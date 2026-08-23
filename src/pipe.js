@@ -64,8 +64,24 @@ export class PipeCdpClient {
       this.transportEvents.emit("disconnected").catch(() => {});
     });
     this.#connected = true;
+    await this.#awaitReady();
     await this.send("Target.setDiscoverTargets", { discover: true }).catch(() => {});
     await this.transportEvents.emit("connected");
+  }
+
+  async #awaitReady() {
+    const deadline = Date.now() + 10_000;
+    let lastError;
+    while (Date.now() < deadline) {
+      try {
+        await this.send("Browser.getVersion", undefined, undefined, { timeoutMs: 1000 });
+        return;
+      } catch (error) {
+        lastError = error;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    throw lastError ?? Error("Browser did not become ready over the CDP pipe");
   }
 
   async send(method, params, sessionId, opts = {}) {
@@ -114,8 +130,10 @@ export class PipeCdpClient {
     this.#failAll(Error("CDP pipe client closed"));
     const child = this.#child;
     this.#child = undefined;
-    if (child && !child.killed) {
+    if (child && child.exitCode === null) {
+      const exited = new Promise(resolve => child.once("exit", resolve));
       try { child.kill("SIGKILL"); } catch {}
+      await exited;
     }
   }
 
