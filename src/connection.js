@@ -1,6 +1,11 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
-import { CdpClient, FrameManager, SessionManager, AsidePage } from "./core.js";
+import {
+  CdpClient,
+  FrameManager,
+  OmOPage,
+  SessionManager,
+} from "./core.js";
 
 export class TabRepository {
   #client;
@@ -26,6 +31,8 @@ export class BrowserConnection {
     return this;
   }
 
+  get cdp() { return this.#client; }
+
   async listTargets() { return this.tabs.listTargets(); }
 
   async attachPage(targetId) {
@@ -36,7 +43,7 @@ export class BrowserConnection {
 
     const entry = { frames, page: null };
     const host = this.#createPageHost(targetId, entry);
-    const page = new AsidePage(this.#client, frames, targetId, sessionId, host);
+    const page = new OmOPage(this.#client, frames, targetId, sessionId, host);
     entry.page = page;
     this.#pages.set(targetId, entry);
     return page;

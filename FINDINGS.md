@@ -30,7 +30,7 @@ Additional saving: ~2.6%.
 ### F3 — No shipped tool schema for agent harnesses (C: missing context)
 The daemon ships a ~1.5 KB "## Available functions" block (recovered from the
 bundle). It repeats `mutates page and tabs` per tool, inlines long option lists,
-and mixes rules with schema. A harness adopting asidewright today must write its
+and mixes rules with schema. A harness adopting OmOWright today must write its
 own. **Fix:** ship `toolSchemas` + a tightened TOOLS.md (one line per tool,
 positive framing, no duplication). Target ≤ 50% of the daemon block.
 

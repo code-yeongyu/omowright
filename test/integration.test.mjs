@@ -20,7 +20,7 @@ function findHeadlessShell() {
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
 
 test("pipe transport drives Chromium with zero listening TCP ports", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const ud = mkdtempSync(path.join(tmpdir(), "asidewright-test-"));
+  const ud = mkdtempSync(path.join(tmpdir(), "omowright-test-"));
   const connection = await connectPipe({
     browserPath: SHELL,
     browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
@@ -54,6 +54,37 @@ test("pipe transport drives Chromium with zero listening TCP ports", { skip: !SH
 
     const locator = page.locator("e1");
     assert.equal(typeof locator.click, "function");
+  } finally {
+    await connection.close();
+    rmSync(ud, { recursive: true, force: true });
+  }
+});
+
+test("JavaScript dialogs are auto-accepted and surfaced as events", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
+  const ud = mkdtempSync(path.join(tmpdir(), "omowright-dialog-test-"));
+  const connection = await connectPipe({
+    browserPath: SHELL,
+    browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+    storageRoot: ud,
+  });
+  try {
+    const page = await connection.newTab("about:blank");
+    const events = [];
+    page.on("dialog", dialog => events.push(dialog));
+
+    await page.evaluate("alert('hello')");
+    assert.equal(await page.evaluate("confirm('proceed?')"), true, "confirm() auto-accepts to true");
+    assert.equal(await page.evaluate("prompt('name?', 'dflt')"), "", "prompt() auto-accepts to empty string");
+
+    assert.equal(events.length, 3, "every dialog surfaces as an event");
+    assert.deepEqual(events.map(d => d.type), ["alert", "confirm", "prompt"]);
+    assert.equal(events[0].message, "hello");
+    assert.equal(events[2].defaultPrompt, "dflt");
+
+    const t0 = Date.now();
+    await page.goto("data:text/html,<script>alert('during load')</script><main><h1>Substantial text content for the readiness probe</h1><a href='https://example.com'>link</a></main>");
+    assert.ok(Date.now() - t0 < 15000, "goto with a load-time dialog completes via the content probe");
+    assert.equal(await page.evaluate("document.readyState"), "complete");
   } finally {
     await connection.close();
     rmSync(ud, { recursive: true, force: true });

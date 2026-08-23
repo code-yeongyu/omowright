@@ -1,6 +1,9 @@
-# asidewright
+# OmOWright
 
-`asidewright` is a standalone research extraction of the browser automation core from the Aside daemon. It preserves the recovered CDP session/frame/page, locator, input, event, and accessibility snapshot implementation while replacing daemon-owned browser/session infrastructure with small standalone adapters.
+`OmOWright` is a standalone browser automation package built from the recovered
+Aside daemon core. It keeps the CDP session, frame, locator, input, event, and
+accessibility snapshot behavior while replacing daemon-owned infrastructure
+with small standalone adapters.
 
 ## Provenance
 
@@ -11,10 +14,24 @@ The recovered implementation came from the Aside daemon version `1.26.822.2145`,
 This package connects to a standard, unauthenticated Chromium DevTools Protocol HTTP endpoint such as one exposed with `--remote-debugging-port`:
 
 ```js
-import { connect } from "asidewright";
+import { connect } from "omowright";
 const browser = await connect("http://127.0.0.1:9222");
 const targets = await browser.listTargets();
 const page = await browser.attachPage(targets.find(target => target.type === "page").id);
+```
+
+For a private, zero-port browser launched by OmOWright:
+
+```js
+import { compactSnapshot, connectPipe } from "omowright";
+
+const browser = await connectPipe({
+  browserPath: "/path/to/chromium",
+  browserArgs: ["--headless", "--no-first-run"],
+});
+const page = await browser.newTab("https://example.com");
+console.log(compactSnapshot(await page.snapshot()));
+await browser.close();
 ```
 
 The Aside secure-CDP entitlement flow (`challenge -> cdp-sign -> session`) is intentionally excluded. Aside extension-only operations, daemon persistence, agent lifecycle signaling, notification persistence, and ffmpeg-backed video are represented by unsupported or no-op standalone defaults. No Bun runtime or native `.node` module is required.
@@ -29,6 +46,18 @@ before sending it to a model — it returns the raw tree. Snapshot options:
 Agent-facing tool reference: TOOLS.md; machine schemas: `toolSchemas` export.
 Audit with before/after numbers: FINDINGS.md.
 
+## Higher-level APIs
+
+- `createCua(page)` — coordinate fallback (visual-browse): click/drag/scroll/
+  type/keypress at viewport points, base64 screenshots. Preset: presets/visual-browse/.
+- `createCaptcha(page, { ocr? })` — captcha click/drag/readText with pluggable
+  OCR (macOS Vision built in).
+- `createChromeApi(connection, { profilePath?, downloadDir? })` — Chrome
+  MV3-shaped tabs/windows/bookmarks/history/downloads/topSites over CDP and
+  profile files. Preset: presets/chrome/.
+- JavaScript dialogs (`alert`/`confirm`/`prompt`/`beforeunload`) are
+  auto-accepted at the transport layer and surfaced via `page.on('dialog')`.
+
 ## Status and warning
 
 AS-IS research extraction; not yet cleared for redistribution. The Aside team authorized the tear-down, but redistribution licensing remains TBD. This package has no warranty and should not be treated as a supported Aside product.
@@ -38,7 +67,7 @@ AS-IS research extraction; not yet cleared for redistribution. The Aside team au
 `connectPipe({ browserPath, browserArgs, storageRoot })` launches Chromium with
 `--remote-debugging-pipe` and speaks CDP over inherited file descriptors
 (stdio 3/4, NUL-delimited JSON). No `/json/*` HTTP endpoint and **no listening
-TCP port** exists for the driven browser — the Aside-grade answer to local
+TCP port** exists for the driven browser — OmOWright's answer to local
 CDP hijacking. Target discovery uses `Target.getTargets`; tabs are created
 with `connection.newTab(url)`. Verified: `lsof -a -iTCP -sTCP:LISTEN -p <pid>`
 returns nothing while the browser is being driven.
