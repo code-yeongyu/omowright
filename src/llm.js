@@ -58,4 +58,24 @@ export const toolSchemas = [
     description: "Pass page.snapshot() output through this before reading: returns the raw tree without the refs map (refs resolve in-page; the map is ~54% of bytes on real pages).",
     parameters: { type: "object", properties: { snapshot: {} }, required: ["snapshot"] },
   },
+  {
+    name: "createCua",
+    description: "Coordinate fallback for UI that refs cannot target: click/doubleClick/drag/move/scroll/type/keypress at viewport points, getVisibleScreenshot() as base64 PNG.",
+    parameters: { type: "object", properties: { page: {} }, required: ["page"] },
+  },
+  {
+    name: "createCaptcha",
+    description: "Captcha helpers: click(bounds) and drag(from,to) return a post-action snapshot tree; readText(bounds?) OCRs a screenshot region (macOS Vision default, custom ocr injectable).",
+    parameters: { type: "object", properties: { page: {}, options: { type: "object" } }, required: ["page"] },
+  },
+  {
+    name: "createChromeApi",
+    description: "Chrome MV3-shaped APIs: tabs.query/get, windows.*, bookmarks/history/topSites (read-only from profile files), downloads.search/download. Writes throw UnsupportedOperationError.",
+    parameters: { type: "object", properties: { connection: {}, options: { type: "object" } }, required: ["connection"] },
+  },
+  {
+    name: "injectCookies",
+    description: "Inject raw cookie exports into a page with CDP sanitization handled (negative expires dropped, __Host- forced secure+root path+url-scoped, SameSite=None dropped when not secure, name+domain deduped).",
+    parameters: { type: "object", properties: { page: {}, cookies: { type: "array" } }, required: ["page", "cookies"] },
+  },
 ];
