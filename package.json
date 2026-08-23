@@ -1,0 +1,11 @@
+{
+  "name": "asidewright",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Research extraction of the Asidewright browser automation core for standard Chromium CDP endpoints.",
+  "license": "UNLICENSED-RESEARCH-EXTRACTION",
+  "engines": { "node": ">=20" },
+  "exports": { ".": "./src/index.js" },
+  "scripts": { "test": "node --test test/llm.test.mjs test/integration.test.mjs" },
+  "dependencies": { "ws": "^8.18.3", "zod": "^4.1.5" }
+}
