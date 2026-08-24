@@ -116,6 +116,11 @@ name+domain — raw cookie exports fail CDP validation without this.
   model means every fresh tab/session requires re-authentication. The
   original logged-in tab stays valid — keep it open and reuse it instead
   of opening new ones.
+- **1Password auto-lock can be extended to 8 hours max** (Settings →
+  Security → 자동 잠금 → 8시간). However, closing the browser ALWAYS
+  locks 1Password regardless of this timer — that behavior is hardcoded
+  and cannot be changed. To keep a session alive, keep the browser
+  running and the tab open.
 
 Cookie extraction + injection is still fine for sites with ordinary session
 cookies (Grafana, internal tools, most SaaS). The rules below apply to those.
