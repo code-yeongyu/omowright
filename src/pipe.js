@@ -19,6 +19,8 @@ class Emittery {
 }
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
+const DEFAULT_READINESS_TIMEOUT_MS = 10_000;
+const STDIO_TAIL_LIMIT = 16_384;
 
 export class PipeCdpClient {
   #child;
@@ -30,18 +32,21 @@ export class PipeCdpClient {
   #events = new Emittery();
   #connected = false;
   #commandTimeoutMs;
+  #readinessTimeoutMs;
   #browserPath;
   #browserArgs;
   #spawnOptions;
+  #stdioTail = "";
   transportEvents = new Emittery();
   logId;
 
-  constructor({ browserPath, browserArgs = [], spawnOptions = {}, commandTimeoutMs, logId }) {
+  constructor({ browserPath, browserArgs = [], spawnOptions = {}, commandTimeoutMs, readinessTimeoutMs, logId }) {
     if (!browserPath) throw new TypeError("PipeCdpClient requires browserPath");
     this.#browserPath = browserPath;
     this.#browserArgs = browserArgs;
     this.#spawnOptions = spawnOptions;
     this.#commandTimeoutMs = commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+    this.#readinessTimeoutMs = readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
     this.logId = logId ?? `cdp-pipe-${Date.now()}`;
   }
 
@@ -50,11 +55,25 @@ export class PipeCdpClient {
 
   async ensureConnected() {
     if (this.#connected) return;
-    const stdio = ["ignore", "inherit", "inherit", "pipe", "pipe"];
+    // Never inherit stdout/stderr: Chromium writes startup noise to both (e.g.
+    // the PartitionAlloc shim's "Trying to load the allocator multiple times"
+    // line and GoogleUpdater child logs), and inherited fds would spray it raw
+    // onto the caller's tty (it corrupted the senpi TUI). Pipe + drain into a
+    // bounded tail kept for launch diagnostics.
+    const stdio = ["ignore", "pipe", "pipe", "pipe", "pipe"];
     this.#child = spawn(this.#browserPath, [...this.#browserArgs, "--remote-debugging-pipe"], {
       ...this.#spawnOptions,
       stdio,
     });
+    this.#stdioTail = "";
+    for (const stream of [this.#child.stdout, this.#child.stderr]) {
+      if (!stream) continue;
+      stream.setEncoding("utf8");
+      stream.on("data", (chunk) => {
+        this.#stdioTail = (this.#stdioTail + chunk).slice(-STDIO_TAIL_LIMIT);
+      });
+      stream.on("error", () => {});
+    }
     this.#writeStream = this.#child.stdio[3];
     this.#readStream = this.#child.stdio[4];
     this.#readStream.on("data", chunk => this.#onData(chunk));
@@ -70,7 +89,7 @@ export class PipeCdpClient {
   }
 
   async #awaitReady() {
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + this.#readinessTimeoutMs;
     let lastError;
     while (Date.now() < deadline) {
       try {
@@ -81,7 +100,12 @@ export class PipeCdpClient {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
-    throw lastError ?? Error("Browser did not become ready over the CDP pipe");
+    const reason = lastError ? String(lastError.message ?? lastError) : "no response";
+    const tail = this.#stdioTail.trim();
+    throw Error(
+      `Browser did not become ready over the CDP pipe (${reason})` +
+      (tail ? `\nBrowser stdio tail:\n${tail}` : ""),
+    );
   }
 
   async send(method, params, sessionId, opts = {}) {
@@ -183,8 +207,8 @@ export class PipeCdpClient {
   }
 }
 
-export async function connectPipe({ browserPath, browserArgs = [], spawnOptions, storageRoot, commandTimeoutMs, logId } = {}) {
-  const client = new PipeCdpClient({ browserPath, browserArgs, spawnOptions, commandTimeoutMs, logId });
+export async function connectPipe({ browserPath, browserArgs = [], spawnOptions, storageRoot, commandTimeoutMs, readinessTimeoutMs, logId } = {}) {
+  const client = new PipeCdpClient({ browserPath, browserArgs, spawnOptions, commandTimeoutMs, readinessTimeoutMs, logId });
   await client.ensureConnected();
   const connection = new BrowserConnection(client, { storageRoot });
   await connection.initialize();
