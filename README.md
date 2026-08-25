@@ -34,6 +34,18 @@ console.log(compactSnapshot(await page.snapshot()));
 await browser.close();
 ```
 
+## Persistent CloakBrowser profiles
+
+For long-lived authenticated workflows, use a stable CloakBrowser
+`--user-data-dir` on the machine that owns the browser session. Do not copy
+Google or 1Password cookies from another profile; use the same persistent
+profile for the initial login and subsequent runs, and stop with
+`login_required` when it is logged out.
+
+The complete setup, profile lifecycle, cookie boundary, and Sionic Mac/Flex
+machine-boundary pattern are documented in
+[`docs/cloakbrowser-persistent-profile.md`](docs/cloakbrowser-persistent-profile.md).
+
 The Aside secure-CDP entitlement flow (`challenge -> cdp-sign -> session`) is intentionally excluded. Aside extension-only operations, daemon persistence, agent lifecycle signaling, notification persistence, and ffmpeg-backed video are represented by unsupported or no-op standalone defaults. No Bun runtime or native `.node` module is required.
 
 ## LLM-facing surfaces
