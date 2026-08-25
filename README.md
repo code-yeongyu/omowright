@@ -42,7 +42,7 @@ Google or 1Password cookies from another profile; use the same persistent
 profile for the initial login and subsequent runs, and stop with
 `login_required` when it is logged out.
 
-The complete setup, profile lifecycle, cookie boundary, and Sionic Mac/Flex
+The complete setup, profile lifecycle, cookie boundary, and scheduler
 machine-boundary pattern are documented in
 [`docs/cloakbrowser-persistent-profile.md`](docs/cloakbrowser-persistent-profile.md).
 

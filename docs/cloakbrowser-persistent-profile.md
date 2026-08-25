@@ -1,9 +1,8 @@
 # CloakBrowser persistent profiles
 
 Use a persistent CloakBrowser profile when an automation job must keep its
-browser state between runs, such as a Flex work-record runner on Sionic Mac.
-The profile is a normal Chromium user-data directory owned by the machine that
-runs the job.
+browser state between runs. The profile is a normal Chromium user-data
+directory owned by the machine that runs the job.
 
 ## Requirements
 
@@ -30,8 +29,8 @@ import { connectPipe, compactSnapshot } from
   "/Users/yeongyu/local-workspaces/OmOWright/src/index.js";
 import fs from "node:fs";
 
-const profile = "/Users/yeongyu/.local/share/omowright-cloak/flex-profile";
-const browserPath = "/Users/yeongyu/.cloakbrowser/<resolved>/Chromium.app/Contents/MacOS/Chromium";
+const profile = "/path/to/private/browser-profile";
+const browserPath = "/path/to/CloakBrowser/Chromium.app/Contents/MacOS/Chromium";
 
 fs.mkdirSync(profile, { recursive: true });
 
@@ -47,9 +46,7 @@ const browser = await connectPipe({
 });
 
 try {
-  const page = await browser.newTab(
-    "https://flex.team/time-tracking/my-time-off/dashboard",
-  );
+  const page = await browser.newTab("https://example.com");
   console.log({
     url: await page.url(),
     title: await page.title(),
@@ -93,22 +90,20 @@ Never print cookies, OAuth query strings, passwords, OTPs, tokens, or snapshots
 of credential fields. Keep profile directories and cookie exports mode `0700`
 or `0600` and outside the repository.
 
-## Machine boundary for Flex
+## Scheduler boundary
 
-For company Flex automation, the browser process and persistent profile belong
-on Sionic Mac. Reading a session transcript on another machine does not move
-the browser execution boundary. A scheduler should invoke the runner locally
-on Sionic Mac, for example through a LaunchAgent, and should not target an
-Aside session on a different machine.
+The browser process and persistent profile belong on the machine that owns the
+browser session. A scheduler should invoke the runner locally, for example
+through a LaunchAgent, and should not target a browser session on another
+machine.
 
-The runner should:
+A stateful runner should:
 
 1. Start OmOWright with the stable CloakBrowser profile.
-2. Navigate to Flex and inspect the current URL and accessible snapshot.
+2. Navigate to the target and inspect the current URL and accessible snapshot.
 3. Stop and report `login_required` when the profile is logged out.
-4. Confirm the date, holiday, leave, and current work state before mutating
-   attendance records.
-5. Click only the intended `지금 출근` or `지금 퇴근` control.
+4. Confirm the target's current state before mutating data.
+5. Click only the intended control.
 6. Verify the resulting state before exiting.
 
 Keep the browser profile and the scheduler's logs on the same machine. Never
