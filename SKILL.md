@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "Drive any browser from code — the optimized path for ALL browsing work, replacing ultimate-browsing: token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicking/filling, coordinate fallback (CUA/visual browsing), CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, text OCR via macOS Vision), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), and stealth browsing through CloakBrowser as the DEFAULT engine — all with zero exposed CDP ports. MUST USE for any browser task: scraping, blocked/WAF/JS-rendered pages, login flows, form filling, screenshots, page QA, CAPTCHAs, and as the browsing lane for ulw-research. Works inside eval cells (persistent kernel browser), with headless or headed Chromium, and attached to real user browsers. Triggers: browse, open page, click, fill form, scrape, snapshot, screenshot, captcha, recaptcha, turnstile, hcaptcha, cloudflare/WAF bypass, stealth browser, drive chrome, browser automation, web QA, ulw-research browsing."
+description: "Drive any browser from code — the optimized path for ALL browsing work, replacing ultimate-browsing: token-efficient a11y snapshots (54% smaller via compactSnapshot), ref-based clicking/filling, coordinate control when refs fail (CUA/visual browsing), viewport pinning for stable coordinates, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, text OCR via macOS Vision), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), and stealth browsing through CloakBrowser as the DEFAULT engine — all with zero exposed CDP ports. MUST USE for any browser task: scraping, blocked/WAF/JS-rendered pages, login flows, extension popups, form filling, screenshots, page QA, CAPTCHAs, and as the browsing lane for ulw-research. Triggers: browse, open page, click, fill form, scrape, snapshot, screenshot, captcha, recaptcha, turnstile, hcaptcha, cloudflare/WAF bypass, stealth browser, visual browse, cua, coordinate click, viewport, extension popup, drive chrome, browser automation, web QA."
 ---
 
 # OmOWright
@@ -8,6 +8,50 @@ description: "Drive any browser from code — the optimized path for ALL browsin
 Browser automation as a code library — no external CLI, no daemon, no open CDP
 port. The package lives at `/Users/yeongyu/local-workspaces/OmOWright` and is
 imported directly by absolute path. Runs on Node >= 20 and Bun.
+
+## Getting past obstacles
+
+A blocked page is a rung to climb, not a reason to stop and report. Refs fail,
+extension popups have no DOM, coordinates drift, challenge widgets appear —
+each has a next move below. Take it.
+
+| Rung | Use | Advance when |
+|---|---|---|
+| 1. `snapshot()` + `locator(ref)` | Anything with a usable ref | Ref absent, stale, obscured, or the click hits the wrong node twice |
+| 2. `createCua(page)` coordinates | Canvas, extension popups, custom controls | Click misses, or screenshot and coordinates disagree |
+| 3. **Pin the viewport**, retry rung 2 | Coordinate drift after a resize, DPI scale, or foreign tab | Coordinates land right but the widget still refuses input |
+| 4. `createCaptcha(page)` | A challenge widget is the blocker | Widget solved, flow still stalls |
+| 5. Read the browser log | Browser-level failure | The log names a cause outside the page |
+
+Rules that govern the climb:
+
+- Two identical failures select the next rung. A third identical attempt is a
+  defect, not persistence.
+- Rung 5 ends in a written diagnosis, never a speculative code change. A browser
+  process problem (missing entitlement, extension service-worker failure, FIDO
+  unavailable) is not fixed by editing automation code — session `01a0411b`
+  burned a full debugging cycle proving exactly that.
+- Verify after every action that changes the page: fresh snapshot for DOM state,
+  fresh screenshot for visual state.
+- Report a stop only when all five rungs are exhausted, and name which rung
+  failed with what evidence.
+
+## Pin the viewport before trusting coordinates
+
+CUA acts in viewport pixels. When the render surface and coordinate space
+disagree, every coordinate is off by a constant and retrying repeats the miss:
+
+```js
+await page._sendToTarget("Emulation.setDeviceMetricsOverride", {
+  width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+  screenWidth: 1440, screenHeight: 900,
+  viewport: { x: 0, y: 0, width: 1440, height: 900, scale: 1 },
+});
+await page.refreshViewportSize();   // → { width: 1440, height: 900 }
+```
+
+Pin every page you will act on, including tabs you did not open, then take a
+fresh screenshot — coordinates read off an unpinned screenshot are stale.
 
 ## Default engine: CloakBrowser
 
@@ -29,7 +73,6 @@ See `references/stealth.md` for the full pattern.
 
 Fallback (no WAF, max speed): any Chrome/Chromium or the Playwright headless
 shell (`~/Library/Caches/ms-playwright/chromium_headless_shell-*/.../chrome-headless-shell`).
-Full stealth setup, verification, and cookie rules: `references/stealth.md`.
 
 ## Core loop
 
@@ -46,45 +89,41 @@ await page.locator("e1").click();                     // refs from the snapshot
 await browser.close();                                // kills the process; rm the profile dir
 ```
 
-## Route by task — visual browsing and CAPTCHAs first
+## Route by task
 
 | Task | Read |
 |---|---|
-| **CAPTCHA** (reCAPTCHA, Turnstile, hCaptcha, slider, text) | `references/interaction.md` — usually DELEGATE, see below |
-| **Visual browsing** (canvas apps, coordinate UI, pixel verification) | `references/interaction.md` — usually DELEGATE, see below |
+| **CAPTCHA** (reCAPTCHA, Turnstile, hCaptcha, slider, text) | `references/interaction.md` — consider delegating, see below |
+| **Visual browsing** (canvas, extension popups, coordinate UI, viewport pinning) | `references/interaction.md` — consider delegating, see below |
 | WAF/Cloudflare/bot-detection pages, CloakBrowser, cookie rules | `references/stealth.md` |
 | First use, page API, snapshot options, locator rules, dialogs | `references/quickstart.md` |
 | Driving a browser inside `eval` cells, kernel persistence, parallel lanes | `references/eval-kernel.md` |
 | Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3) | `references/chrome-api.md` |
 
-## Delegate CAPTCHA and visual-browsing work to `deep` subagents
+## Delegating the pixel loop
 
-CAPTCHA solving and pixel-level visual browsing are multi-step, iterative work
-(screenshot → reason → act → verify, repeated). Don't burn your own context on
-the loop — delegate each blocked page to a `deep` category subagent that loads
-this skill's references:
+CAPTCHA solving and pixel-level visual browsing are iterative (screenshot →
+reason → act → verify, repeated). When the loop would otherwise consume your own
+context, delegate the blocked page to a `deep` subagent that loads these
+references. Drive it yourself when the flow is short or the state is already in
+your hands.
 
 ```
 task(category: "deep", run_in_background: true, prompt: `
-TASK: Solve the CAPTCHA blocking <url> and return the post-solve state.
+TASK: Get past the CAPTCHA blocking <url> and return the post-solve state.
 1. Read ~/.agents/skills/omowright/references/interaction.md and stealth.md.
 2. connectPipe with the CloakBrowser binary (default engine).
-3. createCaptcha(page) — click(bounds) for checkbox captchas (reCAPTCHA/
-   Turnstile), drag(from, to, {steps}) for sliders, readText(bounds) for text
-   captchas (macOS Vision OCR is the default; inject ocr: for a vision model).
-4. For image-grid challenges: page.annotatedScreenshot() + cua.click per cell.
-5. VERIFY with a fresh compactSnapshot that the challenge is gone; retry with
-   a different strategy after 2-3 failures (fresh screenshot first).
-STOP WHEN the page is past the CAPTCHA or 3 strategies are exhausted.
-Return: post-solve snapshot tree + screenshot path.`)
+3. Pin the viewport (setDeviceMetricsOverride 1440x900 + refreshViewportSize)
+   before computing any coordinate.
+4. createCaptcha(page) — click(bounds) for checkbox widgets, drag(from, to,
+   {steps}) for sliders, readText(bounds) for text (macOS Vision OCR default).
+   Image grids: page.annotatedScreenshot() + cua.click per cell.
+5. VERIFY with a fresh compactSnapshot that the challenge is gone. Two failures
+   of one strategy select the next strategy; do not repeat a third time.
+STOP WHEN the page is past the challenge, or all strategies are exhausted —
+then report which failed and the browser-log evidence.
+DELIVERABLE: post-solve snapshot tree + screenshot path.`)
 ```
-
-Same pattern for visual browsing (canvas editors, maps, custom drag handles):
-delegate to `deep` with `createCua(page)` — `click/drag/scroll/type` at
-viewport coordinates, `getVisibleScreenshot()` before acting, return to
-refs/locators once DOM targeting works again. Both flows are documented in
-`references/interaction.md` — the subagent reads it there; you only pass the
-URL and the goal.
 
 ## Hard rules
 
@@ -92,9 +131,8 @@ URL and the goal.
   risk engine kills the session server-side and logs the user out of their
   own browser; 1Password sessions are device-bound and never work from
   cookies. Full detail in `references/stealth.md`. Cookie reuse is fine for
-  ordinary sessions (Grafana, internal tools) — see the session doctrine
-  there too.
-- **Always `compactSnapshot()`** a snapshot before sending it to a model — the
+  ordinary sessions (Grafana, internal tools).
+- **Always `compactSnapshot()`** before sending a snapshot to a model — the
   refs map is ~54% of bytes and resolves in-page, so dropping it is free.
 - **Refs die on every new snapshot.** `page.locator("e1")` straight from the
   latest snapshot; never reuse a ref across snapshots, never put a ref in CSS.
