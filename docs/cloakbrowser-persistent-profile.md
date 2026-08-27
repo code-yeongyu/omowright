@@ -12,15 +12,42 @@ directory owned by the machine that runs the job.
 - A stable, private profile directory
 
 ```bash
-uv venv ~/.local/share/omowright-cloak
-uv pip install --python ~/.local/share/omowright-cloak/bin/python \
+uv venv ~/.local/share/omowright-cloak-venv
+uv pip install --python ~/.local/share/omowright-cloak-venv/bin/python \
   'cloakbrowser==0.5.7'
-~/.local/share/omowright-cloak/bin/python -c \
+~/.local/share/omowright-cloak-venv/bin/python -c \
   'import cloakbrowser; print(cloakbrowser.binary_info()["binary_path"])'
 ```
 
 Do not assume the versioned Chromium directory. Resolve the binary path with
 `cloakbrowser.binary_info()` on the machine that will run the job.
+
+## Stable profile identity
+
+Use the bundled `omowright-cloak` launcher when the profile will be reused for
+an authenticated site. On first use it creates
+`.omowright-cloak.json` inside the profile with a random fingerprint seed and
+sets the file to mode `0600`. Every later run reuses that seed. Passing a
+different `--seed` for an existing profile fails instead of silently changing
+the browser identity.
+
+```bash
+omowright-cloak \
+  --profile "$HOME/.local/share/omowright-cloak" \
+  --seed 63498 \
+  --url https://example.com \
+  --once \
+  --snapshot
+```
+
+The profile directory is mode `0700`. The metadata file is not a credential
+store; it only pins the CloakBrowser fingerprint seed. Keep the profile on the
+machine that owns the session, and never commit it.
+
+Do not put `--user-data-dir`, `--fingerprint`, or
+`--fingerprint-platform` in `browserArgs` when using `connectCloakProfile()`.
+Those identity flags are generated from the profile metadata and conflicting
+overrides fail closed.
 
 ## Launch and reuse one profile
 
@@ -64,6 +91,27 @@ passes the same `--user-data-dir` and reuses the state stored there.
 Only one CloakBrowser process should use a given profile at a time. A stale
 `SingletonLock` or a concurrently running process can make `connectPipe()` hang
 or fail during startup. Use a separate profile for parallel jobs.
+
+`connectPipe()` appends `--remote-debugging-pipe`, so this route has no
+listening CDP TCP port. For a stealth profile, the launcher must also pass
+CloakBrowser's `--fingerprint=<seed>` and `--fingerprint-platform=<platform>`
+flags. `connectCloakProfile()` does both and is the preferred programmatic
+entry point:
+
+```js
+import { connectCloakProfile } from
+  "/Users/yeongyu/local-workspaces/OmOWright/src/index.js";
+
+const browser = await connectCloakProfile({
+  profileDir: "/path/to/private/browser-profile",
+  fingerprintSeed: 63498,
+});
+```
+
+The generic `connectPipe()` example above demonstrates profile persistence, but
+it does not pin a CloakBrowser identity by itself. Use
+`connectCloakProfile()` or add the fixed fingerprint flags yourself when the
+target's risk system is sensitive to device changes.
 
 ## Login state and cookies
 

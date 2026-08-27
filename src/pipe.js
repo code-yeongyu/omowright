@@ -20,6 +20,7 @@ class Emittery {
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_READINESS_TIMEOUT_MS = 10_000;
+const GRACEFUL_CLOSE_TIMEOUT_MS = 2_000;
 const STDIO_TAIL_LIMIT = 16_384;
 
 export class PipeCdpClient {
@@ -150,15 +151,34 @@ export class PipeCdpClient {
   }
 
   async close() {
-    this.#connected = false;
-    this.#failAll(Error("CDP pipe client closed"));
     const child = this.#child;
     this.#child = undefined;
     if (child && child.exitCode === null) {
       const exited = new Promise(resolve => child.once("exit", resolve));
-      try { child.kill("SIGKILL"); } catch {}
-      await exited;
+      if (this.#connected) {
+        await Promise.race([
+          this.send("Browser.close", undefined, undefined, {
+            timeoutMs: GRACEFUL_CLOSE_TIMEOUT_MS,
+          }).catch(() => {}),
+          exited,
+        ]);
+      }
+      this.#connected = false;
+      this.#failAll(Error("CDP pipe client closed"));
+      if (child.exitCode === null) {
+        await Promise.race([
+          exited,
+          new Promise(resolve => setTimeout(resolve, GRACEFUL_CLOSE_TIMEOUT_MS)),
+        ]);
+      }
+      if (child.exitCode === null) {
+        try { child.kill("SIGKILL"); } catch {}
+        await exited;
+      }
+      return;
     }
+    this.#connected = false;
+    this.#failAll(Error("CDP pipe client closed"));
   }
 
   #onData(chunk) {

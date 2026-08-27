@@ -1,5 +1,11 @@
 export { connect, BrowserConnection, TabRepository } from "./connection.js";
 export { connectPipe, PipeCdpClient } from "./pipe.js";
+export {
+  buildCloakBrowserArgs,
+  connectCloakProfile,
+  findCloakBrowserPath,
+  resolveCloakProfile,
+} from "./cloak-profile.js";
 export { compactSnapshot, snapshotTokens, toolSchemas } from "./llm.js";
 export { createCua } from "./cua.js";
 export { createCaptcha, macOSVisionOcr } from "./captcha.js";

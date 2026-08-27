@@ -46,6 +46,18 @@ The complete setup, profile lifecycle, cookie boundary, and scheduler
 machine-boundary pattern are documented in
 [`docs/cloakbrowser-persistent-profile.md`](docs/cloakbrowser-persistent-profile.md).
 
+For a reused authenticated profile, use the bundled `omowright-cloak` launcher
+or `connectCloakProfile()`. The first run stores a random fingerprint seed in
+`.omowright-cloak.json` (mode `0600`) inside the private profile; later runs
+reuse it and reject a conflicting seed. The profile itself is mode `0700`, and
+the metadata file contains no credentials.
+
+The launcher uses `connectPipe()` with the CloakBrowser binary, not a plain
+Chromium process. It adds the fixed `--fingerprint=<seed>` and
+`--fingerprint-platform=<platform>` flags while preserving the zero-port CDP
+transport. Keep one process per profile; closing a run preserves the profile
+directory and its site sessions.
+
 The Aside secure-CDP entitlement flow (`challenge -> cdp-sign -> session`) is intentionally excluded. Aside extension-only operations, daemon persistence, agent lifecycle signaling, notification persistence, and ffmpeg-backed video are represented by unsupported or no-op standalone defaults. No Bun runtime or native `.node` module is required.
 
 ## LLM-facing surfaces
