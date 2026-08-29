@@ -15,7 +15,7 @@ const BROWSER = process.env.CLOAKBROWSER_BIN ?? browserPath();
 
 test("pipe event bridge creates and closes an owned background page", { skip: !BROWSER && "no Chromium binary found", timeout: 60000 }, async () => {
   const profile = mkdtempSync(path.join(tmpdir(), "omowright-events-live-"));
-  const connection = await connectPipe({ browserPath: BROWSER, browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`], storageRoot: profile });
+  const connection = await connectPipe({ browserPath: BROWSER, browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`], storageRoot: profile, commandTimeoutMs: 60_000 });
   const events = createEvents(connection); const tabs = createAgentTabs(connection);
   try {
     await Promise.all([events.ready, tabs.ready]);
