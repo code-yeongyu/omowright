@@ -47,25 +47,34 @@ test("events startup, filtering, popup classification, close and waits", async (
   await Promise.resolve();
   assert.equal(closed.length, 1); assert.equal(closed[0].reason, "crashed"); assert.equal(closed[0].lastKnown.url, "https://updated.test");
   await assert.rejects(events.waitForEvent("tabOpened", { timeout: 1 }), /Timed out waiting/);
+  const wait = events.waitForEvent("tabOpened", { timeout: 1000 });
+  cdp.transportEvents.emit("disconnected"); await assert.rejects(wait, /disconnected/);
   await events.dispose(); await events.dispose();
 });
 
 test("downloads map progress and fail in-flight work on disconnect", async () => {
-  const cdp = new FakeCdp();
+  const cdp = new FakeCdp([page("a")]);
   const events = createEvents({ cdp }, { downloadBehavior: "allow", downloadPath: "/tmp/downloads" });
   const started = [], progress = [], finished = [];
   events.on("downloadStarted", value => started.push(value)); events.on("downloadProgress", value => progress.push(value)); events.on("downloadFinished", value => finished.push(value));
   await events.ready;
-  cdp.emit("Browser.downloadWillBegin", { guid: "g", url: "https://x/file", suggestedFilename: "file", frameId: "f" });
+  cdp.emit("Target.attachedToTarget", { targetInfo: { targetId: "a" } }, { sessionId: "session-a" });
+  cdp.emit("Page.frameAttached", { frameId: "mapped", }, { sessionId: "session-a" });
+  cdp.emit("Browser.downloadWillBegin", { guid: "g", url: "https://x/file", suggestedFilename: "file", frameId: "mapped" });
   cdp.emit("Browser.downloadProgress", { guid: "g", totalBytes: 4, receivedBytes: 2, state: "inProgress" });
   cdp.emit("Browser.downloadProgress", { guid: "g", totalBytes: 4, receivedBytes: 4, state: "completed", filePath: "/tmp/downloads/file" });
   cdp.emit("Browser.downloadProgress", { guid: "g", totalBytes: 4, receivedBytes: 4, state: "completed" });
   await Promise.resolve();
-  assert.equal(started[0].targetId, null); assert.equal(progress.length, 3); assert.equal(finished.length, 1); assert.equal(finished[0].state, "completed");
+  assert.equal(started[0].targetId, "a"); assert.equal(progress.length, 3); assert.equal(finished.length, 1); assert.equal(finished[0].state, "completed");
   cdp.emit("Browser.downloadWillBegin", { guid: "pending", url: "https://x/p", suggestedFilename: "p" });
+  assert.equal(started.at(-1).targetId, "a");
   cdp.transportEvents.emit("disconnected");
   await Promise.resolve();
   assert.equal(finished.at(-1).state, "failed"); assert.equal(finished.at(-1).error.code, "browserDisconnected");
+  cdp.emit("Browser.downloadWillBegin", { guid: "pending" });
+  assert.equal(started.filter(value => value.guid === "pending").length, 1);
+  cdp.emit("Browser.downloadProgress", { guid: "pending", state: "completed" });
+  assert.equal(finished.filter(value => value.guid === "pending").length, 1);
   const allow = cdp.calls.filter(call => call.method === "Browser.setDownloadBehavior");
   assert.equal(allow.at(-1).sessionId, undefined); cdp.transportEvents.emit("reconnected");
   assert.equal(cdp.calls.filter(call => call.method === "Browser.setDownloadBehavior").length, allow.length + 1);
