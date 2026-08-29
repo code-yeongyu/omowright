@@ -43,7 +43,7 @@ export class AgentTabManager {
     // CloakBrowser headless defers renderer startup for background targets until
     // activation; activating before attach avoids Page.enable timing out.
     if (await this.#isHeadless()) await this.#connection.cdp.send("Target.activateTarget", { targetId });
-    const record = { targetId, page: null, viewport: Object.freeze({ ...viewport }) };
+    const record = { targetId, page: null, viewport: Object.freeze({ ...viewport }), repinQueue: Promise.resolve() };
     this.#owned.set(targetId, record);
     try {
       record.page = await this.#connection.attachPage(targetId);
@@ -58,26 +58,33 @@ export class AgentTabManager {
     }
   }
 
-  async #isHeadless() {
-    if (typeof this.#connection.cdp.isHeadless === "boolean") return this.#connection.cdp.isHeadless;
-    const version = await this.#connection.cdp.send("Browser.getVersion").catch(() => null);
-    return /Headless/i.test(version?.product ?? "");
-  }
-
   #public(record) {
     return Object.freeze({ targetId: record.targetId, page: record.page, viewport: { ...record.viewport }, close: options => this.close(record.targetId, options) });
   }
   get(targetId) { const record = this.#owned.get(targetId); return record ? this.#public(record) : null; }
   list() { return [...this.#owned.values()].map(record => this.#public(record)); }
-  async #repin(record) { try { await repinViewport(record.page, record.viewport); } catch (error) { console.warn(`[agent-tabs] viewport repin failed for ${record.targetId}`, error); } }
+  async #isHeadless() {
+    if (typeof this.#connection.cdp.isHeadless === "boolean") return this.#connection.cdp.isHeadless;
+    const version = await this.#connection.cdp.send("Browser.getVersion").catch(() => null);
+    return /Headless/i.test(version?.product ?? "");
+  }
+  #queueRepin(record, viewport, reportErrors = false) {
+    const size = { ...viewport };
+    const operation = record.repinQueue.then(async () => {
+      try { await repinViewport(record.page, size); }
+      catch (error) { if (reportErrors) console.warn(`[agent-tabs] viewport repin failed for ${record.targetId}`, error); else throw error; }
+      record.viewport = Object.freeze(size);
+      return { ...size };
+    });
+    record.repinQueue = operation.catch(() => {});
+    return operation;
+  }
+  async #repin(record) { await this.#queueRepin(record, record.viewport, true); }
   async repin(tabOrTargetId, viewport = this.viewport) {
     const id = typeof tabOrTargetId === "string" ? tabOrTargetId : tabOrTargetId?.targetId;
     const record = this.#owned.get(id);
     if (!record) throw Error(`Target ${id} is not owned by this manager`);
-    const size = { ...viewport };
-    await repinViewport(record.page, size);
-    record.viewport = Object.freeze(size);
-    return { ...size };
+    return this.#queueRepin(record, viewport);
   }
 
   async close(tabOrTargetId, options = {}) {

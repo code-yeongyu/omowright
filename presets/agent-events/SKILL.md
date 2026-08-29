@@ -41,11 +41,7 @@ Download progress is not coalesced, and terminal downloads finish exactly once.
 
 ## Own temporary tabs through the manager
 
-Create tabs only through `createAgentTabs(connection)`. The manager always requests background creation and owns cleanup. CloakBrowser
-headless defers renderer startup for background targets, so the manager
-activates the target immediately before attaching; this is harmless in
-headless mode and makes Page.enable reliable. Do not call Target.activateTarget
-yourself.
+Create tabs only through `createAgentTabs(connection)`. The manager always requests background creation and owns cleanup. CloakBrowser headless defers renderer startup for background targets, so the manager activates immediately before attaching only for connections launched with a `--headless` browser argument. Headed connections attach without activation so background targets do not steal focus. Do not call Target.activateTarget yourself.
 
 
 ```js
