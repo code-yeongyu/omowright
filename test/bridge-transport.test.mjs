@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
-import { mkdtempSync, writeFileSync, readFileSync, statSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, statSync, rmSync, mkdirSync, symlinkSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createNativeMessagingHost, encodeFrame, decodeFrames, installNativeMessagingHost, ExtensionHelloSchema, EventSchema, createChromeApi, BridgeProtocolError } from "../src/index.js";
+import { createNativeMessagingHost, encodeFrame, decodeFrames, installNativeMessagingHost, ExtensionHelloSchema, EventSchema, ResponseSchema, createChromeApi, BridgeProtocolError } from "../src/index.js";
 
 const extensionId = "a".repeat(32);
 const hello = { protocol: 1, type: "hello", role: "extension", connectionId: "c1", extensionId, extensionVersion: "0.1.0", events: ["tabs.activated"], commands: ["bookmarks.create"], maxMessageBytes: 1024 * 1024 };
@@ -90,13 +90,36 @@ test("command queue is bounded independently of the write queue", async () => {
   s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent.requestId, name: sent.name, ok: true, result: { id: "1", title: "one" } })); await first; const sent2 = await readOne(s.output); s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent2.requestId, name: sent2.name, ok: true, result: { id: "2", title: "two" } })); await second; host.close();
 });
 
-test("public send rejects unknown envelopes and bookmark results accept Chrome fields", async () => {
+test("public send rejects unknown envelopes and bookmark results reject unknown fields", async () => {
   const s = streams(); const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId }); s.input.write(encodeFrame(hello)); await readOne(s.output); await assert.rejects(host.send({ type: "bogus" }), /invalid outbound message type/);
-  const request = host.request("bookmarks.create", { details: { title: "x" } }); const sent = await readOne(s.output); const result = { id: "1", title: "x", dateLastUsed: 1, folderType: "bookmarks-bar", syncing: true, futureChromeField: "kept" }; s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent.requestId, name: sent.name, ok: true, result })); assert.deepEqual(await request, result); host.close();
+  const request = host.request("bookmarks.create", { details: { title: "x" } }); const sent = await readOne(s.output); const result = { id: "1", title: "x", dateLastUsed: 1, folderType: "bookmarks-bar", syncing: true, futureChromeField: "rejected" }; assert.throws(() => encodeFrame({ protocol: 1, type: "response", requestId: sent.requestId, name: sent.name, ok: true, result }), /invalid outbound message/); host.close(); await assert.rejects(request, /closed/);
 });
 
 test("async onEvent rejection is reported without disconnecting", async () => {
   const s = streams(); const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId, onEvent: async () => { throw new Error("async boom"); } }); s.input.write(encodeFrame(hello)); await readOne(s.output); s.input.write(encodeFrame({ protocol: 1, type: "event", connectionId: "c1", seq: 1, occurredAt: 1, name: "tabs.activated", payload: { tabId: 1, windowId: 1 } })); await new Promise(resolve => setImmediate(resolve)); assert.match(s.error.read().toString(), /async boom/); assert.equal(host.isConnected, true); host.close();
+});
+
+test("abort after a received mutation response does not disconnect the bridge", async () => {
+  const s = streams(); const controller = new AbortController(); const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId }); s.input.write(encodeFrame(hello)); await readOne(s.output);
+  const request = host.request("bookmarks.create", { details: { title: "done" } }, { signal: controller.signal }); const sent = await readOne(s.output);
+  s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent.requestId, name: sent.name, ok: true, result: { id: "1", title: "done" } })); assert.deepEqual(await request, { id: "1", title: "done" }); controller.abort();
+  assert.deepEqual(await request, { id: "1", title: "done" }); assert.equal(host.isConnected, true); host.close();
+});
+
+test("bookmark result schema is recursive and explicitly strict", () => {
+  const response = { protocol: 1, type: "response", requestId: "abcdef0123456789", name: "bookmarks.create", ok: true, result: { id: "1", parentId: "0", index: 0, title: "folder", dateAdded: 1, dateGroupModified: 2, dateLastUsed: 3, folderType: "bookmarks-bar", syncing: false, unmodifiable: "managed", children: [{ id: "2", title: "link", url: "https://example.test/" }] } };
+  assert.equal(ResponseSchema.safeParse(response).success, true); assert.equal(ResponseSchema.safeParse({ ...response, result: { ...response.result, futureChromeField: true } }).success, false); assert.equal(ResponseSchema.safeParse({ ...response, result: { ...response.result, children: [{ ...response.result.children[0], futureChromeField: true }] } }).success, false);
+});
+
+test("registration rejects writable or symlinked directory components", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "bridge-reg-components-")); const executable = path.join(root, "host"); writeFileSync(executable, "#!/bin/sh\\n", { mode: 0o755 }); const parent = path.join(root, "parent"); const dir = path.join(parent, "hosts"); mkdirSync(parent); chmodSync(parent, 0o777);
+  await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: dir }), /security rejected/); chmodSync(parent, 0o700); const linked = path.join(root, "linked"); symlinkSync(parent, linked);
+  await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: path.join(linked, "hosts") }), /security rejected/); rmSync(root, { recursive: true, force: true });
+});
+
+test("extension protocol errors use a valid response name and reconnect resets consecutive retries", () => {
+  const source = readFileSync(new URL("../bridge/extension/background.js", import.meta.url), "utf8");
+  assert.match(source, /COMMANDS\.includes\(name\) \? name : COMMANDS\[0\]/); assert.match(source, /retries = 0/);
 });
 
 test("registration rejects symlinked executables and parent components", async () => {
