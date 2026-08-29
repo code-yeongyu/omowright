@@ -160,3 +160,19 @@ test("write rejection removes the abort listener", async () => {
   assert.equal(added, 1);
   assert.equal(removed, 1);
 });
+
+test("request with an already-aborted signal rejects instead of hanging", async () => {
+  const s = streams();
+  const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId, commandTimeoutMs: 60_000 });
+  s.input.write(encodeFrame(hello));
+  await readOne(s.output);
+  const controller = new AbortController();
+  controller.abort();
+  const settled = await Promise.race([
+    host.request("bookmarks.create", { details: { title: "x", url: "https://example.com/" } }, { signal: controller.signal }).then(() => "resolved", error => `rejected:${error.message}`),
+    new Promise(resolve => setTimeout(() => resolve("never-settled"), 500)),
+  ]);
+  assert.notEqual(settled, "never-settled");
+  assert.match(settled, /^rejected:/);
+  host.close();
+});
