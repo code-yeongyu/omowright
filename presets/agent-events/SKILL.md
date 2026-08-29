@@ -41,8 +41,12 @@ Download progress is not coalesced, and terminal downloads finish exactly once.
 
 ## Own temporary tabs through the manager
 
-Create tabs only through `createAgentTabs(connection)`. The manager always uses
-background creation and owns cleanup:
+Create tabs only through `createAgentTabs(connection)`. The manager always requests background creation and owns cleanup. CloakBrowser
+headless defers renderer startup for background targets, so the manager
+activates the target immediately before attaching; this is harmless in
+headless mode and makes Page.enable reliable. Do not call Target.activateTarget
+yourself.
+
 
 ```js
 const tab = await tabs.create("about:blank", {
@@ -56,8 +60,7 @@ try {
 }
 ```
 
-Do not send `Target.createTarget` directly, call `Target.activateTarget`, or
-bring a page to the front. `tabs.list()` and `tabs.get(targetId)` expose only
+Do not send `Target.createTarget` directly or bring a page to the front. `tabs.list()` and `tabs.get(targetId)` expose only
 tabs created by this manager. Close all owned tabs in cleanup with
 `await tabs.closeAll()` or `await tabs.dispose()`.
 

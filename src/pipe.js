@@ -110,6 +110,7 @@ export class PipeCdpClient {
   }
 
   async send(method, params, sessionId, opts = {}) {
+    if (method === "Target.createTarget" && opts.capability !== Symbol.for("omowright.targetCreationCapability")) throw Error("Target.createTarget is reserved for createAgentTabs");
     if (String(method).startsWith("Aside.")) {
       throw Error(`Aside.* extension commands are unavailable over pipe transport: ${method}`);
     }
@@ -145,10 +146,6 @@ export class PipeCdpClient {
     }));
   }
 
-  async createTarget(url = "about:blank") {
-    const { targetId } = await this.send("Target.createTarget", { url });
-    return targetId;
-  }
 
   async close() {
     const child = this.#child;
@@ -234,8 +231,8 @@ export async function connectPipe({ browserPath, browserArgs = [], spawnOptions,
   await connection.initialize();
   connection.browserProcess = client.childProcess;
   connection.newTab = async (url = "about:blank") => {
-    const targetId = await client.createTarget(url);
-    return connection.attachPage(targetId);
+    const { createAgentTabs } = await import("./agent-tabs.js");
+    return (await createAgentTabs(connection).create(url)).page;
   };
   return connection;
 }
