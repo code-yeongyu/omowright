@@ -14,7 +14,7 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "test": "node --test test/branding.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs",
+    "test": "node --test test/branding.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs",
     "test:cloak-profile": "node --test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs"
   },
   "dependencies": {
