@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { connectPipe, createChromeApi, UnsupportedOperationError } from "../src/index.js";
+import { connectPipe, createAgentTabs, createChromeApi, UnsupportedOperationError } from "../src/index.js";
 
 function findHeadlessShell() {
   const candidates = globSync(
@@ -76,7 +76,7 @@ test("chrome.tabs and chrome.windows expose CDP target and window state", { skip
   });
   try {
     const chrome = createChromeApi(connection);
-    const page = await connection.newTab("about:blank");
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
     await page.goto("https://example.com");
 
     const all = await chrome.tabs.query({});

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, globSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectPipe, createCua, createCaptcha } from "../src/index.js";
+import { connectPipe, createAgentTabs, createCua, createCaptcha } from "../src/index.js";
 
 function findHeadlessShell() {
   const candidates = globSync(
@@ -76,7 +76,7 @@ async function waitForState(page, expression, timeoutMs = 3000) {
 test("cua drives coordinate click, type, keypress, and scroll", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
   const { connection, cleanup } = await launch();
   try {
-    const page = await connection.newTab("about:blank");
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
     await page.goto(FIXTURE);
     const cua = createCua(page);
 
@@ -106,7 +106,7 @@ test("cua drives coordinate click, type, keypress, and scroll", { skip: !SHELL &
 test("captcha clicks checkbox, drags slider, and OCRs text region", { skip: !SHELL && "no chromium binary found", timeout: 90000 }, async () => {
   const { connection, cleanup } = await launch();
   try {
-    const page = await connection.newTab("about:blank");
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
     await page.goto(FIXTURE);
     const captcha = createCaptcha(page);
 

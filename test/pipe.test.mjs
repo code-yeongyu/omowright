@@ -10,6 +10,11 @@ const harness = fileURLToPath(new URL("./fixtures/pipe-leak-harness.mjs", import
 const ALLOCATOR_LINE =
   "Trying to load the allocator multiple times. This is *not* supported.";
 
+test("pipe target creation rejects the global-registry symbol", async () => {
+  const client = new PipeCdpClient({ browserPath: process.execPath });
+  await assert.rejects(client.send("Target.createTarget", { url: "about:blank" }, undefined, { capability: Symbol.for("omowright.targetCreationCapability") }), /reserved/);
+});
+
 test("pipe transport does not leak browser stdout/stderr to the parent tty", async () => {
   const child = spawn(process.execPath, [harness], { stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";

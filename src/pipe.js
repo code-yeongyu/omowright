@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { BrowserConnection } from "./connection.js";
+import { targetCreationCapability } from "./internal-capability.js";
 
 class Emittery {
   #listeners = new Map();
@@ -52,6 +52,7 @@ export class PipeCdpClient {
   }
 
   get isConnected() { return this.#connected; }
+  get isHeadless() { return this.#browserArgs.some(arg => /^--headless(?:=|$)/.test(arg)); }
   get childProcess() { return this.#child; }
 
   async ensureConnected() {
@@ -110,6 +111,7 @@ export class PipeCdpClient {
   }
 
   async send(method, params, sessionId, opts = {}) {
+    if (method === "Target.createTarget" && opts.capability !== targetCreationCapability) throw Error("Target.createTarget is reserved for createAgentTabs");
     if (String(method).startsWith("Aside.")) {
       throw Error(`Aside.* extension commands are unavailable over pipe transport: ${method}`);
     }
@@ -145,10 +147,6 @@ export class PipeCdpClient {
     }));
   }
 
-  async createTarget(url = "about:blank") {
-    const { targetId } = await this.send("Target.createTarget", { url });
-    return targetId;
-  }
 
   async close() {
     const child = this.#child;
@@ -234,8 +232,8 @@ export async function connectPipe({ browserPath, browserArgs = [], spawnOptions,
   await connection.initialize();
   connection.browserProcess = client.childProcess;
   connection.newTab = async (url = "about:blank") => {
-    const targetId = await client.createTarget(url);
-    return connection.attachPage(targetId);
+    const { createAgentTabs } = await import("./agent-tabs.js");
+    return (await createAgentTabs(connection).create(url)).page;
   };
   return connection;
 }

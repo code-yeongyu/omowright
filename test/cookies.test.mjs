@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, globSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectPipe, injectCookies, sanitizeCookies } from "../src/index.js";
+import { connectPipe, createAgentTabs, injectCookies, sanitizeCookies } from "../src/index.js";
 
 function findHeadlessShell() {
   const candidates = globSync(
@@ -51,7 +51,7 @@ test("injectCookies sets cookies reachable on navigation", { skip: !SHELL && "no
     storageRoot: ud,
   });
   try {
-    const page = await connection.newTab("about:blank");
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
     await injectCookies(page, [
       { name: "omw_test", value: "works", domain: "example.com", expires: Math.floor(Date.now() / 1000) + 3600 },
       { name: "__Host-pinned", value: "yes", domain: "example.com", expires: Math.floor(Date.now() / 1000) + 3600 },
