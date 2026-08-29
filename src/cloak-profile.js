@@ -129,6 +129,8 @@ export async function resolveCloakProfile({
     );
   }
 
+  await chmod(metadataPath, 0o600);
+
   return {
     profileDir: resolvedProfile,
     metadataPath,

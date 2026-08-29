@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as omowright from "../src/index.js";
@@ -71,5 +78,21 @@ test("buildCloakBrowserArgs rejects every identity override form", () => {
       }),
       /override fixed profile identity/i,
     );
+  }
+});
+
+test("resolveCloakProfile tightens existing metadata permissions", async () => {
+  const profileDir = mkdtempSync(path.join(tmpdir(), "omowright-cloak-profile-"));
+  const metadataPath = path.join(profileDir, ".omowright-cloak.json");
+
+  try {
+    writeFileSync(metadataPath, '{"fingerprintSeed":31415}\n', { mode: 0o644 });
+    chmodSync(metadataPath, 0o644);
+
+    await omowright.resolveCloakProfile({ profileDir });
+
+    assert.equal(statSync(metadataPath).mode & 0o777, 0o600);
+  } finally {
+    rmSync(profileDir, { recursive: true, force: true });
   }
 });
