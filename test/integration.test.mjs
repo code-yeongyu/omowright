@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync, globSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { connectPipe, compactSnapshot } from "../src/index.js";
+import { connectPipe, compactSnapshot, createAgentTabs } from "../src/index.js";
 
 function findHeadlessShell() {
   const home = process.env.HOME;
@@ -38,7 +38,7 @@ test("pipe transport drives Chromium with zero listening TCP ports", { skip: !SH
     }
     assert.equal(listenOutput.trim(), "", "browser must not listen on any TCP port");
 
-    const page = await connection.newTab("about:blank");
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
     await page.goto("https://example.com");
     assert.equal(await page.title(), "Example Domain");
     assert.equal(page.url(), "https://example.com/");
@@ -68,7 +68,7 @@ test("JavaScript dialogs are auto-accepted and surfaced as events", { skip: !SHE
     storageRoot: ud,
   });
   try {
-    const page = await connection.newTab("about:blank");
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
     const events = [];
     page.on("dialog", dialog => events.push(dialog));
 

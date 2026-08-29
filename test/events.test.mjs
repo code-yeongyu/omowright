@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createEvents, BROWSER_EVENT_NAMES } from "../src/index.js";
+import { createEvents, BROWSER_EVENT_NAMES, CdpClient } from "../src/index.js";
 
 class FakeEmitter {
   #listeners = new Map();
@@ -79,6 +79,11 @@ test("downloads map progress and fail in-flight work on disconnect", async () =>
   assert.equal(allow.at(-1).sessionId, undefined); cdp.transportEvents.emit("reconnected");
   assert.equal(cdp.calls.filter(call => call.method === "Browser.setDownloadBehavior").length, allow.length + 1);
   await events.dispose();
+});
+
+test("raw target creation rejects the global-registry symbol", async () => {
+  const client = new CdpClient({ cdpUrl: "http://127.0.0.1:1" });
+  await assert.rejects(client.send("Target.createTarget", { url: "about:blank" }, undefined, { capability: Symbol.for("omowright.targetCreationCapability") }), /reserved/);
 });
 
 test("unknown events fail synchronously and listener errors are isolated", async () => {
