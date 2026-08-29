@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { BrowserConnection } from "./connection.js";
 import { targetCreationCapability } from "./internal-capability.js";
 
@@ -232,5 +231,9 @@ export async function connectPipe({ browserPath, browserArgs = [], spawnOptions,
   const connection = new BrowserConnection(client, { storageRoot });
   await connection.initialize();
   connection.browserProcess = client.childProcess;
+  connection.newTab = async (url = "about:blank") => {
+    const { createAgentTabs } = await import("./agent-tabs.js");
+    return (await createAgentTabs(connection).create(url)).page;
+  };
   return connection;
 }
