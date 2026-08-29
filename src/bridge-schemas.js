@@ -11,8 +11,7 @@ const uuid = z.string().regex(/^[0-9a-fA-F-]{16,128}$/);
 const finite = z.number().finite();
 const color = z.enum(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
 const group = z.object({ id: z.number().int().min(0), collapsed: z.boolean(), color, title: z.string().max(1024).nullable().optional(), windowId: z.number().int().min(-1) }).strict();
-const bookmark = z.object({ id: z.string().min(1), parentId: z.string().min(1).optional(), index: z.number().int().min(0).optional(), title: z.string(), url: z.string().optional(), dateAdded: finite.min(0).optional(), dateGroupModified: finite.min(0).optional(), dateLastUsed: finite.min(0).optional(), folderType: z.string().optional(), syncing: z.boolean().optional(), unmodifiable: z.string().optional(), type: z.enum(["bookmark", "folder", "url"]).optional() }).passthrough();
-const bookmarkNode = z.lazy(() => bookmark.extend({ children: z.array(bookmarkNode).optional() }));
+const bookmarkNode = z.lazy(() => z.object({ id: z.string().min(1), parentId: z.string().min(1).optional(), index: z.number().int().min(0).optional(), title: z.string(), url: z.string().optional(), dateAdded: finite.min(0).optional(), dateGroupModified: finite.min(0).optional(), dateLastUsed: finite.min(0).optional(), folderType: z.string().optional(), syncing: z.boolean().optional(), unmodifiable: z.string().optional(), type: z.enum(["bookmark", "folder", "url"]).optional(), children: z.array(bookmarkNode).optional() }).strict());
 const empty = z.object({}).strict();
 export const payloadSchemas = {
   "notifications.shown": z.object({ notificationId: z.string().min(1).max(1024) }).strict(),
