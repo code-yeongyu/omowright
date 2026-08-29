@@ -23,6 +23,11 @@ test("creates owned background tab and repins after main navigation", async () =
   await tabs.dispose({ closeOwned: false }); assert.rejects(tabs.create(), /disposed/);
 });
 
+test("headed creation attaches directly without stealing focus", async () => {
+  const c = connection({ headless: false }); const tabs = createAgentTabs(c); await tabs.ready; await tabs.create();
+  assert.equal(c.cdp.calls.some(call => call.method === "Target.activateTarget"), false);
+});
+
 test("factory rejects close timeout conflicts and activation precedes attach", async () => {
   const c = connection(); const tabs = createAgentTabs(c, { closeTimeoutMs: 100 }); await tabs.ready; await tabs.create();
   assert.equal(c.cdp.calls.some(call => call.method === "Target.activateTarget"), true);

@@ -1,7 +1,8 @@
 import { DEFAULT_AGENT_VIEWPORT, repinViewport } from "./viewport.js";
+import { targetCreationCapability } from "./internal-capability.js";
 
 const managers = new WeakMap();
-const CAPABILITY = Symbol.for("omowright.targetCreationCapability");
+const CAPABILITY = targetCreationCapability;
 
 function optionsKey(options = {}) {
   return JSON.stringify({
@@ -41,7 +42,7 @@ export class AgentTabManager {
     const targetId = result.targetId;
     // CloakBrowser headless defers renderer startup for background targets until
     // activation; activating before attach avoids Page.enable timing out.
-    await this.#connection.cdp.send("Target.activateTarget", { targetId });
+    if (await this.#isHeadless()) await this.#connection.cdp.send("Target.activateTarget", { targetId });
     const record = { targetId, page: null, viewport: Object.freeze({ ...viewport }) };
     this.#owned.set(targetId, record);
     try {
@@ -55,6 +56,12 @@ export class AgentTabManager {
       await this.#connection.cdp.send("Target.closeTarget", { targetId }).catch(() => {});
       throw error;
     }
+  }
+
+  async #isHeadless() {
+    if (typeof this.#connection.cdp.isHeadless === "boolean") return this.#connection.cdp.isHeadless;
+    const version = await this.#connection.cdp.send("Browser.getVersion").catch(() => null);
+    return /Headless/i.test(version?.product ?? "");
   }
 
   #public(record) {
