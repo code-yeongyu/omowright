@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
-import { mkdtempSync, writeFileSync, readFileSync, statSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, statSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createNativeMessagingHost, encodeFrame, decodeFrames, installNativeMessagingHost, ExtensionHelloSchema, EventSchema, createChromeApi, BridgeProtocolError } from "../src/index.js";
@@ -76,4 +76,30 @@ test("registration rejects endpointPath, unsafe host names, and overwrites only 
   const root = mkdtempSync(path.join(tmpdir(), "bridge-reg-hardening-")); const executable = path.join(root, "host"); writeFileSync(executable, "#!/bin/sh\\n", { mode: 0o755 }); const dir = path.join(root, "hosts");
   await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: dir, endpointPath: "/tmp/x" }), /endpointPath/); await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, hostName: "../evil", nativeMessagingHostDir: dir }), /hostName/);
   await installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: dir }); await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: dir }), /already exists/); await installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: dir, force: true }); rmSync(root, { recursive: true, force: true });
+});
+
+test("timed out mutation fails the connection without sending its successor", async () => {
+  const s = streams(); const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId, commandTimeoutMs: 10 }); s.input.write(encodeFrame(hello)); await readOne(s.output);
+  const first = host.request("bookmarks.create", { details: { title: "one" } }); await readOne(s.output); const second = host.request("bookmarks.create", { details: { title: "two" } });
+  await assert.rejects(first, error => error.code === "TIMEOUT"); await assert.rejects(second, /indeterminate/); assert.equal(host.isConnected, false); assert.equal(s.output.readableLength, 0);
+});
+
+test("command queue is bounded independently of the write queue", async () => {
+  const s = streams(); const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId, maxPendingWrites: 2 }); s.input.write(encodeFrame(hello)); await readOne(s.output);
+  const first = host.request("bookmarks.create", { details: { title: "one" } }); const sent = await readOne(s.output); const second = host.request("bookmarks.create", { details: { title: "two" } }); await assert.rejects(host.request("bookmarks.create", { details: { title: "three" } }), /BOUNDED_TRANSPORT/);
+  s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent.requestId, name: sent.name, ok: true, result: { id: "1", title: "one" } })); await first; const sent2 = await readOne(s.output); s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent2.requestId, name: sent2.name, ok: true, result: { id: "2", title: "two" } })); await second; host.close();
+});
+
+test("public send rejects unknown envelopes and bookmark results accept Chrome fields", async () => {
+  const s = streams(); const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId }); s.input.write(encodeFrame(hello)); await readOne(s.output); await assert.rejects(host.send({ type: "bogus" }), /invalid outbound message type/);
+  const request = host.request("bookmarks.create", { details: { title: "x" } }); const sent = await readOne(s.output); const result = { id: "1", title: "x", dateLastUsed: 1, folderType: "bookmarks-bar", syncing: true, futureChromeField: "kept" }; s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent.requestId, name: sent.name, ok: true, result })); assert.deepEqual(await request, result); host.close();
+});
+
+test("async onEvent rejection is reported without disconnecting", async () => {
+  const s = streams(); const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId, onEvent: async () => { throw new Error("async boom"); } }); s.input.write(encodeFrame(hello)); await readOne(s.output); s.input.write(encodeFrame({ protocol: 1, type: "event", connectionId: "c1", seq: 1, occurredAt: 1, name: "tabs.activated", payload: { tabId: 1, windowId: 1 } })); await new Promise(resolve => setImmediate(resolve)); assert.match(s.error.read().toString(), /async boom/); assert.equal(host.isConnected, true); host.close();
+});
+
+test("registration rejects symlinked executables and parent components", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "bridge-reg-links-")); const real = path.join(root, "real"); mkdirSync(real); const executable = path.join(real, "host"); writeFileSync(executable, "#!/bin/sh\n", { mode: 0o755 }); const linkedHost = path.join(root, "linked-host"); symlinkSync(executable, linkedHost); await assert.rejects(() => installNativeMessagingHost({ hostPath: linkedHost, extensionId, nativeMessagingHostDir: path.join(root, "hosts") }), /owned executable/);
+  const linkedParent = path.join(root, "linked-parent"); symlinkSync(real, linkedParent); await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: path.join(linkedParent, "hosts") }), /security rejected/); rmSync(root, { recursive: true, force: true });
 });
