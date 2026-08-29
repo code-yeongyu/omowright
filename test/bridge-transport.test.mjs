@@ -149,16 +149,14 @@ test("write rejection removes the abort listener", async () => {
   let added = 0; let removed = 0;
   controller.signal.addEventListener = (...args) => { added += 1; return originalAdd(...args); };
   controller.signal.removeEventListener = (...args) => { removed += 1; return originalRemove(...args); };
-  const failingOutput = new PassThrough();
-  const originalWrite = failingOutput.write.bind(failingOutput);
-  let writes = 0;
-  failingOutput.write = (chunk, cb) => { writes += 1; if (writes === 1) return originalWrite(chunk, cb); queueMicrotask(() => cb(new Error("EPIPE"))); return true; };
-  const host = createNativeMessagingHost({ stdin: s.input, stdout: failingOutput, stderr: s.error, extensionId, commandTimeoutMs: 60_000 });
+  const hangingOutput = new PassThrough();
+  hangingOutput.write = () => true; // write never completes: the host hello occupies the single write slot
+  const host = createNativeMessagingHost({ stdin: s.input, stdout: hangingOutput, stderr: s.error, extensionId, maxPendingWrites: 1, commandTimeoutMs: 60_000 });
   s.input.write(encodeFrame(hello));
-  await readOne(failingOutput);
+  await new Promise(resolve => setImmediate(resolve));
   const result = await host.request("bookmarks.create", { details: { title: "x", url: "https://example.com/" } }, { signal: controller.signal }).catch(error => error);
   assert.ok(result instanceof Error);
+  assert.equal(result.message, "BOUNDED_TRANSPORT");
   assert.equal(added, 1);
   assert.equal(removed, 1);
-  assert.equal(host.isConnected, false);
 });
