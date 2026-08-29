@@ -1,6 +1,7 @@
 const HOST_NAME = "com.omowright.cloakbridge";
 const PROTOCOL = 1;
 const MAX_MESSAGE_BYTES = 1048576;
+const PROTOCOL_ERROR_NAME = "protocolError";
 const EVENTS = ["notifications.shown", "notifications.clicked", "notifications.closed", "tabGroups.created", "tabGroups.updated", "tabGroups.moved", "tabs.activated", "windows.focusChanged"];
 const COMMANDS = ["bookmarks.create", "bookmarks.move", "bookmarks.remove", "history.deleteUrl", "history.deleteRange", "tabGroups.update", "debugger.attach", "debugger.detach"];
 const COMMAND_BINDINGS = Object.freeze({
@@ -33,14 +34,14 @@ const validDetails = (name, details) => {
 };
 let port; let connectionId; let sequence = 0; let capabilities = new Set(); let negotiatedMax = MAX_MESSAGE_BYTES; let epoch = 0; let retryTimer; let retries = 0;
 const seen = new Set(); const pending = new Map();
-const responseName = name => COMMANDS.includes(name) ? name : COMMANDS[0];
+const responseName = name => COMMANDS.includes(name) ? name : PROTOCOL_ERROR_NAME;
 const response = (request, ok, value, name) => ({ protocol: PROTOCOL, type: "response", requestId: request.requestId, name: responseName(name), ok, ...(ok ? { result: value } : { error: value }) });
 const errorFor = error => ({ code: error?.code === "DEBUGGER_ERROR" ? "DEBUGGER_ERROR" : "CHROME_ERROR", message: error?.code === "DEBUGGER_ERROR" ? "debugger operation failed" : "Chrome operation failed" });
 const withinLimit = message => { try { return new TextEncoder().encode(JSON.stringify(message)).length <= negotiatedMax; } catch { return false; } };
 const safePost = (message, expected = port) => { if (!expected || expected !== port || !withinLimit(message)) return false; try { expected.postMessage(message); return true; } catch { return false; } };
 function rejectPending() { for (const item of pending.values()) item.reject(Object.assign(new Error("native host disconnected"), { code: "NATIVE_HOST_DISCONNECTED" })); pending.clear(); }
 function emit(name, wrap, args) { if (!port || !capabilities.events.has(name)) return; const current = port; sequence += 1; if (!safePost({ protocol: PROTOCOL, type: "event", connectionId, seq: sequence, occurredAt: Date.now(), name, payload: wrap(...args) }, current)) rejectPending(); }
-function scheduleReconnect() { if (retryTimer || retries >= 6) return; const delay = Math.min(1000 * 2 ** retries++, 30000); retryTimer = setTimeout(() => { retryTimer = undefined; connect(); }, delay); }
+function scheduleReconnect() { if (retryTimer) return; if (retries >= 6) console.warn("Cloak bridge remains disconnected; retrying at maximum backoff"); const delay = Math.min(1000 * 2 ** retries, 30000); retries += 1; retryTimer = setTimeout(() => { retryTimer = undefined; connect(); }, delay); }
 function connect() {
   const current = chrome.runtime.connectNative(HOST_NAME); port = current; const currentEpoch = ++epoch; connectionId = makeId(); sequence = 0; capabilities = { events: new Set(), commands: new Set() }; negotiatedMax = MAX_MESSAGE_BYTES;
   safePost({ protocol: PROTOCOL, type: "hello", role: "extension", connectionId, extensionId: chrome.runtime.id, extensionVersion: chrome.runtime.getManifest().version, events: EVENTS, commands: COMMANDS, maxMessageBytes: MAX_MESSAGE_BYTES }, current);

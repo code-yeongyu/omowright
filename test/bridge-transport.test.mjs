@@ -117,9 +117,23 @@ test("registration rejects writable or symlinked directory components", async ()
   await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: path.join(linked, "hosts") }), /security rejected/); rmSync(root, { recursive: true, force: true });
 });
 
-test("extension protocol errors use a valid response name and reconnect resets consecutive retries", () => {
+test("settled mutations remove abort listeners and timers", async () => {
+  const s = streams(); const controller = new AbortController(); const originalAdd = controller.signal.addEventListener.bind(controller.signal); const originalRemove = controller.signal.removeEventListener.bind(controller.signal); let added = 0; let removed = 0;
+  controller.signal.addEventListener = (...args) => { added += 1; return originalAdd(...args); }; controller.signal.removeEventListener = (...args) => { removed += 1; return originalRemove(...args); };
+  const host = createNativeMessagingHost({ stdin: s.input, stdout: s.output, stderr: s.error, extensionId, commandTimeoutMs: 60_000 }); s.input.write(encodeFrame(hello)); await readOne(s.output);
+  const request = host.request("bookmarks.create", { details: { title: "done" } }, { signal: controller.signal }); const sent = await readOne(s.output);
+  assert.equal(added, 1); s.input.write(encodeFrame({ protocol: 1, type: "response", requestId: sent.requestId, name: sent.name, ok: true, result: { id: "1", title: "done" } })); await request;
+  assert.equal(removed, 1); controller.abort(); assert.equal(host.isConnected, true); host.close();
+});
+
+test("extension protocol errors use a dedicated response name and reconnect indefinitely", () => {
   const source = readFileSync(new URL("../bridge/extension/background.js", import.meta.url), "utf8");
-  assert.match(source, /COMMANDS\.includes\(name\) \? name : COMMANDS\[0\]/); assert.match(source, /retries = 0/);
+  assert.match(source, /PROTOCOL_ERROR_NAME = [\"']protocolError[\"']/); assert.doesNotMatch(source, /COMMANDS\.includes\(name\) \? name : COMMANDS\[0\]/); assert.match(source, /retries = 0/); assert.doesNotMatch(source, /retries >= 6\) return/); assert.match(source, /retries >= 6/);
+});
+
+test("protocolError responses are schema-valid and cannot collide with commands", () => {
+  const response = { protocol: 1, type: "response", requestId: "abcdef0123456789", name: "protocolError", ok: false, error: { code: "UNKNOWN_COMMAND", message: "invalid command" } };
+  assert.equal(ResponseSchema.safeParse(response).success, true); assert.equal(ResponseSchema.safeParse({ ...response, ok: true, error: undefined, result: {} }).success, false); assert.equal(["bookmarks.create", "bookmarks.move", "bookmarks.remove", "history.deleteUrl", "history.deleteRange", "tabGroups.update", "debugger.attach", "debugger.detach"].includes(response.name), false);
 });
 
 test("registration rejects symlinked executables and parent components", async () => {
