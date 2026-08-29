@@ -14,7 +14,7 @@ test("creates owned background tab and repins after main navigation", async () =
   assert.deepEqual(tab.viewport, DEFAULT_AGENT_VIEWPORT); assert.deepEqual(tabs.get("owned").viewport, tab.viewport);
   const create = c.cdp.calls.find(call => call.method === "Target.createTarget");
   assert.deepEqual(create.params, { url: "about:blank", background: true }); assert.ok(create.options?.capability);
-  assert.equal(c.cdp.calls.some(call => call.method === "Target.activateTarget"), false);
+  assert.equal(c.cdp.calls.some(call => call.method === "Target.activateTarget"), true);
   c.page.events.emit("framenavigated", { frameId: "main", parentFrameId: null });
   await Promise.resolve();
   assert.equal(c.cdp.calls.filter(call => call.method === "Emulation.setDeviceMetricsOverride").length, 2);
@@ -23,11 +23,23 @@ test("creates owned background tab and repins after main navigation", async () =
   await tabs.dispose({ closeOwned: false }); assert.rejects(tabs.create(), /disposed/);
 });
 
-test("close waits for matching destruction and rejects raw creation", async () => {
+test("factory rejects close timeout conflicts and activation precedes attach", async () => {
+  const c = connection(); const tabs = createAgentTabs(c, { closeTimeoutMs: 100 }); await tabs.ready; await tabs.create();
+  assert.equal(c.cdp.calls.some(call => call.method === "Target.activateTarget"), true);
+  assert.throws(() => createAgentTabs(c, { closeTimeoutMs: 200 }), /Conflicting/);
+});
+
+test("close waits for matching destruction and retains ownership after timeout", async () => {
   const c = connection(); const tabs = createAgentTabs(c); await tabs.ready; const tab = await tabs.create("https://x.test");
   const createCall = c.cdp.calls.find(call => call.method === "Target.createTarget");
   assert.ok(createCall.options.capability, "creation uses the internal capability marker");
   const closing = tabs.close(tab, { timeoutMs: 100 });
   await Promise.resolve(); c.cdp.events.emit("Target.targetDestroyed", { targetId: "owned" }); await closing;
   assert.equal(tabs.list().length, 0);
+});
+
+test("close failure leaves target owned and dispose reports close failures", async () => {
+  const c = connection(); const tabs = createAgentTabs(c, { closeTimeoutMs: 10 }); await tabs.ready; const tab = await tabs.create();
+  await assert.rejects(tabs.close(tab), /Timed out/); assert.ok(tabs.get(tab.targetId));
+  await assert.rejects(tabs.dispose(), AggregateError); assert.ok(tabs.get(tab.targetId));
 });
