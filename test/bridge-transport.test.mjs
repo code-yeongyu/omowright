@@ -140,3 +140,25 @@ test("registration rejects symlinked executables and parent components", async (
   const root = mkdtempSync(path.join(tmpdir(), "bridge-reg-links-")); const real = path.join(root, "real"); mkdirSync(real); const executable = path.join(real, "host"); writeFileSync(executable, "#!/bin/sh\n", { mode: 0o755 }); const linkedHost = path.join(root, "linked-host"); symlinkSync(executable, linkedHost); await assert.rejects(() => installNativeMessagingHost({ hostPath: linkedHost, extensionId, nativeMessagingHostDir: path.join(root, "hosts") }), /owned executable/);
   const linkedParent = path.join(root, "linked-parent"); symlinkSync(real, linkedParent); await assert.rejects(() => installNativeMessagingHost({ hostPath: executable, extensionId, nativeMessagingHostDir: path.join(linkedParent, "hosts") }), /security rejected/); rmSync(root, { recursive: true, force: true });
 });
+
+test("write rejection removes the abort listener", async () => {
+  const s = streams();
+  const controller = new AbortController();
+  const originalAdd = controller.signal.addEventListener.bind(controller.signal);
+  const originalRemove = controller.signal.removeEventListener.bind(controller.signal);
+  let added = 0; let removed = 0;
+  controller.signal.addEventListener = (...args) => { added += 1; return originalAdd(...args); };
+  controller.signal.removeEventListener = (...args) => { removed += 1; return originalRemove(...args); };
+  const failingOutput = new PassThrough();
+  const originalWrite = failingOutput.write.bind(failingOutput);
+  let writes = 0;
+  failingOutput.write = (chunk, cb) => { writes += 1; if (writes === 1) return originalWrite(chunk, cb); queueMicrotask(() => cb(new Error("EPIPE"))); return true; };
+  const host = createNativeMessagingHost({ stdin: s.input, stdout: failingOutput, stderr: s.error, extensionId, commandTimeoutMs: 60_000 });
+  s.input.write(encodeFrame(hello));
+  await readOne(failingOutput);
+  const result = await host.request("bookmarks.create", { details: { title: "x", url: "https://example.com/" } }, { signal: controller.signal }).catch(error => error);
+  assert.ok(result instanceof Error);
+  assert.equal(added, 1);
+  assert.equal(removed, 1);
+  assert.equal(host.isConnected, false);
+});
