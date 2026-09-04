@@ -1,0 +1,149 @@
+---
+name: omowright
+description: "The default code-driven browser path for ALL browsing work, replacing ultimate-browsing: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), and stealth via CloakBrowser as the default engine, with zero exposed CDP ports. MUST USE for any browser task: scraping, blocked/WAF/JS-rendered pages, logins, extension popups, form filling, screenshots, web QA, CAPTCHAs, and the browsing lane for ulw-research."
+---
+
+# OmOWright
+
+Browser automation as a code library — no external CLI, no daemon, no open CDP
+port. The package lives at `/Users/yeongyu/local-workspaces/OmOWright` and is
+imported by absolute path. Runs on Node >= 20 and Bun.
+
+## Core loop
+
+```js
+const { connectPipe, compactSnapshot } = await import("/Users/yeongyu/local-workspaces/OmOWright/src/index.js");
+const browser = await connectPipe({
+  browserPath: "<CloakBrowser binary>",           // DEFAULT engine
+  browserArgs: ["--no-first-run", `--user-data-dir=${profileDir}`],
+  storageRoot: profileDir,
+});
+const page = await browser.newTab("https://example.com");
+const tree = compactSnapshot(await page.snapshot());  // ALWAYS compact before reading
+await page.locator("e1").click();                     // refs come from the snapshot
+await browser.close();                                // then rm -rf the profile dir
+```
+
+## Default engine: CloakBrowser
+
+Use the CloakBrowser binary by default, not a plain headless shell — most real
+targets sit behind WAFs or bot scoring, and CloakBrowser's source-level
+fingerprint patches (Cloudflare Turnstile, FingerprintJS, BrowserScan) make it
+the safe default. Plain headless shell is the speed fallback for trivially open
+pages: any Chrome/Chromium or
+`~/Library/Caches/ms-playwright/chromium_headless_shell-*/.../chrome-headless-shell`.
+
+```bash
+python3 -c "import cloakbrowser; print(cloakbrowser.binary_info()['binary_path'])"
+# -> /Users/yeongyu/.cloakbrowser/chromium-<ver>/Chromium.app/Contents/MacOS/Chromium
+```
+
+For a reused authenticated profile, use `connectCloakProfile({ profileDir, fingerprintSeed })` from the package (or the `omowright-cloak --profile "$HOME/.local/share/omowright-cloak" --url <url> --once --snapshot` launcher). First use pins a fingerprint seed in a mode-`0600` metadata file inside the mode-`0700` profile; later runs reuse it and **REJECT a conflicting seed** instead of silently changing identity. It passes the fixed `--fingerprint=<seed>` plus the platform flag on every `connectPipe()` launch. The seed is an identity pin, not a credential store.
+
+**CLOAKBROWSER ALLOWS ONE INSTANCE.** Probe before launching
+(`curl -s -m 2 http://127.0.0.1:9242/json/version`). If one answers, `connectPipe`
+HANGS during early init — attach with `connect()` instead. Full pattern:
+`references/stealth.md`.
+
+## Getting past obstacles
+
+A blocked page is a rung to climb, not a reason to stop and report.
+
+| Rung | Use | Advance when |
+|---|---|---|
+| 1. `snapshot()` + `locator(ref)` | Anything with a usable ref | Ref absent, stale, obscured, or the click hits the wrong node twice |
+| 2. `createCua(page)` coordinates | Canvas, extension popups, custom controls | Click misses, or screenshot and coordinates disagree |
+| 3. Pin the viewport, retry rung 2 | Coordinate drift after a resize, DPI scale, or foreign tab | Coordinates land right but the widget still refuses input |
+| 4. `createCaptcha(page)` | A challenge widget is the blocker | Widget solved, flow still stalls |
+| 5. Read the browser log | Browser-level failure | The log names a cause outside the page |
+
+**TWO IDENTICAL FAILURES SELECT THE NEXT RUNG — A THIRD IDENTICAL ATTEMPT IS A
+DEFECT.** Verify after every page-changing action: fresh snapshot for DOM state,
+fresh screenshot for visual state. Report a stop only when all five rungs are
+exhausted, naming which rung failed with what evidence.
+
+**RUNG 5 ENDS IN A WRITTEN DIAGNOSIS, NEVER A SPECULATIVE CODE CHANGE.** A browser
+process problem (missing entitlement, extension service-worker failure, FIDO
+unavailable) is not fixed by editing automation code — session `01a0411b` burned a
+full debugging cycle proving exactly that.
+
+### Pin the viewport before trusting coordinates
+
+CUA acts in viewport pixels. When the render surface and coordinate space
+disagree, every coordinate is off by a constant and retrying repeats the miss:
+
+```js
+await page._sendToTarget("Emulation.setDeviceMetricsOverride", {
+  width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+  screenWidth: 1440, screenHeight: 900,
+  viewport: { x: 0, y: 0, width: 1440, height: 900, scale: 1 },
+});
+await page.refreshViewportSize();   // -> { width: 1440, height: 900 }
+```
+
+Pin every page you act on, including tabs you did not open, then take a fresh
+screenshot — coordinates read off an unpinned screenshot are stale.
+
+## Route by task
+
+| Task | Read |
+|---|---|
+| CAPTCHA, visual browsing, coordinate UI, viewport pinning | `references/interaction.md` — consider delegating, below |
+| WAF/Cloudflare/bot-detection pages, CloakBrowser, cookie rules | `references/stealth.md` |
+| First use, page API, snapshot options, locator rules, dialogs | `references/quickstart.md` |
+| Driving a browser inside `eval` cells, kernel persistence, parallel lanes | `references/eval-kernel.md` |
+| Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3) | `references/chrome-api.md` |
+
+## Hard rules
+
+- **NEVER extract and inject cookies for Google (any property) or 1Password.**
+  Google's risk engine kills the session server-side and logs the user out of
+  their own browser; 1Password sessions are device-bound and never work from
+  cookies. Detail in `references/stealth.md`. Cookie reuse is fine for ordinary
+  sessions (Grafana, internal tools).
+- **Always `compactSnapshot()`** before sending a snapshot to a model — the refs
+  map is ~54% of bytes and resolves in-page, so dropping it is free.
+- **Refs die on every new snapshot.** Pass `page.locator("e1")` straight from the
+  latest snapshot; never reuse a ref across snapshots, never put one in CSS.
+- Dialogs never block: `alert/confirm/prompt/beforeunload` are auto-accepted at
+  the transport layer (`confirm() -> true`, `prompt() -> ""`). Observe with
+  `page.on('dialog')`.
+- `goto` waits for meaningful content, not `readyState`: body plus (interactive
+  elements OR landmarks OR >= 20 text chars). Near-empty pages time out — use
+  `page.goto(url, { waitUntil: "commit" })` for those.
+- Cleanup is paired: `await browser.close()` then `rm -rf` the profile dir in the
+  same `finally`.
+
+## Delegating the pixel loop
+
+CAPTCHA solving and pixel-level visual browsing are iterative (screenshot, reason,
+act, verify). When that loop would consume your own context, delegate the blocked
+page to a `deep` subagent that loads these references. Drive it yourself when the
+flow is short or the state is already in your hands.
+
+```
+task(category: "deep", run_in_background: true, prompt: `
+TASK: Get past the CAPTCHA blocking <url> and return the post-solve state.
+1. Read ~/.agents/skills/omowright/references/interaction.md and stealth.md.
+2. connectPipe with the CloakBrowser binary (default engine).
+3. Pin the viewport (setDeviceMetricsOverride 1440x900 + refreshViewportSize)
+   before computing any coordinate.
+4. createCaptcha(page) - click(bounds) for checkbox widgets, drag(from, to,
+   {steps}) for sliders, readText(bounds) for text (macOS Vision OCR default).
+   Image grids: page.annotatedScreenshot() + cua.click per cell.
+5. VERIFY with a fresh compactSnapshot that the challenge is gone. Two failures
+   of one strategy select the next strategy; do not repeat a third time.
+STOP WHEN the page is past the challenge, or all strategies are exhausted -
+then report which failed and the browser-log evidence.
+DELIVERABLE: post-solve snapshot tree + screenshot path.`)
+```
+
+## Choosing this over everything else
+
+Plain `webfetch`/`curl` is fine for one static page. The moment a page needs JS,
+interaction, login, screenshots, CAPTCHAs, or WAF bypass, use this skill rather
+than ultimate-browsing: one library covers tiers 1-2 with a persistent browser,
+smaller snapshots, and no agent-browser/CloakBrowser CLI plumbing. For
+ulw-research browsing lanes, spawn `deep` lanes that `import()` this package in
+eval cells — the browser persists across cells via `globalThis`, and
+`compactSnapshot` keeps dozens of pages inside the context budget.
