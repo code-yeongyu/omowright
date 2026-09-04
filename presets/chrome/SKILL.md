@@ -15,50 +15,70 @@ const chrome = createChromeApi(connection, {
   profilePath: "/path/to/user-data-dir",  // enables bookmarks/history/topSites/downloads.search
   downloadDir: "/path/to/downloads",      // optional, defaults to a temp dir
 });
-
-const tabs = await chrome.tabs.query({ url: "*://example.com/*" });
-const hits = await chrome.history.search({ text: "example", maxResults: 20 });
-const saved = await chrome.downloads.download({ url: "https://files.example.com/x.zip" });
 ```
 
-## What works standalone
+**PROFILE-BACKED METHODS THROW `UnsupportedOperationError` WITHOUT `profilePath`.**
+A `connectPipe` browser gets a fresh profile, so bookmarks and history are empty
+there — these APIs matter when attaching to a real user browser or reading a real
+profile directory. Profile reads are read-only and WAL-safe against a running
+browser.
 
-| Namespace | Methods | Backend |
-|---|---|---|
-| `chrome.tabs` | `query`, `get` | CDP `Target.getTargets` |
-| `chrome.windows` | `get`, `getCurrent`, `getLastFocused`, `getAll` | CDP `Browser.getWindowForTarget` |
-| `chrome.bookmarks` | `get`, `getChildren`, `getRecent`, `getSubTree`, `getTree`, `search` | profile `Bookmarks` JSON |
-| `chrome.history` | `search`, `getVisits` | profile `History` SQLite |
-| `chrome.downloads` | `search`, `download` | profile `History` SQLite + CDP `Browser.setDownloadBehavior` |
-| `chrome.topSites` | `get` | profile `Top Sites` SQLite |
+## tabs — CDP `Target.getTargets`
 
-## Standalone differences from the MV3 original
+- `chrome.tabs.query({ url?: string | string[], title?, windowId? })` — `url`
+  takes MV3 match patterns (`*://*.example.com/*`), `title` is a substring match. **THESE THREE
+  ARE THE ONLY HONORED FILTERS.**
+- `chrome.tabs.get(tabId)` — `tabId` is a string; throws when no tab has it.
+- Returns `{ id, url, title, windowId, active, pinned, audible, discarded, groupId, index }`.
+  **IDS ARE CDP TARGET-ID STRINGS, NOT MV3 NUMBERS**, and the last six fields are
+  fixed defaults — they are not observable over CDP.
 
-- Tab ids are CDP target id strings, not MV3 numeric ids. `active`, `pinned`,
-  `audible`, `discarded`, `groupId`, `index` are not observable over CDP and
-  return fixed defaults; `tabs.query` honors only `url` (MV3 match patterns),
-  `title` (substring), and `windowId` filters.
-- Profile-backed methods need `profilePath` (the browser's user-data-dir).
-  Without it they throw `UnsupportedOperationError`. Note: a browser launched
-  with `connectPipe` uses a fresh profile, so bookmarks/history are empty —
-  these APIs matter when attaching to a real user browser or reading a real
-  profile directory.
-- Profile reads are read-only and safe against a running browser (WAL reads).
-- Write methods that would mutate the user's browser state throw
-  `UnsupportedOperationError` (they require the extension bridge):
-  `bookmarks.create/update/move/remove/removeTree`,
-  `history.addUrl/deleteUrl/deleteRange`,
-  `downloads.pause/resume/cancel/erase`, and all of `chrome.tabGroups`.
-- `downloads.download({ url, filename? })` opens a tab, navigates, and waits
-  for completion (30s timeout); the returned `filename` is the absolute saved
-  path. Each call re-asserts the download behavior because tab initialization
+Tab lifecycle stays on `connection.newTab(url)` / `page.close()`; interaction on
+`page.goto()` / `page.locator()`.
+
+## windows — CDP `Browser.getWindowForTarget`
+
+`get(windowId, queryOptions?)`, `getCurrent(queryOptions?)`,
+`getLastFocused(queryOptions?)`, `getAll(queryOptions?)`.
+
+- `queryOptions: { populate?: boolean }` — `populate: true` adds a `tabs` array.
+- Returns `{ id, focused, type, state, alwaysOnTop, incognito, tabs? }`.
+- Headless sessions have exactly one window; `getCurrent`/`getLastFocused` return
+  the first.
+
+## bookmarks — profile `Bookmarks` JSON, read-only
+
+`get(idOrIdList)`, `getChildren(id)`, `getRecent(numberOfItems)`,
+`getSubTree(id)`, `getTree()`, `search(query)` where `query` is a string or
+`{ query?, url?, title? }`.
+
+Nodes: `{ id, title, type: "url" | "folder", url?, dateAdded?, children? }`.
+
+## history — profile `History` SQLite, read-only
+
+- `search({ text, startTime?, endTime?, maxResults? })` — times are Unix ms.
+  Returns `[{ id, url, title, visitCount, lastVisitTime }]`, newest first.
+- `getVisits({ url })` — returns `[{ id, url, visitTime, transition }]`.
+
+## downloads — `History` SQLite + `Browser.setDownloadBehavior`
+
+- `search({ url?, filename?, limit? })` — returns
+  `[{ id, url, filename, startTime, bytesReceived, totalBytes, state }]`; state is
+  `complete | canceled | interrupted | in_progress`. Needs `profilePath`.
+- `download({ url, filename? })` — downloads through the real browser and resolves
+  `{ id, url, filename, state: "complete" }` with `filename` as the absolute saved
+  path. 30s timeout; rejects when the URL starts no download. It uses an in-page
+  anchor click rather than `Page.navigate`, which hangs on download navigations,
+  and re-asserts the download behavior on every call because tab initialization
   resets it.
 
-## References
+## topSites — profile `Top Sites` SQLite
 
-- Tabs: read `./tabs.md`
-- Windows: read `./windows.md`
-- Bookmarks: read `./bookmarks.md`
-- History: read `./history.md`
-- Downloads: read `./downloads.md`
-- Top sites: read `./top-sites.md`
+`get()` returns `[{ url, title }]` ordered by rank, max 50.
+
+## Write methods require the extension bridge
+
+These throw `UnsupportedOperationError` because they would mutate the user's own
+browser state: `bookmarks.create/update/move/remove/removeTree`,
+`history.addUrl/deleteUrl/deleteRange`,
+`downloads.pause/resume/cancel/erase`, and all of `chrome.tabGroups`.
