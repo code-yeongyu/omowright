@@ -61,7 +61,7 @@ running Chromium DevTools endpoint).
 ## Dialogs (alert / confirm / prompt / beforeunload)
 
 Every JavaScript dialog is **auto-accepted at the transport layer** — the page
-never hangs waiting for a human. Consequences:
+never hangs waiting for a human, including a click that triggers `window.print()`. Consequences:
 
 - `alert()` returns immediately; `confirm()` returns `true`; `prompt()` returns
   `""` (empty string). There is no dismiss/cancel path and no way to supply

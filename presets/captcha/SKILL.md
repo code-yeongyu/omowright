@@ -88,6 +88,6 @@ drop to rung 3 and pin the viewport.
 
 Widgets score fingerprint and behavior before they score the answer. **WHEN EVERY
 STRATEGY FAILS ON A PAGE A NORMAL BROWSER PASSES, THE ENGINE IS THE PROBLEM** —
-run it through CloakBrowser (`references/stealth.md` in the installed skill)
+run it through CloakBrowser (`skills/omowright/references/stealth.md`)
 rather than tuning coordinates further. When the widget is solved but the flow
 still stalls, that is rung 5: read the browser log and report the cause.

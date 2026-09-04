@@ -57,19 +57,14 @@ Tree lines look like `- link "Learn more" [ref=e1]` — feed `e1` to
 after each state change, never act on a stale ref. Start with
 `interactive: true`; escalate to a full snapshot only when the target is missing.
 
-## Readiness probe
+## Readiness and dialogs
 
-`goto` resolves when the page has a body AND (interactive elements OR landmarks
-OR >= 20 visible text chars) — not `document.readyState`. A near-empty fixture
-(`<h1>ok</h1>`) never satisfies it and times out after 30s; pass
-`waitUntil: "commit"` for such pages.
-
-## Dialogs
-
-Auto-accepted at the transport layer — pages never hang on `alert`, `confirm`,
-`prompt`, `beforeunload`. `confirm() -> true`, `prompt() -> ""`. There is no
-dismiss path. Observe via
-`page.on("dialog", d => console.log(d.type, d.message, d.defaultPrompt))`.
+Both are transport-level contracts documented once, in
+`/Users/yeongyu/local-workspaces/OmOWright/TOOLS.md` (sections "Readiness
+probe" and "Dialogs"). Short form: `goto` waits for meaningful content, not
+`readyState`, and times out after 30s on near-empty pages (`waitUntil: "commit"`
+is the escape hatch); every JavaScript dialog is auto-accepted and observable via
+`page.on("dialog")`.
 
 ## Errors worth knowing
 

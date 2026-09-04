@@ -19,8 +19,8 @@ const chrome = createChromeApi(connection, {
 
 **PROFILE-BACKED METHODS THROW `UnsupportedOperationError` WITHOUT `profilePath`.**
 A `connectPipe` browser gets a fresh profile, so bookmarks and history are empty
-there — these APIs matter when attaching to a real user browser or reading a real
-profile directory. Profile reads are read-only and WAL-safe against a running
+there — these APIs matter when attaching to a real user browser via `connect()` or
+reading a real profile directory. Profile reads are read-only and WAL-safe against a running
 browser.
 
 ## tabs — CDP `Target.getTargets`

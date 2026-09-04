@@ -88,11 +88,14 @@ screenshot — coordinates read off an unpinned screenshot are stale.
 
 | Task | Read |
 |---|---|
-| CAPTCHA, visual browsing, coordinate UI, viewport pinning | `references/interaction.md` — consider delegating, below |
+| Visual browsing, coordinate UI, viewport pinning, extension popups | `presets/visual-browse/SKILL.md` — consider delegating, below |
+| CAPTCHA (checkbox, slider, text OCR, image grid) | `presets/captcha/SKILL.md` — consider delegating, below |
 | WAF/Cloudflare/bot-detection pages, CloakBrowser, cookie rules | `references/stealth.md` |
-| First use, page API, snapshot options, locator rules, dialogs | `references/quickstart.md` |
+| First use, page API, snapshot options, locator rules | `references/quickstart.md`; dialogs and readiness in `TOOLS.md` |
 | Driving a browser inside `eval` cells, kernel persistence, parallel lanes | `references/eval-kernel.md` |
-| Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3) | `references/chrome-api.md` |
+| Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3) | `presets/chrome/SKILL.md` |
+
+Preset and `TOOLS.md` paths are relative to `/Users/yeongyu/local-workspaces/OmOWright/`.
 
 ## Hard rules
 
@@ -124,7 +127,8 @@ flow is short or the state is already in your hands.
 ```
 task(category: "deep", run_in_background: true, prompt: `
 TASK: Get past the CAPTCHA blocking <url> and return the post-solve state.
-1. Read ~/.agents/skills/omowright/references/interaction.md and stealth.md.
+1. Read /Users/yeongyu/local-workspaces/OmOWright/presets/captcha/SKILL.md,
+   presets/visual-browse/SKILL.md, and ~/.agents/skills/omowright/references/stealth.md.
 2. connectPipe with the CloakBrowser binary (default engine).
 3. Pin the viewport (setDeviceMetricsOverride 1440x900 + refreshViewportSize)
    before computing any coordinate.
