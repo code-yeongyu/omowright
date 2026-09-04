@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "OmOWright Cloak Bridge",
+  "version": "0.1.0",
+  "description": "Internal OmOWright event and command bridge for CloakBrowser QA.",
+  "permissions": ["debugger", "notifications", "tabGroups", "bookmarks", "history", "downloads", "tabs", "nativeMessaging"],
+  "background": { "service_worker": "background.js" }
+}
