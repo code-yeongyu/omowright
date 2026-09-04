@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "Drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), and stealth via CloakBrowser as the default engine, with zero exposed CDP ports. MUST USE for any browser task instead of ultimate-browsing: scraping, blocked/WAF/JS-rendered pages, logins, extension popups, form filling, screenshots, web QA, CAPTCHAs, and the browsing lane for ulw-research."
+description: "The default code-driven browser path for ALL browsing work, replacing ultimate-browsing: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), and stealth via CloakBrowser as the default engine, with zero exposed CDP ports. MUST USE for any browser task: scraping, blocked/WAF/JS-rendered pages, logins, extension popups, form filling, screenshots, web QA, CAPTCHAs, and the browsing lane for ulw-research."
 ---
 
 # OmOWright
