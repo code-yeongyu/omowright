@@ -1,10 +1,13 @@
 # Eval-kernel integration
 
 The `eval` tool's JS kernel keeps top-level state across cells — a browser
-launched in one cell is still alive in the next. This makes eval the cheapest
-way to drive OmOWright interactively and in parallel.
+launched in one cell is still alive in the next. This makes eval the cheapest way
+to drive OmOWright interactively and in parallel.
 
-## Setup cell (run once per session)
+**ONLY `globalThis.*` SURVIVES ACROSS CELLS.** Top-level `const`/`let` bindings do
+not — re-import or read from `globalThis` in later cells.
+
+## Setup cell (once per session)
 
 ```js
 const m = await import("/Users/yeongyu/local-workspaces/OmOWright/src/index.js");
@@ -22,19 +25,19 @@ globalThis.omwPage = await omw.newTab("about:blank");
 globalThis.omwTools = m;
 ```
 
-**Only `globalThis.*` survives across cells.** `const`/`let` bindings at cell
-top level do NOT — re-import or read from `globalThis` in later cells.
-
 ## Later cells
 
 ```js
 await omwPage.goto("https://example.com");
-const tree = omwTools.compactSnapshot(await omwPage.snapshot());
-console.log(tree);
+console.log(omwTools.compactSnapshot(await omwPage.snapshot()));
 await omwPage.locator("e1").click();
+display(await omwPage.screenshot({ type: "png" }));   // display() renders images inline
 ```
 
 ## Parallel lanes (research fan-out)
+
+Each lane gets its own browser and profile — no shared state, and the pipe
+transport has no ports to collide on.
 
 ```js
 const results = await parallel([1, 2, 3].map(i => async () => {
@@ -50,21 +53,10 @@ const results = await parallel([1, 2, 3].map(i => async () => {
 }));
 ```
 
-Each lane gets its own browser and profile — no shared state, no port
-collisions (pipe transport has no ports at all).
-
 ## Cleanup cell
 
 ```js
 await omw.close();
 fs.rmSync(profile, { recursive: true, force: true });
 delete globalThis.omw; delete globalThis.omwPage; delete globalThis.omwTools;
-```
-
-## Displaying screenshots
-
-The kernel's `display()` builtin renders images inline:
-
-```js
-display(await omwPage.screenshot({ type: "png" }));
 ```
