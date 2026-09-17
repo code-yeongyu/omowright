@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>oopif child</title></head>
+<body>
+child doc
+<button type="button" id="inside">Inside</button>
+<script>
+  document.getElementById("inside").addEventListener("click", () => {
+    document.body.setAttribute("data-clicked", "1");
+  });
+</script>
+</body>
+</html>
