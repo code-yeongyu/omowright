@@ -26,6 +26,22 @@ async function iframeTargets(page) {
     && (!browserContextId || !info.browserContextId || info.browserContextId === browserContextId));
 }
 
+// A frame only participates in snapshots if its parent chain reaches the main frame.
+// A dropped or late attach can leave an entry behind with no parent link at all (the
+// Target.attachedToTarget handler falls back to null when the target info carries no
+// parent), and core then never walks into it, so the child content stays invisible.
+// Such an entry counts as missing and is re-attributed.
+function isAttributed(fm, frameId) {
+  const seen = new Set();
+  let frame = fm.frames.get(frameId);
+  while (frame && !seen.has(frame.frameId)) {
+    if (frame.frameId === fm.mainFrameId) return true;
+    seen.add(frame.frameId);
+    frame = frame.parentFrameId ? fm.frames.get(frame.parentFrameId) : null;
+  }
+  return false;
+}
+
 // Attach, then ask the child itself who its parent is: Page.getFrameTree on the child
 // session is the only reliable attribution for an iframe target.
 async function describeTarget(page, targetId) {
@@ -63,16 +79,16 @@ async function adopt(page, sessionId, frame, parentFrameId) {
 export async function reconcileFrames(page) {
   const fm = page.frameManager;
   const added = [];
-  let pending = (await iframeTargets(page)).filter(info => !fm.frames.has(info.targetId));
+  let pending = (await iframeTargets(page)).filter(info => !isAttributed(fm, info.targetId));
   let progress = true;
   while (progress && pending.length > 0) {
     progress = false;
     const retry = [];
     for (const target of pending) {
-      if (fm.frames.has(target.targetId)) continue;
+      if (isAttributed(fm, target.targetId)) continue;
       const { sessionId, frame } = await describeTarget(page, target.targetId);
       const parentFrameId = frame.parentId ?? null;
-      if (!parentFrameId || !fm.frames.has(parentFrameId)) {
+      if (!parentFrameId || !isAttributed(fm, parentFrameId)) {
         // Not ours (another tab), or its parent is itself still pending: never adopt a
         // frame we cannot attribute to this page.
         await detach(page, sessionId);
