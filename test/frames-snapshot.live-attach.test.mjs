@@ -6,9 +6,11 @@ import {
   childFrameOf,
   clickUntilChildObserves,
   createRawTab,
+  forgetFrame,
   launch,
   listIframeTargets,
   startFixtureServers,
+  waitForChildContent,
   waitForChildTarget,
   waitUntil,
 } from "./fixtures/oopif-harness.mjs";
@@ -27,7 +29,7 @@ async function waitForFreshChildDocument(page) {
   }, { label: "reloaded child document" });
 }
 
-test("attaching to a tab whose OOPIF already exists: reconcileFrames recovers the child", live, async () => {
+test("attaching to a tab whose OOPIF already exists snapshots the child", live, async () => {
   const fixtures = await startFixtureServers();
   const { connection, cleanup } = await launch();
   try {
@@ -35,18 +37,13 @@ test("attaching to a tab whose OOPIF already exists: reconcileFrames recovers th
     await waitForChildTarget(connection);
     const page = await connection.attachPage(targetId);
 
-    // Baseline defect: FrameManager.initialize() misses the Target.attachedToTarget event
-    // for an OOPIF that already existed, so the plain snapshot shows an empty iframe node.
+    // FrameManager now registers its Target.attachedToTarget listener before it asks for
+    // auto-attach, so the OOPIF that already existed is onboarded during initialize() and
+    // there is nothing left for reconcileFrames to adopt.
     const before = await page.snapshot();
-    assert.ok(!before.tree.includes("Inside"), before.tree);
-    assert.match(before.tree, /- iframe \[ref=e\d+\]/, before.tree);
-    assert.equal(page.frames().length, 1);
-
-    const added = await reconcileFrames(page);
-    assert.equal(added.length, 1, JSON.stringify(added));
-    assert.ok(added[0].url.endsWith("/child"), added[0].url);
-    assert.equal(typeof added[0].isolatedContextId, "number");
+    assert.ok(before.tree.includes(`button "Inside" [ref=f1e1]`), before.tree);
     assert.equal(page.frames().length, 2);
+    assert.deepEqual(await reconcileFrames(page), []);
 
     const snapshot = await snapshotWithFrames(page);
     assert.ok(snapshot.tree.includes(`button "Inside" [ref=f1e1]`), snapshot.tree);
@@ -69,6 +66,36 @@ test("attaching to a tab whose OOPIF already exists: reconcileFrames recovers th
   }
 });
 
+test("a frame lost from FrameManager is re-adopted by reconcileFrames", live, async () => {
+  const fixtures = await startFixtureServers();
+  const { connection, cleanup } = await launch();
+  try {
+    const targetId = await createRawTab(connection, fixtures.urlFor("oopif-parent.html"));
+    await waitForChildTarget(connection);
+    const page = await connection.attachPage(targetId);
+    const { frameId: childFrameId } = await waitForChildContent(page);
+
+    // Simulate the frame going missing (the pre-fix attach path, a dropped event, a
+    // reconnect that raced the auto-attach): the child content disappears from the tree.
+    await forgetFrame(page, childFrameId);
+    const lost = await page.snapshot();
+    assert.ok(!lost.tree.includes("Inside"), lost.tree);
+
+    const added = await reconcileFrames(page);
+    assert.deepEqual(added.map(entry => entry.frameId), [childFrameId]);
+    assert.ok(added[0].url.endsWith("/child"), added[0].url);
+    assert.equal(typeof added[0].isolatedContextId, "number");
+
+    const recovered = await snapshotWithFrames(page);
+    assert.ok(recovered.tree.includes(`button "Inside" [ref=f1e1]`), recovered.tree);
+    assert.equal(recovered.missingFrames, undefined);
+    assert.equal(await clickUntilChildObserves(page, "f1e1", childFrameId, "data-clicked"), "1");
+  } finally {
+    await cleanup();
+    await fixtures.close();
+  }
+});
+
 test("Turnstile shape: OOPIF inside a closed shadow root is appended as an orphan block", live, async () => {
   const fixtures = await startFixtureServers();
   const { connection, cleanup } = await launch();
@@ -77,8 +104,7 @@ test("Turnstile shape: OOPIF inside a closed shadow root is appended as an orpha
     await waitForChildTarget(connection);
     const page = await connection.attachPage(targetId);
 
-    const added = await reconcileFrames(page);
-    assert.equal(added.length, 1, JSON.stringify(added));
+    assert.deepEqual(await reconcileFrames(page), []);
 
     const snapshot = await snapshotWithFrames(page);
     assert.ok(snapshot.tree.includes("\n- iframe:\n"), snapshot.tree);
@@ -106,7 +132,10 @@ test("an OOPIF that belongs to another tab is never adopted", live, async () => 
       { label: "own child iframe target" },
     );
     const page = await connection.attachPage(targetId);
+    await waitForChildContent(page);
 
+    // Drop the page's own child so reconcile has to attribute both iframe targets.
+    await forgetFrame(page, own.targetId);
     const added = await reconcileFrames(page);
     assert.deepEqual(added.map(entry => entry.frameId), [own.targetId]);
     assert.equal(page.frameManager.frames.has(foreign.targetId), false);

@@ -123,6 +123,26 @@ export function waitForChildContent(page, selector = "#inside") {
   }, { label: `child frame content ${selector}` });
 }
 
+// Reproduces the state a missed Target.attachedToTarget leaves behind: the frame is gone
+// from FrameManager and the page holds no session for it. Auto-attach is switched off on
+// the page session first, otherwise the browser re-attaches the target and core onboards
+// it again on its own, which would hide whether reconcileFrames did the recovery.
+export async function forgetFrame(page, frameId) {
+  const sessionId = page.frameManager.getFrame(frameId)?.sessionId;
+  await page.cdp.send(
+    "Target.setAutoAttach",
+    { autoAttach: false, waitForDebuggerOnStart: false, flatten: true },
+    await page.resolveSessionId(),
+  );
+  page.frameManager.frames.delete(frameId);
+  if (sessionId) await page.cdp.send("Target.detachFromTarget", { sessionId }).catch(() => {});
+  return waitUntil(async () => {
+    page.frameManager.frames.delete(frameId);
+    await page.cdp.send("Target.getTargetInfo", { targetId: page.targetId });
+    return page.frameManager.frames.has(frameId) ? null : true;
+  }, { label: `frame ${frameId} forgotten`, timeoutMs: 10_000 });
+}
+
 export function readChildAttribute(page, frameId, attribute) {
   return page.evaluateInFrame(frameId, `document.body.getAttribute(${JSON.stringify(attribute)})`);
 }
