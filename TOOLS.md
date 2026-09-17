@@ -51,8 +51,8 @@ running Chromium DevTools endpoint).
   `SameSite=None` dropped when not secure, name+domain deduped.
   `sanitizeCookies(cookies)` is the pure transform if you need it.
 
-The modules below live next to `src/index.js` and are imported by file, e.g.
-`await import("/Users/yeongyu/local-workspaces/OmOWright/src/network-snoop.js")`.
+Every tool below is exported from `src/index.js`, the same import as the core
+loop; the module files next to it are implementation detail.
 
 - `createNetworkSnoop(page, { match?, bodies=true, maxEntries=500, maxBodyBytes? })`:
   buffer finished network entries for one page. `match` is a predicate or
@@ -132,12 +132,12 @@ A policy is either an object or a function:
 ```js
 const browser = await connectPipe({ browserPath, browserArgs, storageRoot,
   dialogPolicy: { accept: false } });              // confirm() -> false, prompt() -> null
-browser.cdp.setDialogPolicy({ accept: true, promptText: "agent@example.com" }); // prompt() -> the text
-browser.cdp.setDialogPolicy(dialog => {           // { type, message, defaultPrompt, url }
+browser.setDialogPolicy({ accept: true, promptText: "agent@example.com" }); // prompt() -> the text
+browser.setDialogPolicy(dialog => {               // { type, message, defaultPrompt, url }
   if (dialog.type === "beforeunload") return true;
   return { accept: !/delete/i.test(dialog.message), promptText: dialog.defaultPrompt };
 });
-browser.cdp.dialogPolicy;                         // read the current policy
+browser.cdp.dialogPolicy;                         // read the current policy (pipe client getter)
 ```
 
 - `{ accept: false }` dismisses: `confirm()` returns `false`, `prompt()` returns
@@ -146,10 +146,9 @@ browser.cdp.dialogPolicy;                         // read the current policy
 - A function policy may return `boolean` or `{ accept, promptText }`, sync or
   async. A policy that throws falls back to accept, so a bug in the policy
   cannot hang the page.
-- `connectPipe({ dialogPolicy })` sets it at launch; `client.setDialogPolicy()`
-  swaps it later; `BrowserConnection.setDialogPolicy()` forwards to a transport
-  that supports it and throws for one that doesn't. `connect()` over WebSocket
-  keeps plain auto-accept.
+- `connectPipe({ dialogPolicy })` sets it at launch; `browser.setDialogPolicy()`
+  swaps it later (it forwards to the pipe client and throws for a transport
+  without policy support). `connect()` over WebSocket keeps plain auto-accept.
 - Subscribe to `page.on('dialog', d => ...)` for observability: the event
   carries `{type, message, defaultPrompt, url}` and fires after the policy runs.
 

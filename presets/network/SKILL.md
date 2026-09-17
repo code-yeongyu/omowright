@@ -6,13 +6,12 @@ description: Read the network instead of the DOM. Snoop JSON API responses, wait
 # Network
 
 Every page session already has the `Network` domain on, so watching traffic
-costs nothing and pages can't see it. These modules are imported by file:
+costs nothing and pages can't see it. All four tools come from the package
+entrypoint:
 
 ```js
-const { createNetworkSnoop } = await import("/Users/yeongyu/local-workspaces/OmOWright/src/network-snoop.js");
-const { collectWhileScrolling } = await import("/Users/yeongyu/local-workspaces/OmOWright/src/scroll-collect.js");
-const { createTrace } = await import("/Users/yeongyu/local-workspaces/OmOWright/src/trace.js");
-const { createRoutes } = await import("/Users/yeongyu/local-workspaces/OmOWright/src/routes.js");
+const { createNetworkSnoop, collectWhileScrolling, createTrace, createRoutes } =
+  await import("/Users/yeongyu/local-workspaces/OmOWright/src/index.js");
 ```
 
 ## Snoop before you scrape
@@ -22,7 +21,7 @@ arrived as JSON one request earlier. That JSON is complete, typed, and free of
 truncated labels. Snapshot to find and click; snoop to read.
 
 ```js
-const snoop = createNetworkSnoop(page, { match: { url: /\/api\//, mimeType: "json" } });
+const snoop = createNetworkSnoop(page, { match: { url: /\/api\//, mimeType: "json" } }); // strings match as substrings
 await page.goto("https://example.com/search?q=widgets");
 const results = snoop.popJson();          // parsed bodies, buffer drained
 console.log(snoop.summary({ max: 20 }));  // "GET 200 application/json 8123B https://..."

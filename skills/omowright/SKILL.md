@@ -7,7 +7,7 @@ description: "The default code-driven browser path for interactive browsing work
 
 Browser automation as a code library — no external CLI, no daemon, no open CDP
 port. The package lives at `/Users/yeongyu/local-workspaces/OmOWright` and is
-imported by absolute path. Runs on Node >= 20 and Bun.
+imported by absolute path. Bun >= 1.4 recommended, Node >= 20 supported.
 
 ## Core loop
 
@@ -115,7 +115,7 @@ Preset and `TOOLS.md` paths are relative to `/Users/yeongyu/local-workspaces/OmO
   `page.locator("f1e3")`; never fetch a frame handle to click inside an iframe.
 - Dialogs never block: `alert/confirm/prompt/beforeunload` are answered by the
   dialog policy (default accept: `confirm() -> true`, `prompt() -> ""`). Change
-  it with `connectPipe({ dialogPolicy })` or `browser.cdp.setDialogPolicy()`;
+  it with `connectPipe({ dialogPolicy })` or `browser.setDialogPolicy()`;
   observe with `page.on('dialog')`. Details in `TOOLS.md`.
 - `goto` waits for meaningful content, not `readyState`: body plus (interactive
   elements OR landmarks OR >= 20 text chars). Near-empty pages time out — use

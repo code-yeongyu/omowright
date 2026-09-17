@@ -21,8 +21,8 @@ rejects every call. Two patterns hold up:
    the setup cell below):
 
 ```js
-tool.monitor({ command: `${shell} --headless --no-first-run --remote-debugging-port=9333 --user-data-dir=${profile} about:blank` });
-globalThis.omw = await omwTools.connect("http://127.0.0.1:9333");
+await tool.monitor({ description: "omowright browser", command: `${shell} --headless --no-first-run --remote-debugging-port=9333 --user-data-dir=${profile} about:blank` });
+globalThis.omw = await omwTools.connect("http://127.0.0.1:9333");   // the port is loopback-only; close the monitor with kill_bash when done
 ```
 
    If you'd rather keep `connectPipe`, treat the browser as disposable: start

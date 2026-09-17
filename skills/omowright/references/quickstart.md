@@ -29,8 +29,8 @@ await browser.cdp.send("Target.closeTarget", { targetId });
 ```
 
 Always launch with a dedicated `--user-data-dir` (a `mkdtemp` dir) and delete it
-after `browser.close()`. Runs on Node >= 20 and Bun — `node:sqlite` loads lazily
-with a `bun:sqlite` fallback.
+after `browser.close()`. Under Node, `node:sqlite` loads lazily with a
+`bun:sqlite` fallback under Bun (see Runtime above).
 
 ## Page essentials
 

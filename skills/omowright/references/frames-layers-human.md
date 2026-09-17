@@ -1,14 +1,11 @@
 # Frames, layers, human handoff, device emulation
 
 Four modules for the moments when the plain snapshot-and-click loop stalls.
-All are imported by file from the package root:
+All come from the package entrypoint:
 
 ```js
-const root = "/Users/yeongyu/local-workspaces/OmOWright/src";
-const { reconcileFrames, snapshotWithFrames } = await import(`${root}/frames-snapshot.js`);
-const { describeLayers, layersHeader, snapshotWithLayers } = await import(`${root}/layers.js`);
-const { requestHuman } = await import(`${root}/human-handoff.js`);
-const { DEVICE_PRESETS, emulate } = await import(`${root}/emulate.js`);
+const { reconcileFrames, snapshotWithFrames, describeLayers, layersHeader, snapshotWithLayers,
+  requestHuman, DEVICE_PRESETS, emulate, compactSnapshot } = await import("/Users/yeongyu/local-workspaces/OmOWright/src/index.js");
 ```
 
 ## Out-of-process iframes and shadow DOM
@@ -59,9 +56,15 @@ const layers = await describeLayers(page);
 console.log(layersHeader(layers));
 // @layers blocking=dialog "Cookie preferences" coverage=100% hint=#onetrust-banner-sdk
 if (layers.blocking) {
-  await page.locator(`${layers.blocking.selectorHint} button`).first().click();
+  // Dismiss through a fresh ref: snapshot the overlay by its hint, click its button.
+  const tree = compactSnapshot(await page.snapshot({ selector: layers.blocking.selectorHint, interactive: true }));
+  await page.locator(/\[ref=(e\d+)\]/.exec(tree)[1]).click();   // first interactive ref inside the overlay
 }
 ```
+
+`selectorHint` is `#id` when the overlay has one and a bare tag or
+`tag.class` otherwise; a bare tag is too broad for a CSS click, which is why
+the recipe scopes a snapshot to it instead of clicking through it.
 
 `describeLayers` hit-tests a 5x5 grid over the viewport (pass `{ grid }` to
 change it), pierces open shadow roots, and reports the topmost element that
