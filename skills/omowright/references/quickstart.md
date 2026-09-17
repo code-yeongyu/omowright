@@ -1,5 +1,10 @@
 # Quickstart — connections, pages, snapshots
 
+## Runtime
+
+Bun >= 1.4 recommended (`bun test` runs the suite as-is); Node >= 20 supported
+(`node --test`). Same source, no build step.
+
 ## Two transports
 
 ```js

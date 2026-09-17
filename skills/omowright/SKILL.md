@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), and stealth via CloakBrowser as the default engine, with zero exposed CDP ports. MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and stealth via CloakBrowser as the default engine, with zero exposed CDP ports. MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
@@ -52,6 +52,7 @@ A blocked page is a rung to climb, not a reason to stop and report.
 | Rung | Use | Advance when |
 |---|---|---|
 | 1. `snapshot()` + `locator(ref)` | Anything with a usable ref | Ref absent, stale, obscured, or the click hits the wrong node twice |
+| 1b. `snapshotWithLayers` / `describeLayers` | A blocking overlay explains two identical misses; dismiss it first | `@layers none`, or the overlay is gone and the click still misses |
 | 2. `createCua(page)` coordinates | Canvas, extension popups, custom controls | Click misses, or screenshot and coordinates disagree |
 | 3. Pin the viewport, retry rung 2 | Coordinate drift after a resize, DPI scale, or foreign tab | Coordinates land right but the widget still refuses input |
 | 4. `createCaptcha(page)` | A challenge widget is the blocker | Widget solved, flow still stalls |
@@ -59,7 +60,7 @@ A blocked page is a rung to climb, not a reason to stop and report.
 
 **TWO IDENTICAL FAILURES SELECT THE NEXT RUNG — A THIRD IDENTICAL ATTEMPT IS A
 DEFECT.** Verify after every page-changing action: fresh snapshot for DOM state,
-fresh screenshot for visual state. Report a stop only when all five rungs are
+fresh screenshot for visual state. Report a stop only when all rungs are
 exhausted, naming which rung failed with what evidence.
 
 **RUNG 5 ENDS IN A WRITTEN DIAGNOSIS, NEVER A SPECULATIVE CODE CHANGE.** A browser
@@ -94,6 +95,8 @@ screenshot — coordinates read off an unpinned screenshot are stale.
 | First use, page API, snapshot options, locator rules | `references/quickstart.md`; dialogs and readiness in `TOOLS.md` |
 | Driving a browser inside `eval` cells, kernel persistence, parallel lanes | `references/eval-kernel.md` |
 | Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3) | `presets/chrome/SKILL.md` |
+| API JSON instead of DOM scraping, wait for a request, infinite scroll, QA flight trace (jsonl/HAR), request routes | `presets/network/SKILL.md` |
+| Cross-origin iframes and shadow DOM, overlays that swallow clicks, login/OTP handoff to a human, device emulation | `references/frames-layers-human.md` |
 
 Preset and `TOOLS.md` paths are relative to `/Users/yeongyu/local-workspaces/OmOWright/`.
 
@@ -108,9 +111,12 @@ Preset and `TOOLS.md` paths are relative to `/Users/yeongyu/local-workspaces/OmO
   map is ~54% of bytes and resolves in-page, so dropping it is free.
 - **Refs die on every new snapshot.** Pass `page.locator("e1")` straight from the
   latest snapshot; never reuse a ref across snapshots, never put one in CSS.
-- Dialogs never block: `alert/confirm/prompt/beforeunload` are auto-accepted at
-  the transport layer (`confirm() -> true`, `prompt() -> ""`). Observe with
-  `page.on('dialog')`.
+- **Refs stay page-level.** Child-frame refs look like `f1e3` and still go to
+  `page.locator("f1e3")`; never fetch a frame handle to click inside an iframe.
+- Dialogs never block: `alert/confirm/prompt/beforeunload` are answered by the
+  dialog policy (default accept: `confirm() -> true`, `prompt() -> ""`). Change
+  it with `connectPipe({ dialogPolicy })` or `browser.cdp.setDialogPolicy()`;
+  observe with `page.on('dialog')`. Details in `TOOLS.md`.
 - `goto` waits for meaningful content, not `readyState`: body plus (interactive
   elements OR landmarks OR >= 20 text chars). Near-empty pages time out — use
   `page.goto(url, { waitUntil: "commit" })` for those.
@@ -123,6 +129,11 @@ CAPTCHA solving and pixel-level visual browsing are iterative (screenshot, reaso
 act, verify). When that loop would consume your own context, delegate the blocked
 page to a `deep` subagent that loads these references. Drive it yourself when the
 flow is short or the state is already in your hands.
+
+When every rung fails on a login, a one-time code, or a challenge the captcha
+preset can't clear, the human is the fallback: `requestHuman(page, { prompt,
+until })` brings the tab to front, shows a Done banner, and resumes when the
+condition holds. Recipe in `references/frames-layers-human.md`.
 
 ```
 task(category: "deep", run_in_background: true, prompt: `
