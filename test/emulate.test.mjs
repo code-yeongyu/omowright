@@ -176,11 +176,7 @@ test("emulate() throws on unknown preset", async () => {
 });
 
 // Integration tests with real headless shell
-test("emulate(page, 'iphone-14') live test", async (t) => {
-  if (!SHELL) {
-    t.skip();
-    return;
-  }
+test("emulate(page, 'iphone-14') live test", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
 
   let connection;
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-emulate-test-"));
@@ -215,11 +211,7 @@ test("emulate(page, 'iphone-14') live test", async (t) => {
   }
 });
 
-test("emulate(page, null) live restore test", async (t) => {
-  if (!SHELL) {
-    t.skip();
-    return;
-  }
+test("emulate(page, null) live restore test", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
 
   let connection;
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-emulate-restore-test-"));
