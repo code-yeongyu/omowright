@@ -44,3 +44,13 @@ export {
   UnsupportedOperationError,
   takeSnapshot,
 } from "./core.js";
+export { normalizeDialogPolicy, resolveDialogAction } from "./dialog-policy.js";
+export { DEVICE_PRESETS, emulate } from "./emulate.js";
+export { reconcileFrames, snapshotWithFrames } from "./frames-snapshot.js";
+export { toHar } from "./har.js";
+export { requestHuman } from "./human-handoff.js";
+export { describeLayers, layersHeader, snapshotWithLayers } from "./layers.js";
+export { createNetworkSnoop } from "./network-snoop.js";
+export { createRoutes } from "./routes.js";
+export { collectWhileScrolling } from "./scroll-collect.js";
+export { createTrace } from "./trace.js";

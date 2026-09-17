@@ -43,9 +43,17 @@ test("toolSchemas are complete and lean", () => {
     assert.ok(schema.description && typeof schema.description === "string");
     assert.ok(schema.description.length <= 220, `${schema.name} description too long: ${schema.description.length}`);
     assert.equal(typeof schema.parameters, "object");
+    assert.equal(schema.parameters.type, "object", `${schema.name} parameters.type`);
   }
   const names = toolSchemas.map(s => s.name);
-  for (const required of ["page.snapshot", "page.locator", "page.goto", "compactSnapshot"]) {
+  for (const required of [
+    "page.snapshot", "page.locator", "page.goto", "compactSnapshot",
+    "createNetworkSnoop", "snoop.waitFor", "snoop.popJson", "snoop.summary",
+    "collectWhileScrolling", "createTrace", "trace.step", "trace.stop",
+    "reconcileFrames", "snapshotWithFrames", "connectPipe.dialogPolicy",
+    "requestHuman", "describeLayers", "snapshotWithLayers", "emulate",
+    "createRoutes", "route.continue", "route.fulfill", "route.abort",
+  ]) {
     assert.ok(names.includes(required), `missing schema: ${required}`);
   }
 });
