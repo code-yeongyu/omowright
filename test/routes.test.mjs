@@ -1,0 +1,368 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, existsSync, globSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import http from "node:http";
+import { connectPipe, createAgentTabs } from "../src/index.js";
+import { createRoutes } from "../src/routes.js";
+
+class FakeEmitter {
+  #listeners = new Map();
+  on(name, listener) {
+    const set = this.#listeners.get(name) ?? new Set();
+    set.add(listener);
+    this.#listeners.set(name, set);
+    return () => set.delete(listener);
+  }
+  emit(name, ...args) {
+    for (const listener of [...this.#listeners.get(name) ?? []]) listener(...args);
+  }
+}
+
+class FakeCdp {
+  constructor() {
+    this.calls = [];
+    this.events = new FakeEmitter();
+  }
+  async send(method, params, sessionId, options) {
+    this.calls.push({ method, params, sessionId, options });
+    return {};
+  }
+  on(method, listener) {
+    return this.events.on(method, listener);
+  }
+  emit(method, params, meta = {}) {
+    this.events.emit(method, params, meta);
+  }
+}
+
+function fakePage(sessionId = "sess-1") {
+  const cdp = new FakeCdp();
+  return { cdp, resolveSessionId: async () => sessionId };
+}
+
+function paused(url, extra = {}) {
+  return {
+    requestId: extra.requestId ?? "req-1",
+    resourceType: extra.resourceType ?? "XHR",
+    request: {
+      url,
+      method: extra.method ?? "GET",
+      headers: extra.headers ?? { accept: "*/*" },
+      postData: extra.postData,
+    },
+  };
+}
+
+function callsOf(page, method) {
+  return page.cdp.calls.filter(call => call.method === method);
+}
+
+async function flush() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function findHeadlessShell() {
+  const candidates = globSync(
+    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+  );
+  if (candidates.length > 0) return candidates.sort().at(-1);
+  const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  if (existsSync(chrome)) return chrome;
+  return null;
+}
+
+const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+
+const PIXEL_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+function startFixtureServer() {
+  const server = http.createServer((req, res) => {
+    const url = (req.url ?? "/").split("?")[0];
+    if (url === "/" || url === "/index.html") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!DOCTYPE html>
+<html><head><title>routes fixture</title></head>
+<body>
+<script>window.__imgError=false;window.__imgLoad=false;</script>
+<img src="/pixel.png" id="pic"
+  onerror="window.__imgError=true"
+  onload="window.__imgLoad=true">
+<p>fixture page with enough text content for the readiness probe to pass on load</p>
+</body></html>`);
+      return;
+    }
+    if (url === "/pixel.png") {
+      res.writeHead(200, { "content-type": "image/png" });
+      res.end(PIXEL_PNG);
+      return;
+    }
+    res.writeHead(404, { "content-type": "text/plain" });
+    res.end("not found");
+  });
+  return new Promise((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      resolve({ server, url: `http://127.0.0.1:${address.port}` });
+    });
+    server.on("error", reject);
+  });
+}
+
+test("route() sends Fetch.enable once; dispose sends Fetch.disable", async () => {
+  const page = fakePage();
+  const routes = createRoutes(page);
+  assert.equal(routes.enabled, false);
+  assert.equal(page.cdp.calls.length, 0);
+
+  await routes.route("*.png", () => {});
+  await routes.route("/other", () => {});
+
+  const enables = callsOf(page, "Fetch.enable");
+  assert.equal(enables.length, 1);
+  assert.deepEqual(enables[0].params, { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+  assert.equal(enables[0].sessionId, "sess-1");
+  assert.equal(routes.enabled, true);
+
+  await routes.dispose();
+  const disables = callsOf(page, "Fetch.disable");
+  assert.equal(disables.length, 1);
+  assert.equal(disables[0].sessionId, "sess-1");
+  assert.equal(routes.enabled, false);
+
+  await routes.dispose();
+  assert.equal(callsOf(page, "Fetch.disable").length, 1);
+});
+
+test("matching glob fulfill sends Fetch.fulfillRequest with base64 body and content-type", async () => {
+  const page = fakePage();
+  const routes = createRoutes(page);
+  const seen = [];
+  await routes.route("*.png", route => {
+    seen.push(route.request);
+    return route.fulfill({ contentType: "text/plain", body: "hello" });
+  });
+
+  page.cdp.emit("Fetch.requestPaused", paused("https://cdn.example/photo.png", { resourceType: "Image" }), { sessionId: "sess-1" });
+  await flush();
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].url, "https://cdn.example/photo.png");
+  assert.equal(seen[0].method, "GET");
+  assert.equal(seen[0].resourceType, "Image");
+
+  const fulfill = callsOf(page, "Fetch.fulfillRequest");
+  assert.equal(fulfill.length, 1);
+  assert.equal(fulfill[0].sessionId, "sess-1");
+  assert.equal(fulfill[0].params.requestId, "req-1");
+  assert.equal(fulfill[0].params.responseCode, 200);
+  assert.equal(fulfill[0].params.body, Buffer.from("hello").toString("base64"));
+  assert.ok(
+    fulfill[0].params.responseHeaders.some(header => header.name.toLowerCase() === "content-type" && header.value === "text/plain"),
+    "content-type header is present",
+  );
+
+  await routes.dispose();
+});
+
+test("abort sends Fetch.failRequest; unmatched continue; other sessionId ignored", async () => {
+  const page = fakePage();
+  const routes = createRoutes(page);
+  let handled = 0;
+  await routes.route("*/blocked", route => {
+    handled += 1;
+    return route.abort();
+  });
+
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/blocked", { requestId: "abort-1" }), { sessionId: "sess-1" });
+  await flush();
+  const fail = callsOf(page, "Fetch.failRequest");
+  assert.equal(handled, 1);
+  assert.equal(fail.length, 1);
+  assert.equal(fail[0].params.requestId, "abort-1");
+  assert.equal(fail[0].params.errorReason, "Failed");
+  assert.equal(fail[0].sessionId, "sess-1");
+
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/other", { requestId: "cont-1" }), { sessionId: "sess-1" });
+  await flush();
+  const cont = callsOf(page, "Fetch.continueRequest");
+  assert.equal(cont.length, 1);
+  assert.equal(cont[0].params.requestId, "cont-1");
+  assert.equal(cont[0].sessionId, "sess-1");
+
+  const before = page.cdp.calls.length;
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/blocked", { requestId: "other-sess" }), { sessionId: "sess-other" });
+  await flush();
+  assert.equal(page.cdp.calls.length, before);
+  assert.equal(handled, 1);
+
+  await routes.dispose();
+});
+
+test("RegExp, substring, and predicate matches; first handler wins; requestId acted once", async () => {
+  const page = fakePage();
+  const routes = createRoutes(page);
+  const hits = [];
+  await routes.route(/api\/v1/, route => {
+    hits.push("regex");
+    return route.fulfill({ body: "regex" });
+  });
+  await routes.route("example.test/item", route => {
+    hits.push("substr");
+    return route.fulfill({ body: "substr" });
+  });
+  await routes.route(({ method, resourceType }) => method === "POST" && resourceType === "Fetch", route => {
+    hits.push("pred");
+    return route.fulfill({ body: "pred" });
+  });
+  await routes.route("*", route => {
+    hits.push("star");
+    return route.continue();
+  });
+
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/api/v1/x", { requestId: "r-regex" }), { sessionId: "sess-1" });
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/item/42", { requestId: "r-sub" }), { sessionId: "sess-1" });
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/submit", { requestId: "r-pred", method: "POST", resourceType: "Fetch" }), { sessionId: "sess-1" });
+  await flush();
+
+  assert.deepEqual(hits, ["regex", "substr", "pred"]);
+  const bodies = callsOf(page, "Fetch.fulfillRequest").map(call => Buffer.from(call.params.body, "base64").toString());
+  assert.deepEqual(bodies, ["regex", "substr", "pred"]);
+  assert.equal(callsOf(page, "Fetch.continueRequest").length, 0);
+
+  const fulfillCount = callsOf(page, "Fetch.fulfillRequest").length;
+  const page2 = fakePage();
+  const routes2 = createRoutes(page2);
+  await routes2.route("*", route => {
+    route.fulfill({ body: "a" });
+    route.abort();
+    route.continue();
+  });
+  page2.cdp.emit("Fetch.requestPaused", paused("https://x.test/", { requestId: "once" }), { sessionId: "sess-1" });
+  await flush();
+  assert.equal(callsOf(page2, "Fetch.fulfillRequest").length, 1);
+  assert.equal(callsOf(page2, "Fetch.failRequest").length, 0);
+  assert.equal(callsOf(page2, "Fetch.continueRequest").length, 0);
+  assert.equal(fulfillCount, 3);
+
+  await routes.dispose();
+  await routes2.dispose();
+});
+
+test("handler that throws or settles without an action continues once per request and warns once per handler", async () => {
+  const page = fakePage();
+  const routes = createRoutes(page);
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const silent = () => {};
+    const boom = () => { throw new Error("handler boom"); };
+    await routes.route("*/silent", silent);
+    await routes.route("*/boom", boom);
+
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/silent", { requestId: "s1" }), { sessionId: "sess-1" });
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/silent", { requestId: "s2" }), { sessionId: "sess-1" });
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/boom", { requestId: "b1" }), { sessionId: "sess-1" });
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/boom", { requestId: "b2" }), { sessionId: "sess-1" });
+    await flush();
+  } finally {
+    console.warn = original;
+  }
+
+  const cont = callsOf(page, "Fetch.continueRequest").map(call => call.params.requestId);
+  assert.deepEqual(cont.sort(), ["b1", "b2", "s1", "s2"]);
+  assert.equal(warnings.length, 2);
+
+  await routes.dispose();
+});
+
+test("unroute removes a match and disables Fetch when no routes remain", async () => {
+  const page = fakePage();
+  const routes = createRoutes(page);
+  await routes.route("*.png", route => route.abort());
+  await routes.route("/keep", route => route.continue());
+  assert.equal(routes.enabled, true);
+
+  await routes.unroute("*.png");
+  page.cdp.emit("Fetch.requestPaused", paused("https://x.test/a.png", { requestId: "png" }), { sessionId: "sess-1" });
+  await flush();
+  assert.equal(callsOf(page, "Fetch.failRequest").length, 0);
+  assert.equal(callsOf(page, "Fetch.continueRequest").some(call => call.params.requestId === "png"), true);
+
+  await routes.unroute("/keep");
+  assert.equal(routes.enabled, false);
+  assert.equal(callsOf(page, "Fetch.disable").length, 1);
+
+  await routes.route("*", route => route.abort());
+  assert.equal(routes.enabled, true);
+  await routes.unroute();
+  assert.equal(routes.enabled, false);
+  assert.equal(callsOf(page, "Fetch.disable").length, 2);
+
+  await routes.dispose();
+});
+
+test("live abort of png fires img onerror", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
+  const ud = mkdtempSync(path.join(tmpdir(), "omowright-routes-png-"));
+  const { server, url } = await startFixtureServer();
+  const connection = await connectPipe({
+    browserPath: SHELL,
+    browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+    storageRoot: ud,
+  });
+  try {
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
+    const routes = createRoutes(page);
+    await routes.route("*.png", route => route.abort());
+    await page.goto(url);
+    const imgState = await page.evaluate(`new Promise((resolve, reject) => {
+      const finish = () => resolve({ error: window.__imgError === true, load: window.__imgLoad === true });
+      if (window.__imgError || window.__imgLoad) return finish();
+      const img = document.getElementById("pic");
+      if (!img) return reject(new Error("img#pic missing"));
+      img.addEventListener("error", finish);
+      img.addEventListener("load", finish);
+      setTimeout(() => reject(new Error("timed out waiting for img error or load")), 8000);
+    })`);
+    assert.equal(imgState.error, true, "aborted image fires onerror");
+    assert.equal(imgState.load, false, "aborted image does not load");
+    await routes.dispose();
+  } finally {
+    await connection.close();
+    rmSync(ud, { recursive: true, force: true });
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test("live fulfill mocks /api/x json even when the server returns 404", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
+  const ud = mkdtempSync(path.join(tmpdir(), "omowright-routes-api-"));
+  const { server, url } = await startFixtureServer();
+  const connection = await connectPipe({
+    browserPath: SHELL,
+    browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+    storageRoot: ud,
+  });
+  try {
+    const page = (await createAgentTabs(connection).create("about:blank")).page;
+    const routes = createRoutes(page);
+    await routes.route("*/api/x", route => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ mocked: true }),
+    }));
+    await page.goto(url);
+    const payload = await page.evaluate("fetch('/api/x').then(r => r.json())");
+    assert.deepEqual(payload, { mocked: true });
+    await routes.dispose();
+  } finally {
+    await connection.close();
+    rmSync(ud, { recursive: true, force: true });
+    await new Promise(resolve => server.close(resolve));
+  }
+});
