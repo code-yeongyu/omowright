@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { BrowserConnection } from "./connection.js";
+import { normalizeDialogPolicy, resolveDialogAction } from "./dialog-policy.js";
 import { targetCreationCapability } from "./internal-capability.js";
 
 class Emittery {
@@ -38,7 +39,7 @@ export class PipeCdpClient {
   #browserArgs;
   #spawnOptions;
   #stdioTail = "";
-  #dialogPolicy = { accept: true };
+  #dialogPolicy;
   transportEvents = new Emittery();
   logId;
 
@@ -50,7 +51,7 @@ export class PipeCdpClient {
     this.#commandTimeoutMs = commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     this.#readinessTimeoutMs = readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
     this.logId = logId ?? `cdp-pipe-${Date.now()}`;
-    if (dialogPolicy !== undefined) this.#dialogPolicy = dialogPolicy;
+    this.#dialogPolicy = normalizeDialogPolicy(dialogPolicy);
   }
 
   get isConnected() { return this.#connected; }
@@ -59,7 +60,7 @@ export class PipeCdpClient {
   get dialogPolicy() { return this.#dialogPolicy; }
 
   setDialogPolicy(policy) {
-    this.#dialogPolicy = policy ?? { accept: true };
+    this.#dialogPolicy = normalizeDialogPolicy(policy);
   }
 
   async ensureConnected() {
@@ -225,33 +226,8 @@ export class PipeCdpClient {
   }
 
   async #handleJavaScriptDialog(msg) {
-    const params = await this.#resolveDialogPolicy(msg.params);
+    const params = await resolveDialogAction(this.#dialogPolicy, msg.params);
     await this.send("Page.handleJavaScriptDialog", params, msg.sessionId);
-  }
-
-  async #resolveDialogPolicy(params = {}) {
-    const fallback = { accept: true };
-    try {
-      const policy = this.#dialogPolicy;
-      let result = policy;
-      if (typeof policy === "function") {
-        result = await policy({
-          type: params.type,
-          message: params.message,
-          defaultPrompt: params.defaultPrompt ?? "",
-          url: params.url,
-        });
-      }
-      if (typeof result === "boolean") return { accept: result };
-      if (result && typeof result === "object") {
-        const decision = { accept: result.accept !== false };
-        if (result.promptText !== undefined) decision.promptText = result.promptText;
-        return decision;
-      }
-      return fallback;
-    } catch {
-      return fallback;
-    }
   }
 
   #failAll(err) {

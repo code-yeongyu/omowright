@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PipeCdpClient, connectPipe } from "../src/pipe.js";
 import { BrowserConnection } from "../src/connection.js";
+import { normalizeDialogPolicy, resolveDialogAction } from "../src/dialog-policy.js";
 import { createAgentTabs } from "../src/agent-tabs.js";
 
 function findHeadlessShell() {
@@ -52,6 +53,44 @@ async function handledParams(client, sent, msg = dialogOpening()) {
   return sent[0].params;
 }
 
+test("normalizeDialogPolicy defaults missing values to accept:true", () => {
+  assert.deepEqual(normalizeDialogPolicy(undefined), { accept: true });
+  const policy = { accept: false, promptText: "x" };
+  assert.equal(normalizeDialogPolicy(policy), policy);
+  const fn = () => false;
+  assert.equal(normalizeDialogPolicy(fn), fn);
+});
+
+test("resolveDialogAction maps policies and falls back when the function throws or rejects", async () => {
+  assert.deepEqual(await resolveDialogAction({ accept: false }), { accept: false });
+  assert.deepEqual(await resolveDialogAction({ accept: true, promptText: "hello" }), {
+    accept: true,
+    promptText: "hello",
+  });
+
+  const seen = [];
+  const policy = (dialog) => {
+    seen.push(dialog);
+    if (dialog.type === "confirm") return false;
+    return { accept: true, promptText: "typed" };
+  };
+  assert.deepEqual(
+    await resolveDialogAction(policy, { type: "confirm", message: "x", url: "https://a.test/" }),
+    { accept: false },
+  );
+  assert.deepEqual(
+    await resolveDialogAction(policy, { type: "prompt", message: "q", defaultPrompt: "dflt", url: "https://example.test/" }),
+    { accept: true, promptText: "typed" },
+  );
+  assert.deepEqual(seen, [
+    { type: "confirm", message: "x", defaultPrompt: "", url: "https://a.test/" },
+    { type: "prompt", message: "q", defaultPrompt: "dflt", url: "https://example.test/" },
+  ]);
+
+  assert.deepEqual(await resolveDialogAction(() => { throw new Error("policy boom"); }), { accept: true });
+  assert.deepEqual(await resolveDialogAction(async () => { throw new Error("policy reject"); }), { accept: true });
+});
+
 test("PipeCdpClient default dialogPolicy auto-accepts", async () => {
   const { client, sent } = captureClient();
   assert.deepEqual(client.dialogPolicy, { accept: true });
@@ -69,43 +108,6 @@ test("object dialogPolicy can dismiss and supply promptText", async () => {
     accept: true,
     promptText: "hello",
   });
-});
-
-test("function dialogPolicy receives the dialog and may return a boolean or object", async () => {
-  const { client, sent } = captureClient();
-  const seen = [];
-  client.setDialogPolicy((dialog) => {
-    seen.push(dialog);
-    if (dialog.type === "confirm") return false;
-    return { accept: true, promptText: "typed" };
-  });
-  assert.equal(typeof client.dialogPolicy, "function");
-
-  assert.deepEqual(
-    await handledParams(client, sent, dialogOpening({ type: "confirm", message: "x", url: "https://a.test/" })),
-    { accept: false },
-  );
-  assert.deepEqual(
-    await handledParams(client, sent, dialogOpening({ type: "prompt", message: "q", defaultPrompt: "dflt" })),
-    { accept: true, promptText: "typed" },
-  );
-  assert.deepEqual(seen, [
-    { type: "confirm", message: "x", defaultPrompt: "", url: "https://a.test/" },
-    { type: "prompt", message: "q", defaultPrompt: "dflt", url: "https://example.test/" },
-  ]);
-});
-
-test("throwing or rejecting dialogPolicy falls back to accept:true", async () => {
-  const { client, sent } = captureClient();
-  client.setDialogPolicy(() => {
-    throw new Error("policy boom");
-  });
-  assert.deepEqual(await handledParams(client, sent), { accept: true });
-
-  client.setDialogPolicy(async () => {
-    throw new Error("policy reject");
-  });
-  assert.deepEqual(await handledParams(client, sent), { accept: true });
 });
 
 test("BrowserConnection.setDialogPolicy delegates or rejects by transport", () => {
