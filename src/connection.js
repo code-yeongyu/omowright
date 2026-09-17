@@ -33,6 +33,13 @@ export class BrowserConnection {
 
   get cdp() { return this.#client; }
 
+  setDialogPolicy(policy) {
+    if (typeof this.#client.setDialogPolicy !== "function") {
+      throw new Error("dialog policy is not supported by this transport");
+    }
+    this.#client.setDialogPolicy(policy);
+  }
+
   async listTargets() { return this.tabs.listTargets(); }
 
   async attachPage(targetId) {
