@@ -41,6 +41,9 @@ test("pipe transport drives Chromium with zero listening TCP ports", { skip: !SH
     const page = (await createAgentTabs(connection).create("about:blank")).page;
     await page.goto("https://example.com");
     assert.equal(await page.title(), "Example Domain");
+    // goto() resolves on the content probe; the committed URL lands with the main-frame
+    // navigation event, which can trail the probe under load. Wait for that state.
+    await page.waitForURL("https://example.com/", { timeout: 10_000 });
     assert.equal(page.url(), "https://example.com/");
 
     const snapshot = await page.snapshot();
