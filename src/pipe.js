@@ -38,10 +38,11 @@ export class PipeCdpClient {
   #browserArgs;
   #spawnOptions;
   #stdioTail = "";
+  #dialogPolicy = { accept: true };
   transportEvents = new Emittery();
   logId;
 
-  constructor({ browserPath, browserArgs = [], spawnOptions = {}, commandTimeoutMs, readinessTimeoutMs, logId }) {
+  constructor({ browserPath, browserArgs = [], spawnOptions = {}, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy }) {
     if (!browserPath) throw new TypeError("PipeCdpClient requires browserPath");
     this.#browserPath = browserPath;
     this.#browserArgs = browserArgs;
@@ -49,11 +50,17 @@ export class PipeCdpClient {
     this.#commandTimeoutMs = commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
     this.#readinessTimeoutMs = readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
     this.logId = logId ?? `cdp-pipe-${Date.now()}`;
+    if (dialogPolicy !== undefined) this.#dialogPolicy = dialogPolicy;
   }
 
   get isConnected() { return this.#connected; }
   get isHeadless() { return this.#browserArgs.some(arg => /^--headless(?:=|$)/.test(arg)); }
   get childProcess() { return this.#child; }
+  get dialogPolicy() { return this.#dialogPolicy; }
+
+  setDialogPolicy(policy) {
+    this.#dialogPolicy = policy ?? { accept: true };
+  }
 
   async ensureConnected() {
     if (this.#connected) return;
@@ -188,11 +195,11 @@ export class PipeCdpClient {
       if (raw.length === 0) continue;
       let msg;
       try { msg = JSON.parse(raw); } catch { continue; }
-      this.#route(msg);
+      this._handleTransportMessage(msg);
     }
   }
 
-  #route(msg) {
+  _handleTransportMessage(msg) {
     if (typeof msg.id === "number") {
       const entry = this.#pending.get(msg.id);
       if (!entry) return;
@@ -209,10 +216,41 @@ export class PipeCdpClient {
       return;
     }
     if (typeof msg.method === "string") {
-      if (msg.method === "Page.javascriptDialogOpening" && msg.sessionId) {
-        this.send("Page.handleJavaScriptDialog", { accept: true }, msg.sessionId).catch(() => {});
-      }
+      const handled = msg.method === "Page.javascriptDialogOpening" && msg.sessionId
+        ? this.#handleJavaScriptDialog(msg).catch(() => {})
+        : undefined;
       this.#events.emit(msg.method, { data: { payload: msg.params, meta: { sessionId: msg.sessionId } } }).catch(() => {});
+      return handled;
+    }
+  }
+
+  async #handleJavaScriptDialog(msg) {
+    const params = await this.#resolveDialogPolicy(msg.params);
+    await this.send("Page.handleJavaScriptDialog", params, msg.sessionId);
+  }
+
+  async #resolveDialogPolicy(params = {}) {
+    const fallback = { accept: true };
+    try {
+      const policy = this.#dialogPolicy;
+      let result = policy;
+      if (typeof policy === "function") {
+        result = await policy({
+          type: params.type,
+          message: params.message,
+          defaultPrompt: params.defaultPrompt ?? "",
+          url: params.url,
+        });
+      }
+      if (typeof result === "boolean") return { accept: result };
+      if (result && typeof result === "object") {
+        const decision = { accept: result.accept !== false };
+        if (result.promptText !== undefined) decision.promptText = result.promptText;
+        return decision;
+      }
+      return fallback;
+    } catch {
+      return fallback;
     }
   }
 
@@ -225,8 +263,8 @@ export class PipeCdpClient {
   }
 }
 
-export async function connectPipe({ browserPath, browserArgs = [], spawnOptions, storageRoot, commandTimeoutMs, readinessTimeoutMs, logId } = {}) {
-  const client = new PipeCdpClient({ browserPath, browserArgs, spawnOptions, commandTimeoutMs, readinessTimeoutMs, logId });
+export async function connectPipe({ browserPath, browserArgs = [], spawnOptions, storageRoot, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy } = {}) {
+  const client = new PipeCdpClient({ browserPath, browserArgs, spawnOptions, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy });
   await client.ensureConnected();
   const connection = new BrowserConnection(client, { storageRoot });
   await connection.initialize();
