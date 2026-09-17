@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Human handoff fixture</title>
+</head>
+<body>
+  <main>
+    <h1>Substantial text content for the readiness probe</h1>
+    <p>Human handoff live fixture with enough text to look interactive.</p>
+    <a href="https://example.com">link</a>
+  </main>
+  <script>
+    setTimeout(() => {
+      const ready = document.createElement("div");
+      ready.id = "ready";
+      ready.textContent = "ready";
+      document.body.appendChild(ready);
+    }, 200);
+  </script>
+</body>
+</html>
