@@ -29,6 +29,12 @@ console.log(compactSnapshot(await page.snapshot()));
 await browser.close();
 ```
 
+## Runtime
+
+Bun >= 1.4 is recommended; Node >= 20 is supported. Run the default suite with
+`bun test` (or `bun run test`) and the Node runner with `bun run test:node`.
+Integration tests need a Chromium headless shell from Playwright's cache.
+
 ## Persistent CloakBrowser profiles
 
 For long-lived authenticated workflows, use a stable CloakBrowser

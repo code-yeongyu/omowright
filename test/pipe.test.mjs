@@ -31,7 +31,7 @@ test("pipe transport does not leak browser stdout/stderr to the parent tty", asy
   assert.ok(!stdout.includes("fake-browser stdout noise"), `browser stdout leaked to parent:\n${stdout}`);
 });
 
-test("readiness failure surfaces the drained browser stdio tail", async () => {
+test("readiness failure surfaces the drained browser stdio tail", { timeout: 15_000 }, async () => {
   const client = new PipeCdpClient({
     browserPath: process.execPath,
     browserArgs: [fixture],

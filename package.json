@@ -5,7 +5,8 @@
   "description": "OmOWright browser automation for standard Chromium CDP endpoints.",
   "license": "UNLICENSED-RESEARCH-EXTRACTION",
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "bun": ">=1.4"
   },
   "bin": {
     "omowright-cloak": "./bin/omowright-cloak.mjs"
@@ -14,8 +15,10 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "test": "node --test test/branding.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs test/skill-docs.test.mjs",
-    "test:cloak-profile": "node --test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs"
+    "test": "bun test test/branding.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs test/skill-docs.test.mjs",
+    "test:node": "node --test test/branding.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs test/skill-docs.test.mjs",
+    "test:cloak-profile": "node --test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs",
+    "test:cloak-profile:bun": "bun test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs"
   },
   "dependencies": {
     "ws": "^8.18.3",
