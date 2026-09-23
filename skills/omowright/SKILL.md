@@ -1,15 +1,25 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and stealth via CloakBrowser as the default engine, with zero exposed CDP ports. MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, stealth via CloakBrowser as the default owned engine with zero exposed CDP ports, and an attached engine that drives the user's own signed-in browser through BrowserSkill (connectBrowserSkill, bskSnapshot, one-click onboarding via bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
 
-Browser automation as a code library — no external CLI, no daemon, no open CDP
-port. Install it with `bun add github:code-yeongyu/omowright` (or import it by
-the path of a local checkout). Bun >= 1.4 recommended, Node >= 22 supported.
+Browser automation as a code library. Install it with
+`bun add github:code-yeongyu/omowright` (or import it by the path of a local
+checkout). Bun >= 1.4 recommended, Node >= 22 supported.
 
-## Core loop
+Two engines, one library:
+
+| Engine | Use when | Entry point |
+|---|---|---|
+| **Owned** (default) | scraping, WAF/bot-scored targets, headless, anything that must not touch the user's profile | `connectPipe` / `connectCloakProfile` — no CLI, no daemon, no open CDP port |
+| **Attached** | the task needs the user's logged-in sessions, cookies, or open tabs | `connectBrowserSkill` — stock BrowserSkill daemon + extension; `references/browserskill.md` |
+
+Never substitute one for the other silently: if the attached engine is not set
+up, run `bskOnboard()` and tell the user its single remaining step.
+
+## Core loop (owned engine)
 
 ```js
 const { connectPipe, compactSnapshot } = await import("omowright");
@@ -89,6 +99,7 @@ screenshot — coordinates read off an unpinned screenshot are stale.
 
 | Task | Read |
 |---|---|
+| The user's own signed-in browser and tabs, BrowserSkill sessions, trace-free `bskSnapshot`, one-click extension onboarding | `references/browserskill.md` |
 | Visual browsing, coordinate UI, viewport pinning, extension popups | `presets/visual-browse/SKILL.md` — consider delegating, below |
 | CAPTCHA (checkbox, slider, text OCR, image grid) | `presets/captcha/SKILL.md` — consider delegating, below |
 | WAF/Cloudflare/bot-detection pages, CloakBrowser, cookie rules | `references/stealth.md` |

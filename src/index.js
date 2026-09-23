@@ -54,3 +54,17 @@ export { createNetworkSnoop } from "./network-snoop.js";
 export { createRoutes } from "./routes.js";
 export { collectWhileScrolling } from "./scroll-collect.js";
 export { createTrace } from "./trace.js";
+export { BskIpcClient, BskRpcError, readDaemonInfo, resolveBskHome } from "./bsk/ipc-client.js";
+export { BskSession } from "./bsk/session.js";
+export { connectBrowserSkill, listBrowsers } from "./bsk/connect.js";
+export { bskSnapshot, buildSnapshotExpression } from "./bsk/snapshot.js";
+export {
+  BROWSERSKILL_EXTENSION_IDS,
+  STORE_PAGE_URLS,
+  detectBrowsers,
+  externalExtensionEntry,
+  registerExternalExtension,
+  unregisterExternalExtension,
+} from "./bsk/external-extension.js";
+export { installBskCli } from "./bsk/install-cli.js";
+export { bskDoctor, bskOnboard } from "./bsk/onboard.js";
