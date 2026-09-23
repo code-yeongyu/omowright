@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>bsk snapshot fixture</title></head>
+<body>
+  <main>
+    <h1>Fixture for the trace-free snapshot</h1>
+    <p>This page watches itself: any attribute or child-list mutation is counted, and it reports whether an automation global appeared.</p>
+    <nav aria-label="Primary">
+      <a id="home" href="#home">Home</a>
+      <a href="#docs">Docs</a>
+      <a href="#docs">Docs</a>
+    </nav>
+    <form>
+      <label for="q">Search</label>
+      <input id="q" name="q" placeholder="Search the docs">
+      <button type="button">Go</button>
+      <button type="button">Go</button>
+    </form>
+    <div id="host"></div>
+  </main>
+  <script>
+    var host = document.getElementById("host");
+    var root = host.attachShadow({ mode: "open" });
+    root.innerHTML = '<button type="button">Inside shadow</button>';
+    window.__fixtureMutations = 0;
+    window.__fixtureMutationLog = [];
+    new MutationObserver(function (records) {
+      window.__fixtureMutations += records.length;
+      records.forEach(function (r) {
+        window.__fixtureMutationLog.push(r.type + ":" + r.target.nodeName + ":" + (r.attributeName || ""));
+      });
+    }).observe(document.documentElement, { attributes: true, childList: true, subtree: true, characterData: true });
+    window.__fixtureClicks = [];
+    document.addEventListener("click", function (event) { window.__fixtureClicks.push(event.target.textContent.trim()); }, true);
+  </script>
+</body>
+</html>
