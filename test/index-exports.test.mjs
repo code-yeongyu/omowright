@@ -17,7 +17,22 @@ const FUNCTION_EXPORTS = [
   "snapshotWithLayers",
   "emulate",
   "createRoutes",
+  "connectBrowserSkill",
+  "listBrowsers",
+  "bskSnapshot",
+  "buildSnapshotExpression",
+  "detectBrowsers",
+  "externalExtensionEntry",
+  "registerExternalExtension",
+  "unregisterExternalExtension",
+  "installBskCli",
+  "bskDoctor",
+  "bskOnboard",
+  "readDaemonInfo",
+  "resolveBskHome",
 ];
+
+const CLASS_EXPORTS = ["BskIpcClient", "BskRpcError", "BskSession"];
 
 test("package entrypoint exports the new public surfaces", () => {
   for (const name of FUNCTION_EXPORTS) {
@@ -25,4 +40,10 @@ test("package entrypoint exports the new public surfaces", () => {
   }
   assert.equal(typeof api.DEVICE_PRESETS, "object");
   assert.ok(api.DEVICE_PRESETS && !Array.isArray(api.DEVICE_PRESETS));
+  for (const name of CLASS_EXPORTS) {
+    assert.equal(typeof api[name], "function", name);
+    assert.ok(api[name].prototype, `${name} is a class`);
+  }
+  assert.equal(api.BROWSERSKILL_EXTENSION_IDS.chrome, "hhcmgoofomhgciiibhipgmgkgnoenaoi");
+  assert.equal(typeof api.STORE_PAGE_URLS.edge, "string");
 });

@@ -110,10 +110,39 @@ loop; the module files next to it are implementation detail.
   `src/dialog-policy.js`: `normalizeDialogPolicy(policy)`,
   `resolveDialogAction(policy, dialogParams)`. See "Dialogs" below.
 
+## Attached engine (BrowserSkill)
+
+- `connectBrowserSkill({ name, browser, width, height, focused, home, sockPath,
+  autoStart, timeoutMs })`: starts a session in the user's own browser through
+  the BrowserSkill daemon's IPC socket and returns a `BskSession`. Throws
+  `BskRpcError` `no_browser_connected` when no extension is attached; never
+  launches a browser of its own.
+- `BskSession`: `navigate`, `back`, `forward`, `reload`, `observe`, `snapshot`,
+  `getHtml`, `screenshot({ ref, fullPage })`, `click`, `hover`, `fill`,
+  `press`, `select`, `focus`, `blur`, `scrollTo`, `wheel`, `evaluate`,
+  `tabList`, `tabCreate`, `tabClose`, `tabSelect`, `tabBorrow`, `tabReturn`,
+  `waitForNavigation`, `requestHelp`, `console`, `network`, `resize`,
+  `emulate`, `stop()`. Targets: `"e3"` / `"@e3"` (daemon refs), a CSS
+  selector, or `{ captureId, x, y }`.
+- `bskSnapshot(session, options)`: OmOWright `{ tree, refs, css }` from an
+  attached tab with no page global and no DOM mutation; `css[ref]` is `null`
+  inside shadow roots.
+- `bskDoctor()` / `bskOnboard({ onHumanStep })`: CLI install (official
+  installer, rc-file changes reverted), daemon start, Web Store extension
+  registration through Chrome's External Extensions (`registerExternalExtension`
+  / `unregisterExternalExtension`, `detectBrowsers`), then a wait on
+  `system.status{wait_for_browser_ms}`. The one human step is returned as
+  `humanStep`.
+- `BskIpcClient` / `BskRpcError` / `readDaemonInfo` / `resolveBskHome`: the
+  raw JSON Lines IPC client (`call`, `callWithHandle`, `cancel`) for daemon
+  methods the session does not wrap.
+
 ## Rules
 
 - Ref ids are virtual: pass them straight to `page.locator('e1')`, never into
-  CSS selectors. Every new snapshot invalidates earlier ref ids.
+  CSS selectors. Every new snapshot invalidates earlier ref ids. Attached-engine
+  refs from `session.observe()` are `@eN` strings for `session.click("@e3")`;
+  `bskSnapshot` refs are clicked through `css[ref]`.
 - `page.context()` and raw CDP `_sendToTarget` exist but are escape hatches;
   prefer the tools above.
 

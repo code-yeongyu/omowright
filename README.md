@@ -122,6 +122,13 @@ sleep to tune.
   OCRs text regions (macOS Vision built in, any `ocr(buffer)` pluggable).
 - **Stealth profiles.** `connectCloakProfile()` pins a CloakBrowser fingerprint
   seed to a persistent profile and refuses to change identity silently.
+- **The user's own browser.** `connectBrowserSkill()` drives the browser the
+  user is already signed into through [BrowserSkill](https://github.com/Tencent/BrowserSkill)
+  (stock daemon and Web Store extension, spoken to over its IPC socket — no
+  process per call). `bskSnapshot()` returns the same `{ tree, refs }` shape
+  without leaving a global or a DOM attribute behind, and `bskOnboard()`
+  installs the CLI, starts the daemon and registers the extension so the only
+  thing left for the user is one **Enable** click.
 
 ## Install
 
@@ -139,7 +146,8 @@ Chrome, a Chromium headless shell, or CloakBrowser.
 references) that routes a model through the library: the snapshot/ref loop,
 the obstacle ladder (refs, overlays, coordinates, viewport pin, CAPTCHA,
 browser log), stealth profiles, eval-kernel usage, frames and human handoff,
-and reading a 1Password web-vault item safely. Task presets live in `presets/`:
+the attached BrowserSkill engine, and reading a 1Password web-vault item
+safely. Task presets live in `presets/`:
 
 | Preset | Covers |
 | --- | --- |
