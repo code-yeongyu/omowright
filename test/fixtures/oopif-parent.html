@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>oopif parent</title></head>
+<body>
+<form>
+  <button type="button" id="outside">Outside</button>
+  <iframe id="child" src="__CHILD_URL__" width="240" height="120"></iframe>
+</form>
+<script>
+  // Diagnostic only: records clicks that the browser routed to the parent frame instead
+  // of the out-of-process child, so a failing assertion can say where the click landed.
+  document.addEventListener("click", event => {
+    document.body.setAttribute("data-parent-click", `${event.clientX},${event.clientY},${event.target.tagName}`);
+  }, true);
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+{
+  "name": "omowright",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "description": "OmOWright browser automation for standard Chromium CDP endpoints.",
+  "license": "UNLICENSED",
+  "keywords": [
+    "browser-automation",
+    "cdp",
+    "chrome-devtools-protocol",
+    "chromium",
+    "ai-agent",
+    "accessibility-snapshot",
+    "llm",
+    "bun"
+  ],
+  "homepage": "https://github.com/code-yeongyu/omowright#readme",
+  "bugs": {
+    "url": "https://github.com/code-yeongyu/omowright/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/code-yeongyu/omowright.git"
+  },
+  "engines": {
+    "node": ">=20",
+    "bun": ">=1.4"
+  },
+  "bin": {
+    "omowright-cloak": "./bin/omowright-cloak.mjs"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "bun test test/branding.test.mjs test/hygiene.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs test/skill-docs.test.mjs test/dialogs.test.mjs test/emulate.test.mjs test/frames-snapshot.test.mjs test/frames-snapshot.live-attach.test.mjs test/har.test.mjs test/human-handoff.test.mjs test/index-exports.test.mjs test/layers.test.mjs test/network-snoop.test.mjs test/routes.test.mjs test/routes.live.test.mjs test/scroll-collect.test.mjs test/trace.test.mjs test/trace.live.test.mjs",
+    "test:node": "node --test test/branding.test.mjs test/hygiene.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs test/skill-docs.test.mjs test/dialogs.test.mjs test/emulate.test.mjs test/frames-snapshot.test.mjs test/frames-snapshot.live-attach.test.mjs test/har.test.mjs test/human-handoff.test.mjs test/index-exports.test.mjs test/layers.test.mjs test/network-snoop.test.mjs test/routes.test.mjs test/routes.live.test.mjs test/scroll-collect.test.mjs test/trace.test.mjs test/trace.live.test.mjs",
+    "test:cloak-profile": "node --test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs",
+    "test:cloak-profile:bun": "bun test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.3",
+    "zod": "^4.1.5"
+  }
+}
