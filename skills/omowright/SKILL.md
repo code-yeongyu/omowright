@@ -7,7 +7,7 @@ description: "The default code-driven browser path for interactive browsing work
 
 Browser automation as a code library — no external CLI, no daemon, no open CDP
 port. Install it with `bun add github:code-yeongyu/omowright` (or import it by
-the path of a local checkout). Bun >= 1.4 recommended, Node >= 20 supported.
+the path of a local checkout). Bun >= 1.4 recommended, Node >= 22 supported.
 
 ## Core loop
 

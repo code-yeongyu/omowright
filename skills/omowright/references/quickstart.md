@@ -2,7 +2,7 @@
 
 ## Runtime
 
-Bun >= 1.4 recommended (`bun test` runs the suite as-is); Node >= 20 supported
+Bun >= 1.4 recommended (`bun test` runs the suite as-is); Node >= 22 supported
 (`node --test`). Same source, no build step.
 
 ## Two transports

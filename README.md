@@ -32,7 +32,7 @@ this repository:
 bun add github:code-yeongyu/omowright
 ```
 
-Bun >= 1.4 is recommended; Node >= 20 is supported. Runtime dependencies are
+Bun >= 1.4 is recommended; Node >= 22 is supported. Runtime dependencies are
 `ws` and `zod`. OmOWright never downloads a browser; point it at any Chromium,
 Chrome, a Chromium headless shell, or CloakBrowser.
 

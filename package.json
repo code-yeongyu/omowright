@@ -24,7 +24,7 @@
     "url": "git+https://github.com/code-yeongyu/omowright.git"
   },
   "engines": {
-    "node": ">=20",
+    "node": ">=22",
     "bun": ">=1.4"
   },
   "bin": {
