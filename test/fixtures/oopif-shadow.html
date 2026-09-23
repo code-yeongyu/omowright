@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>oopif shadow dom</title></head>
+<body>
+<div id="open-host"></div>
+<div id="closed-host"></div>
+<button type="button" id="light">Light</button>
+<script>
+  const openRoot = document.getElementById("open-host").attachShadow({ mode: "open" });
+  openRoot.innerHTML = '<button type="button" id="shadow">Shadow</button>';
+  openRoot.getElementById("shadow").addEventListener("click", () => {
+    document.body.setAttribute("data-shadow-clicked", "1");
+  });
+  const closedRoot = document.getElementById("closed-host").attachShadow({ mode: "closed" });
+  closedRoot.innerHTML = '<button type="button" id="closed">Closed</button>';
+</script>
+</body>
+</html>

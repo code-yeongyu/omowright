@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>oopif turnstile shape</title></head>
+<body>
+<form>
+  <button type="button" id="outside">Outside</button>
+</form>
+<div id="widget"></div>
+<script>
+  // Cloudflare Turnstile shape: a closed shadow root whose only child is the
+  // cross-origin iframe, so the parent snapshot engine cannot see the iframe.
+  const root = document.getElementById("widget").attachShadow({ mode: "closed" });
+  const frame = document.createElement("iframe");
+  frame.src = "__CHILD_URL__";
+  frame.width = "240";
+  frame.height = "120";
+  root.appendChild(frame);
+  // Diagnostic only: see oopif-parent.html.
+  document.addEventListener("click", event => {
+    document.body.setAttribute("data-parent-click", `${event.clientX},${event.clientY},${event.target.tagName}`);
+  }, true);
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+name: Lint Workflows
+
+on:
+  push:
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-workflows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: actionlint + summary rule
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.10/scripts/download-actionlint.bash)
+
+      - name: Run actionlint
+        run: ./actionlint -color -shellcheck=""
+
+      - name: Enforce mandatory workflow summary
+        shell: bash
+        run: |
+          fail=0
+          shopt -s nullglob
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            if ! grep -q 'GITHUB_STEP_SUMMARY' "$f"; then
+              echo "::error file=$f::workflow writes no \$GITHUB_STEP_SUMMARY (a job summary is mandatory)"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Lint Workflows — ${{ job.status }}"
+            echo
+            echo "actionlint and the mandatory step-summary rule were checked on every workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
