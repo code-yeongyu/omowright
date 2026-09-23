@@ -108,7 +108,10 @@ test("captcha clicks checkbox, drags slider, and OCRs text region", { skip: !SHE
   try {
     const page = (await createAgentTabs(connection).create("about:blank")).page;
     await page.goto(FIXTURE);
-    const captcha = createCaptcha(page);
+    // macOS runs the real Vision OCR; elsewhere a recording OCR proves readText hands over the cropped PNG.
+    const ocrCalls = [];
+    const ocr = process.platform === "darwin" ? undefined : async (png) => { ocrCalls.push(png); return ""; };
+    const captcha = createCaptcha(page, { ocr });
 
     const box = await boundsOf(page, "#captcha-box");
     const tree = await captcha.click({ x: box.x, y: box.y, width: 30, height: box.height }, { settleMs: 100 });
@@ -128,8 +131,18 @@ test("captcha clicks checkbox, drags slider, and OCRs text region", { skip: !SHE
 
     const textBounds = await boundsOf(page, "#captcha-text");
     const ocrText = await captcha.readText(textBounds);
-    assert.ok(ocrText, "OCR returned text");
-    assert.equal(ocrText.replace(/[^A-Z0-9]/gi, "").toUpperCase(), "XK7M2");
+    if (ocr) {
+      assert.equal(ocrCalls.length, 1, "readText calls the OCR once");
+      const png = ocrCalls[0];
+      assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "OCR receives a PNG");
+      const scale = png.readUInt32BE(16) / textBounds.width;
+      assert.ok(Math.abs(png.readUInt32BE(20) / textBounds.height - scale) < 0.05, "PNG is cropped to the text bounds");
+      const full = await page.screenshot({ type: "png" });
+      assert.ok(png.readUInt32BE(16) < full.readUInt32BE(16), "PNG is a crop, not the full viewport");
+    } else {
+      assert.ok(ocrText, "OCR returned text");
+      assert.equal(ocrText.replace(/[^A-Z0-9]/gi, "").toUpperCase(), "XK7M2");
+    }
   } finally {
     await cleanup();
   }

@@ -32,7 +32,8 @@ test("resolveCloakProfile creates and reuses a fixed fingerprint seed", async ()
       "--disable-session-crashed-bubble",
       `--user-data-dir=${profileDir}`,
       "--fingerprint=31415",
-      "--fingerprint-platform=macos",
+      // CloakBrowser ships macOS and Windows fingerprints; every non-macOS host presents as Windows.
+      `--fingerprint-platform=${process.platform === "darwin" ? "macos" : "windows"}`,
     ]);
 
     const metadataPath = path.join(profileDir, ".omowright-cloak.json");

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, globSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, globSync, readdirSync, readlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -19,6 +19,33 @@ function findHeadlessShell() {
 
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
 
+// Linux reads /proc directly (lsof is often absent there); elsewhere lsof exits 1 when nothing matches.
+function listeningTcpSockets(pid) {
+  if (process.platform !== "linux") {
+    try {
+      return execFileSync("lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", String(pid)], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    } catch (error) {
+      assert.equal(error.status, 1, `lsof failed: ${error.message}`);
+      return [];
+    }
+  }
+  const inodes = new Set();
+  for (const fd of readdirSync(`/proc/${pid}/fd`)) {
+    let target = "";
+    try { target = readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; } // fd closed since readdir
+    const match = /^socket:\[(\d+)\]$/.exec(target);
+    if (match) inodes.add(match[1]);
+  }
+  const listening = [];
+  for (const table of ["tcp", "tcp6"]) {
+    for (const row of readFileSync(`/proc/${pid}/net/${table}`, "utf8").trim().split("\n").slice(1)) {
+      const cols = row.trim().split(/\s+/);
+      if (cols[3] === "0A" && inodes.has(cols[9])) listening.push(`${table} ${cols[1]}`);
+    }
+  }
+  return listening;
+}
+
 test("pipe transport drives Chromium with zero listening TCP ports", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-test-"));
   const connection = await connectPipe({
@@ -30,13 +57,7 @@ test("pipe transport drives Chromium with zero listening TCP ports", { skip: !SH
     const pid = connection.browserProcess?.pid;
     assert.ok(pid > 0, "browser process pid");
 
-    let listenOutput = "";
-    try {
-      listenOutput = execFileSync("lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", String(pid)], { encoding: "utf8" });
-    } catch (error) {
-      assert.equal(error.status, 1, "lsof found no listening ports");
-    }
-    assert.equal(listenOutput.trim(), "", "browser must not listen on any TCP port");
+    assert.deepEqual(listeningTcpSockets(pid), [], "browser must not listen on any TCP port");
 
     const page = (await createAgentTabs(connection).create("about:blank")).page;
     await page.goto("https://example.com");
