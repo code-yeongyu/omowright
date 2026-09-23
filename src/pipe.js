@@ -87,6 +87,11 @@ export class PipeCdpClient {
     this.#writeStream = this.#child.stdio[3];
     this.#readStream = this.#child.stdio[4];
     this.#readStream.on("data", chunk => this.#onData(chunk));
+    // A killed browser resets its end of the CDP pipes (ECONNRESET/EPIPE on Linux);
+    // without a listener Node rethrows that as an uncaught exception in the caller.
+    for (const stream of [this.#writeStream, this.#readStream]) {
+      stream.on("error", error => this.#failAll(Error(`CDP pipe error: ${error.code ?? error.message}`)));
+    }
     this.#child.on("exit", () => {
       this.#connected = false;
       this.#failAll(Error("CDP pipe browser exited"));
