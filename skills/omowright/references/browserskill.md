@@ -75,20 +75,49 @@ bot detection; for WAF-heavy targets use the owned engine with CloakBrowser
 
 ```js
 const { bskDoctor, bskOnboard } = await import("omowright");
-const report = await bskDoctor();            // {cli, daemon, browsers, browsersConnected, ready, nextStep}
+const report = await bskDoctor();            // {cli, daemon, browsers, primary, identification, browsersConnected, ready, nextStep}
 if (!report.ready) {
-  const result = await bskOnboard({ onHumanStep: (s) => console.log(s.step) });
-  // result.humanStep is the single thing to tell the user, e.g.
-  // 'Quit Chrome completely and open it again; a dialog offers to enable "BrowserSkill" — click Enable.'
+  const result = await bskOnboard({ browser: knownBrowserOrUndefined, onHumanStep: (s) => console.log(s.step) });
+  // result.needsChoice === true: nothing was registered; ask the user which
+  //   browser they use (result.identification.candidates), then call again with
+  //   { browser: "<id>" }.
+  // otherwise result.humanStep is the single thing to tell the user, e.g.
+  // 'Quit Aside completely and open it again; a dialog offers to enable "BrowserSkill" — click Enable.'
 }
 ```
+
+### Which browser gets the extension
+
+Exactly one: the browser the user actually uses. A profile directory on disk
+proves nothing — Chrome leaves one behind after a single launch — so
+`identifyBrowser` ranks the installed Chromium-family browsers (Chrome, Edge,
+Brave, Chromium, Arc, Dia, Vivaldi, Opera, Comet, Aside, Naver Whale) by
+usage signals from `probeBrowserSignals`:
+
+| Signal | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Default browser | LaunchServices `https` handler | `xdg-settings get default-web-browser` | `UserChoice` ProgId |
+| Running now | the app bundle in `/Applications` or `~/Applications` (automation builds elsewhere do not count) | process name | `tasklist` image |
+| Recent use | `Local State` / `Default/History` mtime within 7 days | same | same |
+
+The decision, in order: an explicit `browser` option or `OMOWRIGHT_BROWSER`;
+the default browser when it is also in use, or when nothing else is; the only
+browser in use when no default can be read. Everything else — the default is
+Safari or Firefox, the default is idle while another browser runs, several
+browsers are in use, or nothing shows use — returns `needsChoice: true` with
+every candidate and its signals, and registers nothing. Ask the user; if the
+agent keeps a memory, look there first and record the answer.
+
+`bskDoctor()` reports the same `identification` plus `registeredElsewhere`:
+browsers that still carry an entry from an older onboarding. It never removes
+them — deleting an external-extension entry uninstalls an extension the user
+may have enabled; `unregisterExternalExtension({ browser })` does it on request.
 
 `bskOnboard` runs, in order: the official `install.sh` / `install.ps1` into
 `~/.local/bin` (any PATH lines the installer appends to shell rc files are
 reverted — the library calls the binary by absolute path); `bsk status` to
-start the daemon; then, for every Chromium-family browser profile it finds
-(Chrome, Edge, Brave, Chromium), Chrome's external-extension registration for
-the Web Store listing:
+start the daemon; then, for the identified browser only, Chrome's
+external-extension registration for the Web Store listing:
 
 | Platform | Where the entry goes | What the user does |
 | --- | --- | --- |
@@ -96,6 +125,7 @@ the Web Store listing:
 | Windows | `HKCU\Software\<vendor>\<browser>\Extensions\<id>` (`reg add`, no admin) | click **Enable** on the toolbar badge; no restart |
 | Linux (Chromium) | `<user data dir>/External Extensions/<id>.json` | relaunch; installs silently |
 | Linux (Chrome/Edge/Brave) | `/opt/google/chrome/extensions/<id>.json` etc. — needs root | otherwise: open the store link and click Add |
+| Opera, and Vivaldi/Whale off macOS | no external-extension path | open the store link in that browser and click Add |
 
 Then it waits on `system.status{wait_for_browser_ms}` until the extension
 connects. Tell the user exactly `result.humanStep`, nothing more. If the user

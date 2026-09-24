@@ -127,12 +127,18 @@ loop; the module files next to it are implementation detail.
 - `bskSnapshot(session, options)`: OmOWright `{ tree, refs, css }` from an
   attached tab with no page global and no DOM mutation; `css[ref]` is `null`
   inside shadow roots.
-- `bskDoctor()` / `bskOnboard({ onHumanStep })`: CLI install (official
-  installer, rc-file changes reverted), daemon start, Web Store extension
-  registration through Chrome's External Extensions (`registerExternalExtension`
-  / `unregisterExternalExtension`, `detectBrowsers`), then a wait on
+- `bskDoctor({ browser })` / `bskOnboard({ browser, onHumanStep })`: CLI install
+  (official installer, rc-file changes reverted), daemon start, then Web Store
+  extension registration through Chrome's External Extensions
+  (`registerExternalExtension` / `unregisterExternalExtension`) for the one
+  browser the user actually uses, then a wait on
   `system.status{wait_for_browser_ms}`. The one human step is returned as
-  `humanStep`.
+  `humanStep`; `needsChoice: true` means nothing was registered and the user
+  has to name the browser.
+- `identifyBrowser({ catalog, signals, explicit })` / `probeBrowserSignals()` /
+  `catalogBrowsers()` / `detectBrowsers()`: the browser choice on its own —
+  default browser, running process and recent-use signals, ranked; ambiguity
+  returns `needsChoice` instead of a guess.
 - `BskIpcClient` / `BskRpcError` / `readDaemonInfo` / `resolveBskHome`: the
   raw JSON Lines IPC client (`call`, `callWithHandle`, `cancel`) for daemon
   methods the session does not wrap.

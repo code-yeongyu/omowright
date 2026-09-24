@@ -17,7 +17,9 @@ Two engines, one library:
 | **Attached** | the task needs the user's logged-in sessions, cookies, or open tabs | `connectBrowserSkill` — stock BrowserSkill daemon + extension; `references/browserskill.md` |
 
 Never substitute one for the other silently: if the attached engine is not set
-up, run `bskOnboard()` and tell the user its single remaining step.
+up, run `bskOnboard()` and tell the user its single remaining step. It installs
+the extension only into the browser the user actually uses; when it returns
+`needsChoice`, ask which browser that is and pass `{ browser: "<id>" }`.
 
 ## Core loop (owned engine)
 
