@@ -8,15 +8,20 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { BROWSERSKILL_EXTENSION_IDS, STORE_PAGE_URLS, STORE_UPDATE_URLS } from "./browsers.js";
 
-export { BROWSERSKILL_EXTENSION_IDS, STORE_PAGE_URLS, STORE_UPDATE_URLS, detectBrowsers } from "./browsers.js";
+export { BROWSERSKILL_EXTENSION_IDS, STORE_PAGE_URLS, STORE_UPDATE_URLS, catalogBrowsers, detectBrowsers } from "./browsers.js";
 
 const ENABLE_STEP = (browser) => `Quit ${browser} completely and open it again; a dialog offers to enable "BrowserSkill" — click Enable.`;
 const BADGE_STEP = (browser) => `In ${browser}, open the menu (the badge on the toolbar) and enable "BrowserSkill" when prompted; no restart is needed.`;
 
+const storeStep = (browser, label) => `Open ${STORE_PAGE_URLS[browser.store]} in ${label} and click the "Add" button.`;
+
 export function externalExtensionEntry({ platform = process.platform, browser }) {
   const id = BROWSERSKILL_EXTENSION_IDS[browser.store];
   const updateUrl = STORE_UPDATE_URLS[browser.store];
-  const label = browser.id.charAt(0).toUpperCase() + browser.id.slice(1);
+  const label = browser.label ?? browser.id.charAt(0).toUpperCase() + browser.id.slice(1);
+  if (browser.externalExtensions === false) {
+    return { kind: "store", needsRestart: false, storeUrl: STORE_PAGE_URLS[browser.store], humanStep: storeStep(browser, label) };
+  }
   if (platform === "win32") {
     const key = `${browser.registryKey}\\${id}`;
     return {
@@ -65,9 +70,11 @@ function runRegDefault(args) {
 export async function registerExternalExtension({ platform = process.platform, browser, writeFile = writeFileSync, readFile = readFileSync, runReg = runRegDefault } = {}) {
   const entry = externalExtensionEntry({ platform, browser });
   const id = BROWSERSKILL_EXTENSION_IDS[browser.store];
-  const storeStep = `Open ${entry.storeUrl} in ${browser.id} and click "Add to ${browser.store === "edge" ? "Edge" : "Chrome"}".`;
+  const label = browser.label ?? browser.id;
+  const storeStep = `Open ${entry.storeUrl} in ${label} and click the "Add" button.`;
+  if (entry.kind === "store") return { ...entry, registered: false, alreadyPresent: false, reason: "store_only" };
   if (isBlocklisted(browser, id, { readFile })) {
-    return { ...entry, registered: false, alreadyPresent: false, reason: "blocklisted", humanStep: `The extension was removed from ${browser.id} before, so external registration is ignored. ${storeStep}` };
+    return { ...entry, registered: false, alreadyPresent: false, reason: "blocklisted", humanStep: `The extension was removed from ${label} before, so external registration is ignored. ${storeStep}` };
   }
   if (entry.kind === "registry") {
     const result = await runReg(entry.regAddArgs);
@@ -91,6 +98,7 @@ export async function registerExternalExtension({ platform = process.platform, b
 
 export async function unregisterExternalExtension({ platform = process.platform, browser, runReg = runRegDefault } = {}) {
   const entry = externalExtensionEntry({ platform, browser });
+  if (entry.kind === "store") return { ...entry, removed: false };
   if (entry.kind === "registry") {
     const result = await runReg(entry.regDeleteArgs);
     return { ...entry, removed: result.code === 0, detail: result.stderr };

@@ -17,45 +17,93 @@ export const STORE_PAGE_URLS = Object.freeze({
   edge: `https://microsoftedge.microsoft.com/addons/detail/browserskill/${BROWSERSKILL_EXTENSION_IDS.edge}`,
 });
 
+export const NON_CHROMIUM_DEFAULTS = Object.freeze([
+  { id: "safari", label: "Safari", match: ["com.apple.safari", "safarihtml"] },
+  { id: "firefox", label: "Firefox", match: ["org.mozilla.firefox", "firefox.desktop", "firefoxurl", "firefoxhtml"] },
+  { id: "zen", label: "Zen", match: ["app.zen-browser.zen", "zen.desktop", "zenhtml"] },
+  { id: "orion", label: "Orion", match: ["com.kagi.kagimacos"] },
+]);
+
+// externalExtensions: false marks a browser whose external-extension path is unknown or not honoured;
+// onboarding hands the user that browser's store link instead of writing a file nobody reads.
 const MAC = [
-  { id: "chrome", store: "chrome", userData: "Library/Application Support/Google/Chrome", binary: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", bundleId: "com.google.Chrome" },
-  { id: "edge", store: "edge", userData: "Library/Application Support/Microsoft Edge", binary: "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge", bundleId: "com.microsoft.edgemac" },
-  { id: "brave", store: "chrome", userData: "Library/Application Support/BraveSoftware/Brave-Browser", binary: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", bundleId: "com.brave.Browser" },
-  { id: "chromium", store: "chrome", userData: "Library/Application Support/Chromium", binary: "/Applications/Chromium.app/Contents/MacOS/Chromium", bundleId: "org.chromium.Chromium" },
+  { id: "chrome", label: "Google Chrome", store: "chrome", userData: "Library/Application Support/Google/Chrome", app: "Google Chrome", bundleId: "com.google.Chrome" },
+  { id: "edge", label: "Microsoft Edge", store: "edge", userData: "Library/Application Support/Microsoft Edge", app: "Microsoft Edge", bundleId: "com.microsoft.edgemac" },
+  { id: "brave", label: "Brave", store: "chrome", userData: "Library/Application Support/BraveSoftware/Brave-Browser", app: "Brave Browser", bundleId: "com.brave.Browser" },
+  { id: "chromium", label: "Chromium", store: "chrome", userData: "Library/Application Support/Chromium", app: "Chromium", bundleId: "org.chromium.Chromium" },
+  { id: "arc", label: "Arc", store: "chrome", userData: "Library/Application Support/Arc/User Data", app: "Arc", bundleId: "company.thebrowser.Browser" },
+  { id: "dia", label: "Dia", store: "chrome", userData: "Library/Application Support/Dia/User Data", app: "Dia", bundleId: "company.thebrowser.dia" },
+  { id: "vivaldi", label: "Vivaldi", store: "chrome", userData: "Library/Application Support/Vivaldi", app: "Vivaldi", bundleId: "com.vivaldi.Vivaldi" },
+  { id: "opera", label: "Opera", store: "chrome", userData: "Library/Application Support/com.operasoftware.Opera", app: "Opera", bundleId: "com.operasoftware.Opera", externalExtensions: false },
+  { id: "comet", label: "Comet", store: "chrome", userData: "Library/Application Support/Comet", app: "Comet", bundleId: "ai.perplexity.comet" },
+  { id: "aside", label: "Aside", store: "chrome", userData: "Library/Application Support/Aside", app: "Aside", bundleId: "at.studio.AsideBrowser" },
+  { id: "whale", label: "Naver Whale", store: "chrome", userData: "Library/Application Support/Naver/Whale", app: "Naver Whale", bundleId: "com.naver.Whale" },
 ];
 
 const LINUX = [
-  { id: "chrome", store: "chrome", userData: ".config/google-chrome", binaries: ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/opt/google/chrome/chrome"], externalDir: "/opt/google/chrome/extensions", userExternalDir: false },
-  { id: "chromium", store: "chrome", userData: ".config/chromium", binaries: ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium"], externalDir: "/usr/share/chromium/extensions", userExternalDir: true },
-  { id: "edge", store: "edge", userData: ".config/microsoft-edge", binaries: ["/usr/bin/microsoft-edge", "/opt/microsoft/msedge/msedge"], externalDir: "/usr/share/microsoft-edge/extensions", userExternalDir: false },
-  { id: "brave", store: "chrome", userData: ".config/BraveSoftware/Brave-Browser", binaries: ["/usr/bin/brave-browser", "/opt/brave.com/brave/brave"], externalDir: "/usr/share/brave/extensions", userExternalDir: false },
+  { id: "chrome", label: "Google Chrome", store: "chrome", userData: ".config/google-chrome", binaries: ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/opt/google/chrome/chrome"], externalDir: "/opt/google/chrome/extensions", userExternalDir: false, desktopIds: ["google-chrome.desktop", "google-chrome-stable.desktop", "com.google.Chrome.desktop"], processNames: ["chrome", "google-chrome"] },
+  { id: "chromium", label: "Chromium", store: "chrome", userData: ".config/chromium", binaries: ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium"], externalDir: "/usr/share/chromium/extensions", userExternalDir: true, desktopIds: ["chromium.desktop", "chromium-browser.desktop", "chromium_chromium.desktop", "org.chromium.Chromium.desktop"], processNames: ["chromium", "chromium-browse"] },
+  { id: "edge", label: "Microsoft Edge", store: "edge", userData: ".config/microsoft-edge", binaries: ["/usr/bin/microsoft-edge", "/opt/microsoft/msedge/msedge"], externalDir: "/usr/share/microsoft-edge/extensions", userExternalDir: false, desktopIds: ["microsoft-edge.desktop", "microsoft-edge-stable.desktop", "com.microsoft.Edge.desktop"], processNames: ["msedge"] },
+  { id: "brave", label: "Brave", store: "chrome", userData: ".config/BraveSoftware/Brave-Browser", binaries: ["/usr/bin/brave-browser", "/opt/brave.com/brave/brave"], externalDir: "/usr/share/brave/extensions", userExternalDir: false, desktopIds: ["brave-browser.desktop", "com.brave.Browser.desktop"], processNames: ["brave"] },
+  { id: "vivaldi", label: "Vivaldi", store: "chrome", userData: ".config/vivaldi", binaries: ["/usr/bin/vivaldi", "/opt/vivaldi/vivaldi"], externalDir: null, userExternalDir: false, externalExtensions: false, desktopIds: ["vivaldi-stable.desktop", "vivaldi.desktop"], processNames: ["vivaldi-bin"] },
+  { id: "opera", label: "Opera", store: "chrome", userData: ".config/opera", binaries: ["/usr/bin/opera"], externalDir: null, userExternalDir: false, externalExtensions: false, desktopIds: ["opera.desktop"], processNames: ["opera"] },
 ];
 
 const WINDOWS = [
-  { id: "chrome", store: "chrome", userData: "Google/Chrome/User Data", registryKey: "HKCU\\Software\\Google\\Chrome\\Extensions", binaryRel: "Google/Chrome/Application/chrome.exe" },
-  { id: "edge", store: "edge", userData: "Microsoft/Edge/User Data", registryKey: "HKCU\\Software\\Microsoft\\Edge\\Extensions", binaryRel: "Microsoft/Edge/Application/msedge.exe" },
-  { id: "brave", store: "chrome", userData: "BraveSoftware/Brave-Browser/User Data", registryKey: "HKCU\\Software\\BraveSoftware\\Brave-Browser\\Extensions", binaryRel: "BraveSoftware/Brave-Browser/Application/brave.exe" },
+  { id: "chrome", label: "Google Chrome", store: "chrome", userData: "Google/Chrome/User Data", registryKey: "HKCU\\Software\\Google\\Chrome\\Extensions", binaryRel: "Google/Chrome/Application/chrome.exe", progIds: ["chromehtml"], processNames: ["chrome.exe"] },
+  { id: "edge", label: "Microsoft Edge", store: "edge", userData: "Microsoft/Edge/User Data", registryKey: "HKCU\\Software\\Microsoft\\Edge\\Extensions", binaryRel: "Microsoft/Edge/Application/msedge.exe", progIds: ["msedgehtm"], processNames: ["msedge.exe"] },
+  { id: "brave", label: "Brave", store: "chrome", userData: "BraveSoftware/Brave-Browser/User Data", registryKey: "HKCU\\Software\\BraveSoftware\\Brave-Browser\\Extensions", binaryRel: "BraveSoftware/Brave-Browser/Application/brave.exe", progIds: ["bravehtml"], processNames: ["brave.exe"] },
+  { id: "chromium", label: "Chromium", store: "chrome", userData: "Chromium/User Data", registryKey: "HKCU\\Software\\Chromium\\Extensions", binaryRel: "Chromium/Application/chrome.exe", progIds: ["chromiumhtm"], processNames: [] },
+  { id: "vivaldi", label: "Vivaldi", store: "chrome", userData: "Vivaldi/User Data", registryKey: null, externalExtensions: false, binaryRel: "Vivaldi/Application/vivaldi.exe", progIds: ["vivaldihtm"], processNames: ["vivaldi.exe"] },
+  { id: "whale", label: "Naver Whale", store: "chrome", userData: "Naver/Naver Whale/User Data", registryKey: null, externalExtensions: false, binaryRel: "Naver/Naver Whale/Application/whale.exe", progIds: ["whalehtml"], processNames: ["whale.exe"] },
 ];
 
-export function detectBrowsers({ platform = process.platform, home = homedir(), env = process.env, exists = existsSync } = {}) {
-  if (platform === "darwin") {
-    return MAC.filter((b) => exists(path.join(home, b.userData))).map((b) => ({
-      id: b.id, store: b.store, userDataDir: path.join(home, b.userData), binary: b.binary, bundleId: b.bundleId,
-    }));
-  }
-  if (platform === "linux") {
-    return LINUX.filter((b) => exists(path.join(home, b.userData))).map((b) => ({
-      id: b.id, store: b.store, userDataDir: path.join(home, b.userData),
-      binary: b.binaries.find((p) => exists(p)) ?? null, externalDir: b.externalDir, userExternalDir: b.userExternalDir,
-    }));
-  }
-  if (platform === "win32") {
-    const localAppData = env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
-    const programFiles = [env.PROGRAMFILES, env["PROGRAMFILES(X86)"], "C:\\Program Files", "C:\\Program Files (x86)"].filter(Boolean);
-    return WINDOWS.filter((b) => exists(path.join(localAppData, b.userData))).map((b) => ({
-      id: b.id, store: b.store, userDataDir: path.join(localAppData, b.userData), registryKey: b.registryKey,
-      binary: programFiles.map((root) => path.join(root, b.binaryRel)).find((p) => exists(p)) ?? null,
-    }));
-  }
+export const BROWSER_IDS = Object.freeze([...new Set([...MAC, ...LINUX, ...WINDOWS].map((b) => b.id))]);
+
+function macRow(b, home, exists) {
+  const apps = [path.join("/Applications", `${b.app}.app`), path.join(home, "Applications", `${b.app}.app`)];
+  const appPath = apps.find((p) => exists(p)) ?? null;
+  const userDataDir = path.join(home, b.userData);
+  return {
+    id: b.id, label: b.label, store: b.store, userDataDir,
+    binary: path.join(appPath ?? apps[0], "Contents", "MacOS", b.app), bundleId: b.bundleId,
+    processNames: apps.map((a) => path.join(a, "Contents", "MacOS", b.app)), defaultIds: [b.bundleId.toLowerCase()], externalExtensions: b.externalExtensions !== false,
+    installed: appPath !== null || exists(userDataDir), hasProfile: exists(userDataDir),
+  };
+}
+
+function linuxRow(b, home, exists) {
+  const userDataDir = path.join(home, b.userData);
+  const binary = b.binaries.find((p) => exists(p)) ?? null;
+  return {
+    id: b.id, label: b.label, store: b.store, userDataDir, binary,
+    externalDir: b.externalDir, userExternalDir: b.userExternalDir,
+    processNames: b.processNames, defaultIds: b.desktopIds.map((d) => d.toLowerCase()), externalExtensions: b.externalExtensions !== false,
+    installed: binary !== null || exists(userDataDir), hasProfile: exists(userDataDir),
+  };
+}
+
+function windowsRow(b, env, home, exists) {
+  const localAppData = env.LOCALAPPDATA ?? path.join(home, "AppData", "Local");
+  const programFiles = [localAppData, env.PROGRAMFILES, env["PROGRAMFILES(X86)"], "C:\\Program Files", "C:\\Program Files (x86)"].filter(Boolean);
+  const userDataDir = path.join(localAppData, b.userData);
+  const binary = programFiles.map((root) => path.join(root, b.binaryRel)).find((p) => exists(p)) ?? null;
+  return {
+    id: b.id, label: b.label, store: b.store, userDataDir, registryKey: b.registryKey, binary,
+    processNames: b.processNames, defaultIds: b.progIds, externalExtensions: b.externalExtensions !== false,
+    installed: binary !== null || exists(userDataDir), hasProfile: exists(userDataDir),
+  };
+}
+
+// Every catalog browser for the platform with installed/hasProfile flags; `detectBrowsers` keeps the
+// installed ones. Being installed says nothing about use — `identifyBrowser` ranks by usage signals.
+export function catalogBrowsers({ platform = process.platform, home = homedir(), env = process.env, exists = existsSync } = {}) {
+  if (platform === "darwin") return MAC.map((b) => macRow(b, home, exists));
+  if (platform === "linux") return LINUX.map((b) => linuxRow(b, home, exists));
+  if (platform === "win32") return WINDOWS.map((b) => windowsRow(b, env, home, exists));
   return [];
+}
+
+export function detectBrowsers(options = {}) {
+  return catalogBrowsers(options).filter((b) => b.installed);
 }
