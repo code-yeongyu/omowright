@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startFakeBskDaemon } from "./fixtures/fake-bsk-daemon.mjs";
 import { BskIpcClient } from "../src/bsk/ipc-client.js";
 import { bskDoctor, bskOnboard } from "../src/bsk/onboard.js";
 import { installBskCli, cliInstallCommand } from "../src/bsk/install-cli.js";
+
+const scoped = (home) => ({ exists: (p) => p.startsWith(home) && existsSync(p), signals: { defaultBrowser: null, running: [], lastUsed: {} } });
 
 function macHomeWithChrome() {
   const home = mkdtempSync(path.join(tmpdir(), "omowright-onboard-"));
@@ -58,7 +60,7 @@ test("bskDoctor reports each layer: cli, daemon, browsers, extension registratio
   const home = macHomeWithChrome();
   try {
     const client = new BskIpcClient({ home: daemon.home, autoStart: false });
-    const report = await bskDoctor({ platform: "darwin", home, client, bskBin: null, waitForBrowserMs: 0 });
+    const report = await bskDoctor({ platform: "darwin", home, client, ...scoped(home), bskBin: null, waitForBrowserMs: 0 });
     assert.equal(report.cli.installed, false);
     assert.equal(report.daemon.running, true);
     assert.equal(report.daemon.version, "0.3.0-fake");
@@ -79,7 +81,7 @@ test("bskDoctor is ready when a browser is connected", async () => {
   const home = macHomeWithChrome();
   try {
     const client = new BskIpcClient({ home: daemon.home, autoStart: false });
-    const report = await bskDoctor({ platform: "darwin", home, client, bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.0", waitForBrowserMs: 0 });
+    const report = await bskDoctor({ platform: "darwin", home, client, ...scoped(home), bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.0", waitForBrowserMs: 0 });
     assert.equal(report.cli.installed, true);
     assert.equal(report.cli.version, "0.3.0");
     assert.equal(report.browsersConnected.length, 1);
@@ -93,7 +95,7 @@ test("bskDoctor without a daemon reports it instead of throwing", async () => {
   const bskHome = mkdtempSync(path.join(tmpdir(), "omowright-nodaemon-"));
   try {
     const client = new BskIpcClient({ home: bskHome, autoStart: false });
-    const report = await bskDoctor({ platform: "darwin", home, client, bskBin: null, waitForBrowserMs: 0 });
+    const report = await bskDoctor({ platform: "darwin", home, client, ...scoped(home), bskBin: null, waitForBrowserMs: 0 });
     assert.equal(report.daemon.running, false);
     assert.match(report.daemon.error, /daemon\.json/);
     assert.equal(report.ready, false);
@@ -116,7 +118,7 @@ test("bskOnboard runs install -> daemon -> register and returns the single human
   try {
     const client = new BskIpcClient({ home: daemon.home, autoStart: false });
     const result = await bskOnboard({
-      platform: "darwin", home, client,
+      platform: "darwin", home, client, ...scoped(home),
       bskBin: null,
       installCli: async () => { events.push("install"); return { installed: true, bskBin: "/fake/bsk", restoredRcFiles: [] }; },
       cliVersion: async () => "bsk 0.3.0",
@@ -147,7 +149,7 @@ test("bskOnboard never launches a headless browser when no browser is found; it 
     const client = new BskIpcClient({ home: daemon.home, autoStart: false });
     let installs = 0;
     const result = await bskOnboard({
-      platform: "darwin", home, client, bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.0",
+      platform: "darwin", home, client, ...scoped(home), bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.0",
       installCli: async () => { installs += 1; return { installed: false, bskBin: null, restoredRcFiles: [] }; },
       waitForBrowserMs: 0, waitTotalMs: 0,
     });

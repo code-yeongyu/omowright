@@ -127,8 +127,9 @@ sleep to tune.
   (stock daemon and Web Store extension, spoken to over its IPC socket — no
   process per call). `bskSnapshot()` returns the same `{ tree, refs }` shape
   without leaving a global or a DOM attribute behind, and `bskOnboard()`
-  installs the CLI, starts the daemon and registers the extension so the only
-  thing left for the user is one **Enable** click.
+  installs the CLI, starts the daemon and registers the extension in the browser
+  the user actually uses (default browser, running process, recent use; it asks
+  when those disagree) so the only thing left for the user is one **Enable** click.
 
 ## Install
 

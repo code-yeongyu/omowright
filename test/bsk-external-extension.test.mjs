@@ -25,7 +25,7 @@ test("detectBrowsers finds Chromium-family user-data dirs per platform from the 
   try {
     mkdirSync(path.join(home, "Library/Application Support/Google/Chrome/Default"), { recursive: true });
     mkdirSync(path.join(home, "Library/Application Support/Microsoft Edge/Default"), { recursive: true });
-    const mac = detectBrowsers({ platform: "darwin", home, exists: existsSync });
+    const mac = detectBrowsers({ platform: "darwin", home, exists: (p) => p.startsWith(home) && existsSync(p) });
     assert.deepEqual(mac.map((b) => b.id), ["chrome", "edge"]);
     assert.equal(mac[0].userDataDir, path.join(home, "Library/Application Support/Google/Chrome"));
     assert.equal(mac[0].store, "chrome");
@@ -33,14 +33,14 @@ test("detectBrowsers finds Chromium-family user-data dirs per platform from the 
     assert.equal(mac[0].binary, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
 
     mkdirSync(path.join(home, ".config/chromium/Default"), { recursive: true });
-    const linux = detectBrowsers({ platform: "linux", home, exists: existsSync });
+    const linux = detectBrowsers({ platform: "linux", home, exists: (p) => p.startsWith(home) && existsSync(p) });
     assert.deepEqual(linux.map((b) => b.id), ["chromium"]);
     assert.equal(linux[0].store, "chrome");
 
-    const win = detectBrowsers({ platform: "win32", home, exists: existsSync, env: { LOCALAPPDATA: path.join(home, "AppData/Local") } });
+    const win = detectBrowsers({ platform: "win32", home, exists: (p) => p.startsWith(home) && existsSync(p), env: { LOCALAPPDATA: path.join(home, "AppData/Local") } });
     assert.deepEqual(win, []);
     mkdirSync(path.join(home, "AppData/Local/Google/Chrome/User Data/Default"), { recursive: true });
-    const win2 = detectBrowsers({ platform: "win32", home, exists: existsSync, env: { LOCALAPPDATA: path.join(home, "AppData/Local") } });
+    const win2 = detectBrowsers({ platform: "win32", home, exists: (p) => p.startsWith(home) && existsSync(p), env: { LOCALAPPDATA: path.join(home, "AppData/Local") } });
     assert.equal(win2[0].id, "chrome");
     assert.equal(win2[0].registryKey, "HKCU\\Software\\Google\\Chrome\\Extensions");
   } finally { rmSync(home, { recursive: true, force: true }); }
