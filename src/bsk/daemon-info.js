@@ -51,7 +51,7 @@ export function windowsDaemonTaskName(home) {
 // The home and binary travel as PowerShell single-quoted literals inside -EncodedCommand: conhost
 // re-parses a cmd.exe line and drops it at the first &, (, ^ or |, and cmd.exe expands % in quotes.
 function windowsDaemonLaunch(home, bskBin) {
-  const literal = (value) => `'${value.replaceAll("'", "''")}'`;
+  const literal = (value) => `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, (quote) => quote + quote)}'`;
   const script = `$env:BSK_HOME = ${literal(home)}; & ${literal(bskBin)} daemon start --foreground; exit $LASTEXITCODE`;
   return `--headless powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
 }
