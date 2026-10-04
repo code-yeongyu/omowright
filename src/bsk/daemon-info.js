@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
 export function resolveBskHome(env = process.env) {
   const override = env.BSK_HOME;
@@ -36,25 +37,62 @@ export function findBskBinary(env = process.env) {
   return "bsk";
 }
 
-export function startDaemonWithCli({ home, env = process.env, bskBin = findBskBinary(env), timeoutMs = 20_000 } = {}) {
+// bsk refuses to detach its daemon when the caller's Job Object forbids breakaway, as agent
+// sandboxes on Windows do, and asks for `bsk daemon start --foreground` in a persistent host task.
+const NO_BREAKAWAY = /Job Object/;
+
+export function windowsDaemonTaskName(home) {
+  return `bsk-daemon-${createHash("sha256").update(path.resolve(home).toLowerCase()).digest("hex").slice(0, 12)}`;
+}
+
+// Task Scheduler starts the action outside the caller's job. conhost --headless gives the console
+// program a console without a window; a task that starts bsk directly opens one in the default
+// terminal, and Windows Terminal ignores the hidden-window flag a task or PowerShell passes.
+// The home and binary travel as PowerShell single-quoted literals inside -EncodedCommand: conhost
+// re-parses a cmd.exe line and drops it at the first &, (, ^ or |, and cmd.exe expands % in quotes.
+function windowsDaemonLaunch(home, bskBin) {
+  const literal = (value) => `'${value.replaceAll("'", "''")}'`;
+  const script = `$env:BSK_HOME = ${literal(home)}; & ${literal(bskBin)} daemon start --foreground; exit $LASTEXITCODE`;
+  return `--headless powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
+}
+
+function startDaemonInWindowsTask({ home, bskBin, timeoutMs }) {
+  const script = [
+    "$action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\\conhost.exe') -Argument $env:BSK_TASK_ARGUMENT",
+    "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew",
+    "Register-ScheduledTask -TaskName $env:BSK_TASK_NAME -Action $action -Settings $settings -Force | Out-Null",
+    "Start-ScheduledTask -TaskName $env:BSK_TASK_NAME",
+  ].join("; ");
+  return runToExit("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    env: { ...process.env, BSK_TASK_NAME: windowsDaemonTaskName(home), BSK_TASK_ARGUMENT: windowsDaemonLaunch(home, bskBin) },
+    timeoutMs,
+    label: "registering the bsk daemon task",
+  });
+}
+
+function runToExit(command, args, { env, timeoutMs, label }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bskBin, ["status", "--json"], {
-      env: { ...env, BSK_HOME: home },
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-4096); });
-    child.stdout.on("data", () => {});
+    const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let output = "";
+    const keep = (chunk) => { output = (output + chunk).slice(-4096); };
+    child.stdout.on("data", keep);
+    child.stderr.on("data", keep);
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error(`bsk status did not return within ${timeoutMs}ms`));
+      reject(new Error(`${label} did not return within ${timeoutMs}ms`));
     }, timeoutMs);
-    child.on("error", (error) => { clearTimeout(timer); reject(new Error(`could not run ${bskBin}: ${error.message}`)); });
-    child.on("exit", (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`bsk status exited with ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
-    });
+    child.on("error", (error) => { clearTimeout(timer); reject(new Error(`could not run ${command}: ${error.message}`)); });
+    child.on("exit", (code) => { clearTimeout(timer); resolve({ code, output: output.trim() }); });
   });
+}
+
+export async function startDaemonWithCli({ home, env = process.env, bskBin = findBskBinary(env), timeoutMs = 20_000 } = {}) {
+  const status = await runToExit(bskBin, ["status", "--json"], { env: { ...env, BSK_HOME: home }, timeoutMs, label: "bsk status" });
+  if (status.code === 0) return;
+  if (process.platform === "win32" && NO_BREAKAWAY.test(status.output)) {
+    const task = await startDaemonInWindowsTask({ home, bskBin, timeoutMs });
+    if (task.code === 0) return;
+    throw new Error(`registering the bsk daemon task exited with ${task.code}${task.output ? `: ${task.output}` : ""}`);
+  }
+  throw new Error(`bsk status exited with ${status.code}${status.output ? `: ${status.output}` : ""}`);
 }
