@@ -27,7 +27,11 @@ await session.stop();                                // ALWAYS: returns borrowed
 
 `connectBrowserSkill` talks to the daemon over its Unix-socket IPC directly —
 no `bsk` process per call. It starts the daemon if needed (`bsk status`),
-unless `BSK_AUTO_START=0`. It never falls back to a headless browser: when no
+unless `BSK_AUTO_START=0`. On Windows, a host that forbids Job Object
+breakaway makes `bsk status` refuse to detach; the library then registers a
+per-user `bsk-daemon-<hash>` scheduled task that runs `bsk daemon start
+--foreground` under `conhost.exe --headless`, so no console window opens.
+It never falls back to a headless browser: when no
 extension is connected it throws `no_browser_connected` and `bskDoctor()`
 tells you the one step that is missing.
 
