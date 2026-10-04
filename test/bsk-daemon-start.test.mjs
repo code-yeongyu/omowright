@@ -1,31 +1,58 @@
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { startDaemonWithCli } from "../src/bsk/daemon-info.js";
+import { startDaemonWithCli, windowsDaemonTaskName } from "../src/bsk/daemon-info.js";
 
 // Platform contract: when bsk cannot detach its daemon from the caller's Job Object, the start
-// must still succeed through a scheduled task, and that task must not open a console window.
+// must still succeed through a scheduled task that opens no console window, whatever the home path holds.
+const windowsOnly = { skip: process.platform !== "win32" };
 const REFUSAL = "cannot start an independent Windows daemon; the host may prohibit Job Object breakaway";
-const refusingStatus = `data:text/javascript,console.log(${encodeURIComponent(JSON.stringify(JSON.stringify({ message: REFUSAL, exit_code: 2 })))});process.exit(2)`;
+
+// A compiled stand-in for bsk: `status` refuses breakaway, `daemon start` records what the task gave it.
+const FAKE_BSK = `import { writeFileSync } from "node:fs";
+import path from "node:path";
+const args = process.argv.slice(2);
+if (args[0] === "status") { console.log(JSON.stringify({ message: ${JSON.stringify(REFUSAL)}, exit_code: 2 })); process.exit(2); }
+writeFileSync(path.join(process.env.BSK_HOME, "started.txt"), args.join(" "));
+`;
+
+let dir;
+let bskBin;
 
 function powershell(command) {
   return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8" }).trim();
 }
 
-test("a refused breakaway on Windows registers a headless scheduled task for the daemon", { skip: process.platform !== "win32" }, async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "bsk-task-"));
-  const home = path.join(dir, "home");
-  const findTask = `Get-ScheduledTask -TaskName 'bsk-daemon-*' | Where-Object { $_.Actions[0].Arguments -like '*${home}*' }`;
-  try {
-    await startDaemonWithCli({ home, bskBin: "node", env: { ...process.env, NODE_OPTIONS: `--import=${refusingStatus}` } });
-    const [execute, args] = powershell(`$a = @(${findTask})[0].Actions[0]; $a.Execute + '|' + $a.Arguments`).split("|");
-    assert.match(execute, /\\conhost\.exe$/i);
-    assert.equal(args, `--headless cmd.exe /d /c set BSK_HOME=${home}&& "node" daemon start --foreground`);
-  } finally {
-    powershell(`${findTask} | Unregister-ScheduledTask -Confirm:$false; exit 0`);
-    rmSync(dir, { recursive: true, force: true });
-  }
+before(() => {
+  if (process.platform !== "win32") return;
+  dir = mkdtempSync(path.join(tmpdir(), "bsk-task-"));
+  writeFileSync(path.join(dir, "fake-bsk.mjs"), FAKE_BSK);
+  mkdirSync(path.join(dir, "bin & (x)"));
+  bskBin = path.join(dir, "bin & (x)", "bsk.exe");
+  execFileSync("bun", ["build", "--compile", path.join(dir, "fake-bsk.mjs"), "--outfile", bskBin], { stdio: "ignore" });
 });
+
+after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+for (const name of ["Tom&Jerry (x) ^ ;", "100% %PATH% home", "O'Brien"]) {
+  test(`a refused breakaway starts the daemon from a headless task for a home named ${name}`, windowsOnly, async () => {
+    const home = path.join(dir, name);
+    mkdirSync(home);
+    const task = windowsDaemonTaskName(home);
+    try {
+      await startDaemonWithCli({ home, bskBin });
+      const [execute, args] = powershell(`$a = (Get-ScheduledTask -TaskName '${task}').Actions[0]; $a.Execute + '|' + $a.Arguments`).split("|");
+      assert.match(execute, /\\conhost\.exe$/i);
+      assert.match(args, /^--headless powershell\.exe -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/);
+      const marker = path.join(home, "started.txt");
+      const deadline = Date.now() + 15_000;
+      while (!existsSync(marker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.equal(readFileSync(marker, "utf8"), "daemon start --foreground");
+    } finally {
+      powershell(`Unregister-ScheduledTask -TaskName '${task}' -Confirm:$false -ErrorAction SilentlyContinue; exit 0`);
+    }
+  });
+}

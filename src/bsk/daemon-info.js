@@ -41,22 +41,30 @@ export function findBskBinary(env = process.env) {
 // sandboxes on Windows do, and asks for `bsk daemon start --foreground` in a persistent host task.
 const NO_BREAKAWAY = /Job Object/;
 
-function windowsDaemonTaskName(home) {
+export function windowsDaemonTaskName(home) {
   return `bsk-daemon-${createHash("sha256").update(path.resolve(home).toLowerCase()).digest("hex").slice(0, 12)}`;
 }
 
 // Task Scheduler starts the action outside the caller's job. conhost --headless gives the console
 // program a console without a window; a task that starts bsk directly opens one in the default
 // terminal, and Windows Terminal ignores the hidden-window flag a task or PowerShell passes.
+// The home and binary travel as PowerShell single-quoted literals inside -EncodedCommand: conhost
+// re-parses a cmd.exe line and drops it at the first &, (, ^ or |, and cmd.exe expands % in quotes.
+function windowsDaemonLaunch(home, bskBin) {
+  const literal = (value) => `'${value.replaceAll("'", "''")}'`;
+  const script = `$env:BSK_HOME = ${literal(home)}; & ${literal(bskBin)} daemon start --foreground; exit $LASTEXITCODE`;
+  return `--headless powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
+}
+
 function startDaemonInWindowsTask({ home, bskBin, timeoutMs }) {
   const script = [
-    "$action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\\conhost.exe') -Argument ('--headless cmd.exe /d /c set BSK_HOME=' + $env:BSK_TASK_HOME + '&& \"' + $env:BSK_TASK_BIN + '\" daemon start --foreground')",
+    "$action = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\\conhost.exe') -Argument $env:BSK_TASK_ARGUMENT",
     "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew",
     "Register-ScheduledTask -TaskName $env:BSK_TASK_NAME -Action $action -Settings $settings -Force | Out-Null",
     "Start-ScheduledTask -TaskName $env:BSK_TASK_NAME",
   ].join("; ");
   return runToExit("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    env: { ...process.env, BSK_TASK_NAME: windowsDaemonTaskName(home), BSK_TASK_HOME: home, BSK_TASK_BIN: bskBin },
+    env: { ...process.env, BSK_TASK_NAME: windowsDaemonTaskName(home), BSK_TASK_ARGUMENT: windowsDaemonLaunch(home, bskBin) },
     timeoutMs,
     label: "registering the bsk daemon task",
   });
