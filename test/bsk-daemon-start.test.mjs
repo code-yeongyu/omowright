@@ -37,7 +37,7 @@ before(() => {
 
 after(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
 
-for (const name of ["Tom&Jerry (x) ^ ;", "100% %PATH% home", "O'Brien"]) {
+for (const name of ["Tom&Jerry (x) ^ ;", "100% %PATH% home", "O'Brien", "O\u2019Brien", "\u2018quoted\u201B \u201A"]) {
   test(`a refused breakaway starts the daemon from a headless task for a home named ${name}`, windowsOnly, async () => {
     const home = path.join(dir, name);
     mkdirSync(home);
