@@ -250,9 +250,5 @@ export async function connectPipe({ browserPath, browserArgs = [], spawnOptions,
   const connection = new BrowserConnection(client, { storageRoot });
   await connection.initialize();
   connection.browserProcess = client.childProcess;
-  connection.newTab = async (url = "about:blank") => {
-    const { createAgentTabs } = await import("./agent-tabs.js");
-    return (await createAgentTabs(connection).create(url)).page;
-  };
   return connection;
 }

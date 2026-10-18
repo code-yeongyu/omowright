@@ -103,7 +103,18 @@ sleep to tune.
 - **Zero-port pipe transport.** `connectPipe()` launches Chromium with
   `--remote-debugging-pipe` and speaks CDP over inherited file descriptors. No
   `/json/*` endpoint and no listening TCP port exist for the driven browser.
-  `connect(url)` attaches to an existing DevTools endpoint instead.
+  `connect(url)` attaches to an existing DevTools endpoint instead. The
+  attached connection offers the same tab API: `browser.newTab(url)` opens a
+  background tab and `browser.attachPage(targetId)` takes over an existing one.
+
+```js
+import { connect } from "omowright";
+
+const browser = await connect("http://127.0.0.1:9222");
+const page = await browser.newTab("https://example.com");
+const targets = await browser.listTargets();
+const existing = await browser.attachPage(targets[0].id);
+```
 - **Agent signals.** `createEvents()` pushes `tabOpened`, `popupOpened`,
   `downloadStarted` / `downloadFinished` and friends, so agents stop polling.
   `createAgentTabs()` opens every tab in the background and never steals focus.

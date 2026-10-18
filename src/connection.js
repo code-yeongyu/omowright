@@ -42,6 +42,11 @@ export class BrowserConnection {
 
   async listTargets() { return this.tabs.listTargets(); }
 
+  async newTab(url = "about:blank") {
+    const { createAgentTabs } = await import("./agent-tabs.js");
+    return (await createAgentTabs(this).create(url)).page;
+  }
+
   async attachPage(targetId) {
     if (this.#pages.has(targetId)) return this.#pages.get(targetId).page;
     const sessionId = await this.#sessions.resolvePageSession(targetId);
