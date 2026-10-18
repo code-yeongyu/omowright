@@ -63,4 +63,19 @@ test("BrowserConnection exposes newTab that opens a tab through createAgentTabs"
   assert.ok(create, "expected a Target.createTarget call");
   assert.deepEqual(create.params, { url: "https://x.test", background: true });
   assert.ok(create.options?.capability, "Target.createTarget must carry the internal capability");
+
+  // Options object invocation
+  const openedWithOptions = await connection.newTab({ url: "https://y.test", viewport: { width: 800, height: 600 } });
+  assert.equal(openedWithOptions, attached);
+  const createWithOptions = cdp.calls.filter((call) => call.method === "Target.createTarget")[1];
+  assert.ok(createWithOptions, "expected a second Target.createTarget call");
+  assert.deepEqual(createWithOptions.params, { url: "https://y.test", background: true });
+
+  // Default invocation
+  const openedDefault = await connection.newTab();
+  assert.equal(openedDefault, attached);
+  const createDefault = cdp.calls.filter((call) => call.method === "Target.createTarget")[2];
+  assert.ok(createDefault, "expected a third Target.createTarget call");
+  assert.deepEqual(createDefault.params, { url: "about:blank", background: true });
 });
+
