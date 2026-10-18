@@ -42,6 +42,19 @@ export class BrowserConnection {
 
   async listTargets() { return this.tabs.listTargets(); }
 
+  async newTab(urlOrOptions = "about:blank", options = {}) {
+    const { createAgentTabs } = await import("./agent-tabs.js");
+    let url = "about:blank";
+    let opts = options;
+    if (typeof urlOrOptions === "string") {
+      url = urlOrOptions;
+    } else if (urlOrOptions && typeof urlOrOptions === "object") {
+      url = urlOrOptions.url ?? "about:blank";
+      opts = { ...urlOrOptions, ...options };
+    }
+    return (await createAgentTabs(this).create(url, opts)).page;
+  }
+
   async attachPage(targetId) {
     if (this.#pages.has(targetId)) return this.#pages.get(targetId).page;
     const sessionId = await this.#sessions.resolvePageSession(targetId);
