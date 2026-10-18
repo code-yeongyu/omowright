@@ -103,8 +103,10 @@ sleep to tune.
 - **Zero-port pipe transport.** `connectPipe()` launches Chromium with
   `--remote-debugging-pipe` and speaks CDP over inherited file descriptors. No
   `/json/*` endpoint and no listening TCP port exist for the driven browser.
-  `connect(url)` attaches to an existing DevTools endpoint instead. Named
-  instances are the one exception: they listen on a local `127.0.0.1` port
+  `connect(url)` attaches to an existing DevTools endpoint instead. The
+  attached connection offers the same tab API: `browser.newTab(url)` opens a
+  background tab and `browser.attachPage(targetId)` takes over an existing one.
+  Named instances are the one exception: they listen on a local `127.0.0.1` port
   chosen by the OS (`--remote-debugging-port=0`). That keeps the endpoint off
   the network, but it is unauthenticated — any local process can drive a named
   browser, which a pipe-transport browser never allows.
