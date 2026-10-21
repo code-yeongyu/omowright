@@ -21,19 +21,47 @@ strengthened by source patches). If one is already running, `connectPipe` HANGS
 during early init — the `Browser.getVersion` handshake never answers and
 OmOWright times out.
 
+Use `connectNamed(name, options)` — attach-or-launch under one name, no probe
+ritual. A healthy registered instance is attached over its endpoint; a stale
+record is cleaned up and the browser relaunched; a live pid whose recorded port
+refuses connections is a reused pid (treated as stale), while an endpoint that
+hangs or answers wrongly fails fast with an `unresponsive holder` error naming
+the holder (name, pid, endpoint). Named launches expose CDP on a local-only TCP
+endpoint (`--remote-debugging-address=127.0.0.1 --remote-debugging-port=0`), and
+the returned `BrowserConnection` supports `newTab()` on both the launch and the
+attach path.
+
+```js
+const { connectNamed, listInstances } = await import("omowright");
+const browser = await connectNamed("cloak-main", {
+  browserPath,   // required only when a launch is needed (connectCloakProfile resolves it)
+  browserArgs,
+  profileDir,    // recorded with the instance; used for endpoint discovery
+  registryRoot,  // defaults to ~/.local/share/omowright/instances
+});
+const page = await browser.newTab("https://target.com");
+await listInstances();
+// [{ name, pid, endpoint, profileDir, browserPath, startedAt, alive, responsive }]
+```
+
+`close()` on the launcher terminates the browser; on an attached client it only
+detaches — the instance keeps running for the next `connectNamed`.
+`connectCloakProfile({ name })` and `omowright-cloak --name <name>` go through
+the same registry: same name, same instance. Without `name` both keep the
+zero-port pipe and never touch the registry.
+
+**Fallback — a nameless CloakBrowser is already running** (launched outside
+OmOWright): probe the legacy endpoint, then attach — do NOT spawn another.
+
 ```bash
 curl -s -m 2 http://127.0.0.1:9242/json/version   # Browser info -> an instance is alive
 ```
 
-If alive, attach — do NOT spawn another. `connect()` returns `BrowserConnection`,
-which has no `newTab()`:
-
 ```js
 const browser = await connect("http://127.0.0.1:9242");
-const { targetId } = await browser.cdp.send("Target.createTarget", { url: "https://target.com" });
-const page = await browser.attachPage(targetId);
+const page = await browser.newTab("https://target.com");
 // ... work ...
-await browser.cdp.send("Target.closeTarget", { targetId });  // close only YOUR tab
+await page.close();                               // close only YOUR tab
 ```
 
 ## Launch
@@ -57,8 +85,9 @@ CLI equivalent:
   same `--fingerprint=<seed>` on every launch. Do not pass `--user-data-dir`,
   `--fingerprint`, or `--fingerprint-platform` through `browserArgs`; conflicting
   identity overrides are rejected.
-- The helper uses `connectPipe()`, so there is no listening CDP TCP port. One
-  process per profile.
+- The helper uses `connectPipe()` — `connectNamed()` when you pass `name` — so
+  an anonymous launch still has no listening CDP TCP port. One process per
+  profile.
 
 Verify: `await page.evaluate("navigator.webdriver")` must be `false`. For a full
 check load `https://bot.sannysoft.com` or `https://browserscan.net` and read the

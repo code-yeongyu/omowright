@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createAgentTabs, DEFAULT_AGENT_VIEWPORT } from "../src/index.js";
+import { BrowserConnection } from "../src/connection.js";
 
 class Emitter { constructor() { this.map = new Map(); } on(n, f) { const s = this.map.get(n) ?? new Set(); s.add(f); this.map.set(n, s); return () => s.delete(f); } emit(n, p, m = {}) { for (const f of [...this.map.get(n) ?? []]) f(p, m); } }
 function connection({ headless = true, send = null } = {}) {
@@ -66,4 +67,37 @@ test("close failure leaves target owned and dispose reports close failures", asy
   const c = connection(); const tabs = createAgentTabs(c, { closeTimeoutMs: 10 }); await tabs.ready; const tab = await tabs.create();
   await assert.rejects(tabs.close(tab), /Timed out/); assert.ok(tabs.get(tab.targetId));
   await assert.rejects(tabs.dispose(), AggregateError); assert.ok(tabs.get(tab.targetId));
+});
+
+test("BrowserConnection exposes newTab on the attach path", async () => {
+  // newTab is a BrowserConnection class method, not a connectPipe instance
+  // patch, so connect()-style attach clients get the launch path's tab API.
+  const calls = [];
+  const cdp = {
+    isHeadless: true,
+    transportEvents: new Emitter(),
+    on: () => () => {},
+    ensureConnected: async () => {},
+    discoverTargets: async () => [],
+    close: async () => {},
+    send: async (method, params, sessionId, options) => {
+      calls.push({ method, params, sessionId, options });
+      if (method === "Target.createTarget") return { targetId: "attached-tab" };
+      return {};
+    },
+  };
+  const connection = new BrowserConnection(cdp);
+  const page = { targetId: "attached-tab", cdp, resolveSessionId: async () => "session", setCachedViewportSize() {}, on: () => () => {}, async dispose() {} };
+  connection.attachPage = async (targetId) => { calls.push({ method: "attachPage", targetId }); return page; };
+
+  const opened = await connection.newTab();
+  assert.equal(opened, page);
+  const create = calls.find(call => call.method === "Target.createTarget");
+  assert.deepEqual(create.params, { url: "about:blank", background: true });
+  assert.ok(create.options?.capability, "createTarget must carry the reserved capability");
+  const order = calls.map(call => call.method);
+  assert.ok(order.indexOf("Target.activateTarget") < order.indexOf("attachPage"), `activation must precede attach: ${order.join(", ")}`);
+  assert.ok(order.includes("Emulation.setDeviceMetricsOverride"), "newTab must repin the viewport");
+  assert.equal(createAgentTabs(connection).get("attached-tab").page, page, "newTab must register with the per-connection manager");
+  await createAgentTabs(connection).dispose({ closeOwned: false });
 });

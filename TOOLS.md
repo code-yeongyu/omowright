@@ -68,6 +68,17 @@ running Chromium DevTools endpoint).
 Every tool below is exported from `src/index.js`, the same import as the core
 loop; the module files next to it are implementation detail.
 
+- `connectNamed(name, { browserPath, browserArgs, profileDir, registryRoot? })`:
+  attach-or-launch a named Chromium. A healthy registered instance is attached;
+  a stale record is cleaned up and relaunched (CDP on a local-only TCP endpoint,
+  127.0.0.1 with a kernel-chosen port); a live pid whose recorded port refuses
+  connections is treated as a reused pid (stale → relaunch), while an endpoint
+  that hangs or answers wrongly throws an `unresponsive holder` error naming
+  the holder (name, pid, endpoint).
+  `newTab()` works on both paths; `close()` from the launcher terminates the
+  browser, from an attached client it only detaches. `listInstances()` returns
+  every record (`{ name, pid, endpoint, profileDir, browserPath, startedAt }`)
+  with `alive` / `responsive` liveness.
 - `createNetworkSnoop(page, { match?, bodies=true, maxEntries=500, maxBodyBytes? })`:
   buffer finished network entries for one page. `match` is a predicate or
   `{ url: string|RegExp, method, mimeType, resourceType }`. Methods: `pop()`

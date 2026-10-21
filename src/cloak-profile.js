@@ -8,7 +8,11 @@ import {
 import { globSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { connectNamed, listInstances, withEngineLock } from "./instances.js";
 import { connectPipe } from "./pipe.js";
+
+const LEGACY_CLOAK_PROBE_URL = "http://127.0.0.1:9242";
+const LEGACY_PROBE_TIMEOUT_MS = 1500;
 
 const MIN_FINGERPRINT_SEED = 10_000;
 const MAX_FINGERPRINT_SEED = 99_999;
@@ -164,23 +168,88 @@ export function findCloakBrowserPath({
   return browserPath;
 }
 
+async function assertCloakLaunchClear({
+  browserPath,
+  profileDir,
+  registryRoot,
+  legacyProbeUrl = LEGACY_CLOAK_PROBE_URL,
+  probeTimeoutMs,
+}) {
+  const records = await listInstances({ registryRoot, probeTimeoutMs });
+  for (const record of records) {
+    if (!record.alive || !record.responsive) continue;
+    if (!record.profileDir) continue;
+    if (path.resolve(record.profileDir) === path.resolve(profileDir)) continue;
+    if (record.browserPath !== browserPath) continue;
+    throw new Error(
+      `CloakBrowser allows one instance: "${record.name}" (pid ${record.pid}, profile ${record.profileDir}) is live — connectNamed("${record.name}") to reuse it or close it first`,
+    );
+  }
+
+  // A registered holder may legitimately answer on the legacy port; only an
+  // unregistered engine there blocks a launch.
+  const legacyHost = new URL(legacyProbeUrl).host;
+  const explainedByRecord = records.some(
+    (record) =>
+      record.alive && record.responsive && new URL(record.endpoint).host === legacyHost,
+  );
+  if (explainedByRecord) return;
+  try {
+    const response = await fetch(new URL("/json/version", legacyProbeUrl), {
+      signal: AbortSignal.timeout(probeTimeoutMs ?? LEGACY_PROBE_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      throw new Error(
+        `an unregistered CloakBrowser is answering on ${legacyProbeUrl} — attach with connect("${legacyProbeUrl}") or close it before launching`,
+      );
+    }
+  } catch (error) {
+    const unreachable =
+      error instanceof TypeError ||
+      error?.name === "TimeoutError" ||
+      error?.name === "AbortError";
+    if (!unreachable) throw error;
+  }
+}
+
 export async function connectCloakProfile({
   browserPath = process.env.CLOAKBROWSER_BIN ?? findCloakBrowserPath(),
   profileDir = process.env.CLOAK_PROFILE_DIR ?? DEFAULT_PROFILE_DIR,
   fingerprintSeed = process.env.CLOAK_FINGERPRINT_SEED,
   browserArgs = [],
   storageRoot,
+  name,
   ...options
 } = {}) {
   const profile = await resolveCloakProfile({ profileDir, fingerprintSeed });
-  return connectPipe({
-    browserPath,
-    browserArgs: buildCloakBrowserArgs({
+  const resolvedBrowserArgs = buildCloakBrowserArgs({
+    profileDir: profile.profileDir,
+    fingerprintSeed: profile.fingerprintSeed,
+    extraArgs: browserArgs,
+  });
+  if (name === undefined) {
+    return connectPipe({
+      browserPath,
+      browserArgs: resolvedBrowserArgs,
+      storageRoot: storageRoot ?? profile.profileDir,
+      ...options,
+    });
+  }
+  const { legacyProbeUrl, ...connectOptions } = options;
+  return withEngineLock(connectOptions.registryRoot, browserPath, async () => {
+    await assertCloakLaunchClear({
+      browserPath,
       profileDir: profile.profileDir,
-      fingerprintSeed: profile.fingerprintSeed,
-      extraArgs: browserArgs,
-    }),
-    storageRoot: storageRoot ?? profile.profileDir,
-    ...options,
+      registryRoot: connectOptions.registryRoot,
+      legacyProbeUrl,
+      probeTimeoutMs: connectOptions.probeTimeoutMs,
+    });
+    return connectNamed(name, {
+      browserPath,
+      browserArgs: resolvedBrowserArgs,
+      profileDir: profile.profileDir,
+      storageRoot: storageRoot ?? profile.profileDir,
+      ...connectOptions,
+    });
   });
 }
