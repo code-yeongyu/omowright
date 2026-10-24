@@ -84,8 +84,8 @@ export function createProfileApis(profilePath) {
   }
 
   const bookmarks = {
-    async get(idOrIdList) {
-      const ids = Array.isArray(idOrIdList) ? idOrIdList : [idOrIdList];
+    async get(idsOrId) {
+      const ids = Array.isArray(idsOrId) ? idsOrId : [idsOrId];
       return ids.map(findBookmark).filter(Boolean).map(toBookmark);
     },
     async getChildren(id) {

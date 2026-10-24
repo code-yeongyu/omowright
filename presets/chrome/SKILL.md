@@ -48,7 +48,7 @@ Tab lifecycle stays on `connection.newTab(url)` / `page.close()`; interaction on
 
 ## bookmarks — profile `Bookmarks` JSON, read-only
 
-`get(idOrIdList)`, `getChildren(id)`, `getRecent(numberOfItems)`,
+`get(idsOrId)`, `getChildren(id)`, `getRecent(numberOfItems)`,
 `getSubTree(id)`, `getTree()`, `search(query)` where `query` is a string or
 `{ query?, url?, title? }`.
 
