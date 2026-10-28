@@ -132,6 +132,7 @@ test("bskOnboard runs install -> daemon -> register and returns the single human
     assert.equal(result.registrations[0].registered, true);
     assert.match(result.registrations[0].humanStep, /Enable/);
     assert.equal(result.humanStep, null, "once the browser connected there is nothing left for the human");
+    assert.equal(result.nextStep, null);
     assert.equal(result.browsersConnected.length, 1);
     assert.equal(result.ready, true);
     assert.ok(statusCalls >= 3, `waited through ${statusCalls} status polls`);
@@ -178,5 +179,6 @@ test("bskOnboard never launches a headless browser when no browser is found; it 
     assert.deepEqual(result.registrations, []);
     assert.match(result.humanStep, /Chrome|Edge|Chromium/);
     assert.match(result.humanStep, /chromewebstore\.google\.com/);
+    assert.equal(result.nextStep, result.humanStep, "with the daemon up, nextStep is the step the user still owes");
   } finally { await daemon.close(); rmSync(home, { recursive: true, force: true }); }
 });

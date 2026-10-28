@@ -174,7 +174,8 @@ loop; the module files next to it are implementation detail.
   `system.status{wait_for_browser_ms}`. The one human step is returned as
   `humanStep`; `needsChoice: true` means nothing was registered and the user
   has to name the browser. While the daemon is down nothing is registered,
-  `humanStep` is `null`, and `nextStep` says how to start the daemon.
+  `humanStep` is `null`, and `nextStep` says how to start the daemon; otherwise
+  `nextStep` is the same step as `humanStep` (`null` once ready).
 - `identifyBrowser({ catalog, signals, explicit })` / `probeBrowserSignals()` /
   `catalogBrowsers()` / `detectBrowsers()`: the browser choice on its own —
   default browser, running process and recent-use signals, ranked; ambiguity
