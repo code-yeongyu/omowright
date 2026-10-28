@@ -10,15 +10,16 @@ export async function listBrowsers(client, { waitForBrowserMs } = {}) {
 }
 
 function describeBrowser(b) {
-  const parts = [`${b.label || b.browser_name} [${b.instance_id}]`, [b.browser_name, b.browser_version].filter(Boolean).join(" ")];
+  const parts = [`${b.label || b.browser_name || "browser"} [${b.instance_id}]`, [b.browser_name, b.browser_version].filter(Boolean).join(" ")];
   if (typeof b.session_count === "number") parts.push(`${b.session_count} session${b.session_count === 1 ? "" : "s"}`);
-  if (b.connected_at_ms) parts.push(`online since ${new Date(b.connected_at_ms).toISOString()}`);
+  // An out-of-range or non-numeric time would make toISOString() throw and hide the real error.
+  if (Number.isFinite(b.connected_at_ms) && Math.abs(b.connected_at_ms) <= 8.64e15) parts.push(`online since ${new Date(b.connected_at_ms).toISOString()}`);
   return parts.filter(Boolean).join(", ");
 }
 
 // The daemon's message names a CLI flag and no instance; a library caller needs the option and the candidates.
 function multipleBrowsersError(error, statusBrowsers) {
-  const browsers = error.data?.browsers ?? statusBrowsers;
+  const browsers = Array.isArray(error.data?.browsers) ? error.data.browsers : statusBrowsers;
   return new BskRpcError(error.code, `more than one browser is online; pass browser: "<instance_id or label>" to connectBrowserSkill(). Online: ${browsers.map(describeBrowser).join("; ")}. Tabs are only visible inside a session: ask the user which browser holds the page, or open a session per browser and read tabList({ scope: "user" }) before stopping it.`, { ...error.data, browsers });
 }
 

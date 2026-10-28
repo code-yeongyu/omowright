@@ -198,6 +198,23 @@ test("connectBrowserSkill with two browsers online names each instance and the o
   });
 });
 
+test("connectBrowserSkill still names the online browsers when the daemon's error has no list and a connect time is unusable", async () => {
+  const browsers = [
+    { instance_id: "49ae608d", browser_name: "chrome", browser_version: "156", connected_at_ms: "not a time" },
+    { instance_id: "e6a714a1", browser_name: "chrome", browser_version: "156", connected_at_ms: 1e20 },
+  ];
+  const client = stubClient({
+    "system.status": { browsers, daemon_version: "0.3.3", protocol_version: "1.3" },
+    "session.start": new BskRpcError("multiple_browsers_online", "more than one browser is online — pass --browser <id-or-label>"),
+  });
+  await assert.rejects(connectBrowserSkill({ client, name: "smoke", waitForBrowserMs: 10 }), (err) => {
+    assert.equal(err.code, "multiple_browsers_online");
+    for (const b of browsers) assert.ok(err.message.includes(b.instance_id), err.message);
+    assert.deepEqual(err.data.browsers, browsers);
+    return true;
+  });
+});
+
 test("connectBrowserSkill refuses to continue when no browser is attached instead of falling back", async () => {
   const client = stubClient({ "system.status": { browsers: [], daemon_version: "0.3.0", protocol_version: "1.3" } });
   await assert.rejects(connectBrowserSkill({ client, waitForBrowserMs: 10 }), (err) => {
