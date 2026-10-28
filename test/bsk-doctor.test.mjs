@@ -140,6 +140,26 @@ test("bskOnboard runs install -> daemon -> register and returns the single human
   } finally { await daemon.close(); rmSync(home, { recursive: true, force: true }); }
 });
 
+test("bskOnboard with no daemon names the daemon and sends the user nothing, since it cannot see whether the extension is enabled", async () => {
+  const home = macHomeWithChrome();
+  const bskHome = mkdtempSync(path.join(tmpdir(), "omowright-onboard-nodaemon-"));
+  const steps = [];
+  try {
+    const client = new BskIpcClient({ home: bskHome, autoStart: false });
+    const result = await bskOnboard({
+      platform: "darwin", home, client, ...scoped(home), bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.3",
+      onHumanStep: (step) => steps.push(step), waitForBrowserMs: 0, waitTotalMs: 0,
+    });
+    assert.equal(result.daemon.running, false);
+    assert.deepEqual(result.registrations, []);
+    assert.deepEqual(steps, []);
+    assert.equal(result.humanStep, null);
+    assert.equal(existsSync(path.join(home, "Library/Application Support/Google/Chrome/External Extensions")), false);
+    assert.match(result.nextStep, /daemon/i);
+    assert.equal(result.ready, false);
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(bskHome, { recursive: true, force: true }); }
+});
+
 test("bskOnboard never launches a headless browser when no browser is found; it returns the store instruction", async () => {
   const daemon = await startFakeBskDaemon({
     handlers: { "system.status": () => ({ result: { daemon_version: "0.3.0-fake", protocol_version: "1.3", browsers: [], sessions: [] } }) },
