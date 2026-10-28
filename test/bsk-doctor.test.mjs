@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startFakeBskDaemon } from "./fixtures/fake-bsk-daemon.mjs";
-import { BskIpcClient, BskRpcError } from "../src/bsk/ipc-client.js";
+import { BskIpcClient } from "../src/bsk/ipc-client.js";
 import { bskDoctor, bskOnboard } from "../src/bsk/onboard.js";
 import { installBskCli, cliInstallCommand } from "../src/bsk/install-cli.js";
 
@@ -102,16 +102,28 @@ test("bskDoctor without a daemon reports it instead of throwing", async () => {
   } finally { rmSync(home, { recursive: true, force: true }); rmSync(bskHome, { recursive: true, force: true }); }
 });
 
-test("bskDoctor names a start the host's Job Object refuses and points at a foreground daemon, not another detached start", async () => {
+test("a daemon start the host's Job Object refuses is named, and the next step is a foreground daemon, not another detached start", async () => {
   const home = macHomeWithChrome();
-  const refusal = "cannot start an independent Windows daemon; the host may prohibit Job Object breakaway; use `bsk daemon start --foreground` in a persistent host task or start from an independent terminal";
-  const client = { call: async () => { throw new BskRpcError("no_daemon", refusal); } };
+  const bskHome = mkdtempSync(path.join(tmpdir(), "omowright-blocked-"));
+  // What startDaemonWithCli throws on Windows when bsk refuses and the scheduled-task fallback fails too.
+  const refusal = "cannot start an independent Windows daemon; the host may prohibit Job Object breakaway; use `bsk daemon start --foreground` in a persistent host task or start from an independent terminal; registering the bsk daemon task exited with 1: Access is denied.";
+  const startingClient = () => new BskIpcClient({ home: bskHome, autoStart: true, startDaemon: async () => { throw new Error(refusal); } });
+  const common = { platform: "darwin", home, ...scoped(home), bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.3", waitForBrowserMs: 0 };
   try {
-    const report = await bskDoctor({ platform: "darwin", home, client, ...scoped(home), bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.3", waitForBrowserMs: 0 });
-    assert.equal(report.daemon.running, false);
+    // bskOnboard starts the daemon itself, so this is where a refusal shows up.
+    const onboard = await bskOnboard({ ...common, client: startingClient(), waitTotalMs: 0 });
+    assert.equal(onboard.daemon.running, false);
+    assert.equal(onboard.daemon.startBlocked, true);
+
+    // bskDoctor's own client never starts the daemon; given a client that does, it reports the refusal the same way.
+    const report = await bskDoctor({ ...common, client: startingClient() });
     assert.equal(report.daemon.startBlocked, true);
     assert.match(report.nextStep, /bsk daemon start --foreground/);
-  } finally { rmSync(home, { recursive: true, force: true }); }
+
+    const plain = await bskDoctor({ ...common, client: new BskIpcClient({ home: bskHome, autoStart: false }) });
+    assert.equal(plain.daemon.running, false);
+    assert.equal(plain.daemon.startBlocked, false, "a daemon that was never started is not a refused start");
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(bskHome, { recursive: true, force: true }); }
 });
 
 test("bskOnboard runs install -> daemon -> register and returns the single human step, then waits for the browser", async () => {
