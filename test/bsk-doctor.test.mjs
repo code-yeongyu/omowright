@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startFakeBskDaemon } from "./fixtures/fake-bsk-daemon.mjs";
-import { BskIpcClient } from "../src/bsk/ipc-client.js";
+import { BskIpcClient, BskRpcError } from "../src/bsk/ipc-client.js";
 import { bskDoctor, bskOnboard } from "../src/bsk/onboard.js";
 import { installBskCli, cliInstallCommand } from "../src/bsk/install-cli.js";
 
@@ -100,6 +100,18 @@ test("bskDoctor without a daemon reports it instead of throwing", async () => {
     assert.match(report.daemon.error, /daemon\.json/);
     assert.equal(report.ready, false);
   } finally { rmSync(home, { recursive: true, force: true }); rmSync(bskHome, { recursive: true, force: true }); }
+});
+
+test("bskDoctor names a start the host's Job Object refuses and points at a foreground daemon, not another detached start", async () => {
+  const home = macHomeWithChrome();
+  const refusal = "cannot start an independent Windows daemon; the host may prohibit Job Object breakaway; use `bsk daemon start --foreground` in a persistent host task or start from an independent terminal";
+  const client = { call: async () => { throw new BskRpcError("no_daemon", refusal); } };
+  try {
+    const report = await bskDoctor({ platform: "darwin", home, client, ...scoped(home), bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.3.3", waitForBrowserMs: 0 });
+    assert.equal(report.daemon.running, false);
+    assert.equal(report.daemon.startBlocked, true);
+    assert.match(report.nextStep, /bsk daemon start --foreground/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test("bskOnboard runs install -> daemon -> register and returns the single human step, then waits for the browser", async () => {
