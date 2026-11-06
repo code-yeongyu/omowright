@@ -151,12 +151,32 @@
 	]);
 	// Longest label an interactive read keeps for a clickable generic; matches normalizeName.
 	const INTERACTIVE_LABEL_MAX = 100;
-	// State feedback an interactive read keeps as capped text, like a control's label.
-	const FEEDBACK_TEXT_ROLES = /* @__PURE__ */ new Set([
+	// Roles that are live regions by default; their text is state feedback an interactive read keeps.
+	const LIVE_REGION_ROLES = /* @__PURE__ */ new Set([
 		"alert",
 		"alertdialog",
-		"status"
+		"status",
+		"log",
+		"timer",
+		"marquee"
 	]);
+	// The live region an element sits in: the nearest ancestor (or the element itself) that sets
+	// aria-live polite/assertive or has a live role, or null outside one. An explicit aria-live wins on
+	// its own element, so aria-live="off" opts out; an invalid value counts as unset, as in ARIA.
+	function getLiveRegionRoot(element) {
+		for (let current = element; current; current = getParentElementAcrossShadowBoundary(current)) {
+			const live = (current.getAttribute("aria-live") || "").trim().toLowerCase();
+			if (live === "polite" || live === "assertive") return current;
+			if (live === "off") return null;
+			if (LIVE_REGION_ROLES.has(getRole(current))) return current;
+		}
+		return null;
+	}
+	// True when `ancestor` is `element` itself or one of its ancestors, across shadow boundaries.
+	function isSelfOrAncestor(ancestor, element) {
+		for (let current = element; current; current = getParentElementAcrossShadowBoundary(current)) if (current === ancestor) return true;
+		return false;
+	}
 	const INTERACTIVE_REF_ROLES = /* @__PURE__ */ new Set([
 		"button",
 		"link",
@@ -925,7 +945,8 @@
 	function withoutWhitespace(text) {
 		return normalizeWhitespace(text).replace(/\s+/g, "");
 	}
-	function mergeTextLeafChildren(node) {
+	// `liveText` maps each live-region root to the text pieces the snapshot kept from inside it.
+	function mergeTextLeafChildren(node, liveText) {
 		const textLeafRoles = /* @__PURE__ */ new Set([
 			"generic",
 			"heading",
@@ -954,10 +975,25 @@
 			if (!merged) return;
 			if (!current.name) {
 				current.name = merged;
-				current.children = [];
+				// The name is cut at 100 characters. When the cut drops the text of a live region nested inside
+				// this node (a toast in a scrollable or clickable container), that text stays as a child, capped
+				// once per live-region root; the container's own text keeps only the cut name.
+				const full = texts.join(" ");
+				current.children = merged.length < normalizeWhitespace(full).length && current.element && !getLiveRegionRoot(current.element) ? nestedLiveTexts(current.element, withoutWhitespace(full), withoutWhitespace(merged)) : [];
 				return;
 			}
 			if (withoutWhitespace(current.name) === withoutWhitespace(merged)) current.children = [];
+		};
+		// Capped text of the live regions inside `element` that appears in the node's text but not in its cut name.
+		const nestedLiveTexts = (element, fullText, nameText) => {
+			const kept = [];
+			for (const [root, pieces] of liveText) {
+				if (root === element || !isSelfOrAncestor(element, root)) continue;
+				const text = normalizeName(mergeStringBuffer(pieces));
+				const bare = withoutWhitespace(text);
+				if (bare && fullText.includes(bare) && !nameText.includes(bare)) kept.push(text);
+			}
+			return kept;
 		};
 		visit(node);
 	}
@@ -1045,6 +1081,14 @@
 				children: []
 			};
 			const visited = /* @__PURE__ */ new Set();
+			// Characters of live-region text an interactive read has kept so far, per live-region root.
+			const liveTextLength = /* @__PURE__ */ new Map();
+			// Text pieces kept from inside each live-region root, in either mode; see mergeTextLeafChildren.
+			const liveText = /* @__PURE__ */ new Map();
+			const keepLiveText = (root, text) => {
+				if (!liveText.has(root)) liveText.set(root, []);
+				liveText.get(root).push(text);
+			};
 			function traverse(element, currentDepth, parentNode) {
 				if (currentDepth > options.maxDepth) return;
 				if (!element?.tagName) return;
@@ -1075,19 +1119,34 @@
 					for (const child of getLightAndShadowChildNodes(element)) {
 						if (child.nodeType === Node.TEXT_NODE) {
 							if (!child.nodeValue || targetNode.role === "textbox") continue;
-							// Interactive reads keep the text of a node that is itself clickable, scrollable or
-							// state feedback (alert, status, alertdialog), whatever its children are, capped like an
-							// accessible name so a card wrapping a whole article stays short; free-standing prose
-							// under landmarks and generics is dropped.
+							// Interactive reads keep the text of a node that is itself clickable or scrollable, and
+							// text inside a live region (live roles or aria-live polite/assertive, such as toasts),
+							// capped like an accessible name so a card wrapping a whole article stays short;
+							// free-standing prose under landmarks and generics is dropped. A clickable or scrollable
+							// node caps its own text; live-region text is capped once per live-region root, whichever
+							// kept node it lands on, so two toasts in a row each keep their text and a log of many
+							// entries stays bounded. A live region nested inside the clickable or scrollable node (a
+							// toast in a scrollable app shell) uses its live-region budget, not the node's own.
 							if (options.interactive && targetNode.role !== "heading" && !INTERACTIVE_REF_ROLES.has(targetNode.role)) {
-								if (!targetNode.interactiveControl && !targetNode.scrollable && !FEEDBACK_TEXT_ROLES.has(targetNode.role)) continue;
-								const room = INTERACTIVE_LABEL_MAX - (targetNode.labelLength ?? 0);
+								const liveRoot = getLiveRegionRoot(element);
+								const ownText = (targetNode.interactiveControl || targetNode.scrollable) && !(liveRoot && !isSelfOrAncestor(liveRoot, targetNode.element));
+								if (!ownText && !liveRoot) continue;
+								const used = ownText ? targetNode.labelLength ?? 0 : liveTextLength.get(liveRoot) ?? 0;
+								const room = INTERACTIVE_LABEL_MAX - used;
 								if (room <= 0) continue;
 								const collapsed = child.nodeValue.replace(/\s+/g, " ");
-								targetNode.labelLength = (targetNode.labelLength ?? 0) + Math.min(collapsed.length, room);
-								targetNode.children.push(collapsed.length > room ? collapsed.substring(0, room) : child.nodeValue);
+								const kept = used + Math.min(collapsed.length, room);
+								if (ownText) targetNode.labelLength = kept;
+								else liveTextLength.set(liveRoot, kept);
+								const piece = collapsed.length > room ? collapsed.substring(0, room) : child.nodeValue;
+								if (liveRoot) keepLiveText(liveRoot, piece);
+								targetNode.children.push(piece);
 								continue;
 							}
+							// Text of a wrapper below the kept node may sit in a nested live region; text on the kept
+							// node itself never does.
+							const liveRoot = element !== targetNode.element && getLiveRegionRoot(element);
+							if (liveRoot) keepLiveText(liveRoot, child.nodeValue);
 							targetNode.children.push(child.nodeValue);
 							continue;
 						}
@@ -1117,7 +1176,7 @@
 			} else if (document.body) traverse(document.body, 0, treeRoot);
 			normalizeStringChildren(treeRoot);
 			normalizeGenericRoles(treeRoot);
-			mergeTextLeafChildren(treeRoot);
+			mergeTextLeafChildren(treeRoot, liveText);
 			const duplicateRefs = findDuplicateRefIds(treeRoot);
 			if (duplicateRefs.length > 0) return {
 				error: `Snapshot produced duplicate refs: ${duplicateRefs.join(", ")}. Take a new snapshot and retry.`,
