@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { findBskBinary } from "./daemon-info.js";
 import { BskIpcClient } from "./ipc-client.js";
-import { listBrowsers } from "./connect.js";
+import { isTabGroupingExtension, listBrowsers, TAB_GROUPING_EXTENSION_STEP } from "./connect.js";
 import { catalogBrowsers, externalExtensionEntry, registerExternalExtension, STORE_PAGE_URLS } from "./external-extension.js";
 import { probeBrowserSignals } from "./browser-signals.js";
 import { identifyBrowser } from "./identify-browser.js";
@@ -65,7 +65,7 @@ function choiceStep(identification) {
 }
 
 function nextStepFor({ cli, daemon, browsers, browsersConnected, identification, primary }) {
-  if (browsersConnected.length > 0) return null;
+  if (browsersConnected.length > 0) return browsersConnected.every(isTabGroupingExtension) ? TAB_GROUPING_EXTENSION_STEP : null;
   if (!cli.installed) return "Install the bsk CLI (bskOnboard() runs the official installer).";
   if (!daemon.running) return daemonStep(daemon);
   if (browsers.length === 0 && !primary) return NO_BROWSER_STEP;
@@ -83,7 +83,8 @@ export async function bskDoctor({
   const daemon = await daemonReport(ipc, waitForBrowserMs);
   const { browsers, identification, primary } = await identify({ platform, home, env, exists, browser, connected: daemon.browsers.map((b) => b.browser_name), signals, probeSignals, now });
   const browsersConnected = daemon.browsers;
-  const report = { cli, daemon, browsers, primary: primary ?? null, identification, browsersConnected, ready: browsersConnected.length > 0 };
+  const outdatedExtensions = browsersConnected.filter(isTabGroupingExtension);
+  const report = { cli, daemon, browsers, primary: primary ?? null, identification, browsersConnected, outdatedExtensions, ready: browsersConnected.length > outdatedExtensions.length };
   report.nextStep = nextStepFor(report);
   return report;
 }

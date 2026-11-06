@@ -190,3 +190,29 @@ test("connectBrowserSkill sends a browser name as the instance id of the one con
   await assert.rejects(connectBrowserSkill({ client: twoChromes, browser: "chrome" }), (err) => err.code === "invalid_params" && /a, b/.test(err.message));
   assert.equal(twoChromes.calls.some((c) => c.method === "session.start"), false);
 });
+
+// BrowserSkill extension 0.4.0 put every task tab into a native "BrowserSkill" tab group; Chrome saves and syncs those
+// groups, so they stay in the user's own browser after the task ends (upstream removed the feature in 0.4.1).
+test("connectBrowserSkill never starts a session on the tab-grouping BrowserSkill extension 0.4.0", async () => {
+  const old = { instance_id: "old1", browser_name: "chrome", extension_version: "0.4.0" };
+  const current = { instance_id: "new1", browser_name: "edge", extension_version: "0.4.2" };
+  const start = (browsers, browser) => {
+    const client = stubClient({ "system.status": { browsers }, "session.start": (params) => ({ session_id: "s", browser_instance_id: params.browser_instance_id }) });
+    return { client, started: connectBrowserSkill({ client, browser }) };
+  };
+
+  for (const browser of [undefined, "old1", "chrome"]) {
+    const { client, started } = start([old], browser);
+    await assert.rejects(started, (err) => {
+      assert.equal(err.code, "extension_outdated");
+      assert.match(err.message, /0\.4\.0/);
+      assert.match(err.message, /tab group/i);
+      return true;
+    });
+    assert.equal(client.calls.some((c) => c.method === "session.start"), false, `browser=${browser}`);
+  }
+
+  const { client, started } = start([old, current], undefined);
+  await started;
+  assert.equal(client.calls.find((c) => c.method === "session.start").params.browser_instance_id, "new1", "with no browser named, the up-to-date extension is chosen");
+});
