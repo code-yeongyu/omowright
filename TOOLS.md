@@ -345,8 +345,11 @@ loop; the module files next to it are implementation detail.
   the BrowserSkill daemon's IPC socket and returns a `BskSession`. `browser`
   takes an instance id, a unique label, or a browser name such as `"chrome"`
   that exactly one connected browser carries. Throws
-  `BskRpcError` `no_browser_connected` when no extension is attached; never
-  launches a browser of its own.
+  `BskRpcError` `no_browser_connected` when no extension is attached, and
+  `extension_outdated` when the chosen extension is 0.4.0 (its task tab groups
+  stay in the user's browser after the task); with no `browser` named it picks
+  an up-to-date connected browser over a 0.4.0 one. Never launches a browser of
+  its own.
 - `BskSession`: `navigate`, `back`, `forward`, `reload`, `observe`, `snapshot`,
   `getHtml`, `screenshot({ ref, fullPage })`, `click`, `hover`, `fill`,
   `press`, `select`, `focus`, `blur`, `scrollTo`, `wheel`, `evaluate`,
