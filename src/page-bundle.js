@@ -149,6 +149,14 @@
 		"details",
 		"summary"
 	]);
+	// Longest label an interactive read keeps for a clickable generic; matches normalizeName.
+	const INTERACTIVE_LABEL_MAX = 100;
+	// State feedback an interactive read keeps as capped text, like a control's label.
+	const FEEDBACK_TEXT_ROLES = /* @__PURE__ */ new Set([
+		"alert",
+		"alertdialog",
+		"status"
+	]);
 	const INTERACTIVE_REF_ROLES = /* @__PURE__ */ new Set([
 		"button",
 		"link",
@@ -749,7 +757,7 @@
 	}
 	function shouldIncludeNode(element, options) {
 		const role = getRole(element);
-		if (options.interactive) return role === "canvas" || isInteractive(element) || isScrollable(element) || isLandmark(element);
+		if (options.interactive) return role === "canvas" || role === "heading" || isInteractive(element) || isScrollable(element) || isLandmark(element);
 		if (isInteractive(element)) return true;
 		if (isScrollable(element)) return true;
 		if (isLandmark(element)) return true;
@@ -831,6 +839,7 @@
 			selected: selected || void 0,
 			focused: focused || void 0,
 			disabled: disabled || void 0,
+			interactiveControl: interactivity.interactive || void 0,
 			refId: nodeRefId,
 			hints,
 			href: href ?? void 0,
@@ -1066,6 +1075,19 @@
 					for (const child of getLightAndShadowChildNodes(element)) {
 						if (child.nodeType === Node.TEXT_NODE) {
 							if (!child.nodeValue || targetNode.role === "textbox") continue;
+							// Interactive reads keep the text of a node that is itself clickable, scrollable or
+							// state feedback (alert, status, alertdialog), whatever its children are, capped like an
+							// accessible name so a card wrapping a whole article stays short; free-standing prose
+							// under landmarks and generics is dropped.
+							if (options.interactive && targetNode.role !== "heading" && !INTERACTIVE_REF_ROLES.has(targetNode.role)) {
+								if (!targetNode.interactiveControl && !targetNode.scrollable && !FEEDBACK_TEXT_ROLES.has(targetNode.role)) continue;
+								const room = INTERACTIVE_LABEL_MAX - (targetNode.labelLength ?? 0);
+								if (room <= 0) continue;
+								const collapsed = child.nodeValue.replace(/\s+/g, " ");
+								targetNode.labelLength = (targetNode.labelLength ?? 0) + Math.min(collapsed.length, room);
+								targetNode.children.push(collapsed.length > room ? collapsed.substring(0, room) : child.nodeValue);
+								continue;
+							}
 							targetNode.children.push(child.nodeValue);
 							continue;
 						}

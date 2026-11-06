@@ -104,3 +104,70 @@ test("bskSnapshot surfaces an in-page failure as an error instead of a partial r
   const failing = { evaluate: async () => ({ ok: false, error: { text: "ReferenceError: document is not defined", line: 1, column: 1 } }) };
   await assert.rejects(bskSnapshot(failing), /document is not defined/);
 });
+
+// The ref that carries a label: the label's own line if it has a ref, else the nearest
+// shallower line above it that has one (a text: child belongs to its parent's ref).
+function ownerRef(tree, label) {
+  const lines = tree.split("\n");
+  const at = lines.findIndex((line) => line.includes(label));
+  assert.ok(at >= 0, `tree has a line for ${label}:\n${tree}`);
+  const indent = (line) => line.match(/^ */)[0].length;
+  let depth = indent(lines[at]) + 1;
+  for (let i = at; i >= 0; i -= 1) {
+    if (indent(lines[i]) >= depth) continue;
+    const match = lines[i].match(/ref=(e\d+)/);
+    if (match) return match[1];
+    depth = indent(lines[i]);
+  }
+  assert.fail(`no ref carries ${label}:\n${tree}`);
+}
+
+// Ids of the fixture elements whose refs resolve inside each container.
+async function refsInside(mainWorldEvaluate, snap, ids) {
+  const reply = await mainWorldEvaluate(`(() => {
+    const css = ${JSON.stringify(Object.values(snap.css).filter(Boolean))};
+    const ids = ${JSON.stringify(ids)};
+    return Object.fromEntries(ids.map((id) => [id, css.filter((path) => document.querySelector(path)?.closest("#" + id)).length]));
+  })()`);
+  return reply.value;
+}
+
+test("interactive snapshots keep the label of a clickable or scrollable element whatever its children are", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
+  await withPage(async ({ mainWorldEvaluate }) => {
+    const fakeSession = { evaluate: (expression, opts) => mainWorldEvaluate(expression, opts) };
+    const snap = await bskSnapshot(fakeSession, { interactive: true });
+    const owners = {
+      "Nested pointer card": "#nested-pointer-card",
+      "Invoice 42 Due Friday": "#invoice-card",
+      "Open menu": "#open-menu",
+      "Span tile": "#span-tile",
+      "Settings": "#settings-tile",
+      "Option alpha": "#option-alpha",
+      "Option beta": "#option-beta",
+    };
+    for (const [label, css] of Object.entries(owners)) {
+      assert.match(snap.css[ownerRef(snap.tree, label)] ?? "", new RegExp(`${css}$`), `${label} is carried by the ref of ${css}:\n${snap.tree}`);
+    }
+    for (const label of ["Card tile", "Icon tile", "SVG tile"]) {
+      assert.match(snap.css[ownerRef(snap.tree, label)] ?? "", /#pointer-generics$/, `${label} is clicked through its pointer container:\n${snap.tree}`);
+    }
+    const longLine = snap.tree.split("\n").find((line) => line.includes("Long card start"));
+    assert.ok(longLine, `a long clickable card keeps the start of its label:\n${snap.tree}`);
+    assert.match(snap.css[ownerRef(snap.tree, "Long card start")] ?? "", /#long-card$/);
+    assert.ok(!snap.tree.includes("LONG_CARD_TAIL"), `a long label is capped, not copied whole:\n${longLine}`);
+    assert.match(snap.css[ownerRef(snap.tree, "Scroll box line one")] ?? "", /#scroll-box$/, `a scrollable box keeps its ref and the start of its text:\n${snap.tree}`);
+    assert.ok(!snap.tree.includes("This page watches itself"), "free-standing body prose stays out of the interactive read");
+  });
+});
+
+test("a pointer container keeps one ref however deep its children nest", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
+  await withPage(async ({ mainWorldEvaluate }) => {
+    const fakeSession = { evaluate: (expression, opts) => mainWorldEvaluate(expression, opts) };
+    for (const interactive of [false, true]) {
+      const snap = await bskSnapshot(fakeSession, { interactive });
+      const counts = await refsInside(mainWorldEvaluate, snap, ["pointer-section", "js-card", "link-card", "nested-pointer-card", "span-tile", "pointer-generics"]);
+      assert.deepEqual(counts, { "pointer-section": 1, "js-card": 1, "link-card": 1, "nested-pointer-card": 1, "span-tile": 1, "pointer-generics": 2 }, `interactive=${interactive}:\n${snap.tree}`);
+      assert.match(snap.tree, /"Pro plan new\$20\/mo"/, "inline price text is not split by per-span refs");
+    }
+  });
+});
