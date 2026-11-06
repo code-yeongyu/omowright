@@ -128,7 +128,13 @@ export async function bskOnboard({
     if (waitForBrowserMs === 0) break;
   }
   daemon = { ...daemon, browsers: browsersConnected };
-  const ready = browsersConnected.length > 0;
+  // An installed 0.4.0 extension needs the user to update it, not another registration: see bskDoctor.
+  const outdatedExtensions = browsersConnected.filter(isTabGroupingExtension);
+  const ready = browsersConnected.length > outdatedExtensions.length;
+  if (!ready && outdatedExtensions.length > 0) {
+    humanStep = TAB_GROUPING_EXTENSION_STEP;
+    onHumanStep({ browser: outdatedExtensions[0].browser_name, step: humanStep, registered: true, needsRestart: false });
+  }
   const nextStep = ready ? null : humanStep ?? nextStepFor({ cli, daemon, browsers, browsersConnected, identification, primary });
-  return { cli, install, daemon, browsers, primary: primary ?? null, identification, needsChoice, registrations, humanStep: ready ? null : humanStep, nextStep, browsersConnected, ready };
+  return { cli, install, daemon, browsers, primary: primary ?? null, identification, needsChoice, registrations, humanStep: ready ? null : humanStep, nextStep, browsersConnected, outdatedExtensions, ready };
 }

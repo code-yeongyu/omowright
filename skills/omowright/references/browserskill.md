@@ -112,6 +112,9 @@ if (!report.ready) {
   // result.needsChoice === true: nothing was registered; ask the user which
   //   browser they use (result.identification.candidates), then call again with
   //   { browser: "<id>" }.
+  // result.outdatedExtensions non-empty and ready === false: the only connected
+  //   extension is 0.4.0; humanStep (also sent to onHumanStep) tells the user to
+  //   update it to 0.4.1 or later and delete saved "BrowserSkill" tab groups.
   // result.daemon.running === false: humanStep is null and nothing was
   //   registered; result.nextStep says how to start the daemon. Start it and
   //   call again before telling the user anything.

@@ -241,3 +241,24 @@ test("bskDoctor is not ready while the only connected extension is the tab-group
     assert.match(report.nextStep, /tab group/i);
   } finally { await daemon.close(); rmSync(home, { recursive: true, force: true }); }
 });
+
+test("bskOnboard is not ready while the only connected extension is the tab-grouping BrowserSkill 0.4.0, and hands the user the update step", async () => {
+  const daemon = await startFakeBskDaemon({
+    handlers: { "system.status": () => ({ result: { daemon_version: "0.4.0-fake", protocol_version: "1.7", browsers: [{ instance_id: "abc", browser_name: "chrome", browser_version: "153", extension_version: "0.4.0" }], sessions: [] } }) },
+  });
+  const home = macHomeWithChrome();
+  const steps = [];
+  try {
+    const client = new BskIpcClient({ home: daemon.home, autoStart: false });
+    const result = await bskOnboard({
+      platform: "darwin", home, client, ...scoped(home), bskBin: "/fake/bsk", cliVersion: async () => "bsk 0.4.0",
+      onHumanStep: (step) => { steps.push(step); }, waitForBrowserMs: 0,
+    });
+    assert.equal(result.ready, false);
+    assert.deepEqual(result.outdatedExtensions.map((b) => b.instance_id), ["abc"]);
+    assert.match(result.humanStep, /0\.4\.1/);
+    assert.equal(result.nextStep, result.humanStep);
+    assert.deepEqual(steps.map((step) => [step.browser, step.step]), [["chrome", result.humanStep]]);
+    assert.equal(result.registrations.length, 0, "an installed, outdated extension is updated by the user, not registered again");
+  } finally { await daemon.close(); rmSync(home, { recursive: true, force: true }); }
+});
