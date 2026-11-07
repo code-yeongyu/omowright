@@ -144,7 +144,8 @@ function lease(key, entry, connection) {
   }));
   return new Proxy(connection, {
     get(target, property) {
-      if (property === "close") return close;
+      // Disposing a lease releases only this holder, like close() (#244).
+      if (property === "close" || property === Symbol.asyncDispose) return close;
       ensureOpen(property);
       if (property === "setDialogPolicy") return setDialogPolicy;
       if (property === "cdp") return clientView;

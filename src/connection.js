@@ -192,6 +192,12 @@ export class BrowserConnection {
     await this.#sessions.dispose();
     await this.#client.close();
   }
+
+  // `await using browser = await connect(...)` closes the connection when the
+  // scope ends, also on a throw, so an agent script exits on its own (#244).
+  async [Symbol.asyncDispose]() {
+    await this.close();
+  }
 }
 
 // The browser's WebSocket URL carries its GUID: a ws:// URL is one already, an

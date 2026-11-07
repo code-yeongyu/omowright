@@ -247,7 +247,13 @@ loop; the module files next to it are implementation detail.
   Attaches in one process share one CDP connection per browser, because
   Chrome asks the user to allow remote debugging once per connection: each
   attach returns a handle on it, `close()` releases that handle, and the last
-  release disconnects. A dropped socket is reconnected once, and a browser
+  release disconnects. Every connection handle is also async-disposable, so a
+  script can write `await using browser = await connect(url)`: the handle is
+  released when the scope ends, also on a throw, and the script exits without
+  a trailing `close()` or `process.exit()`. Agent tabs stay open for the next
+  script's `attachPage(targetId)`; popups the script attached are closed with
+  the connection, so create tabs that must outlive the script with
+  `createAgentTabs`. A dropped socket is reconnected once, and a browser
   with another GUID always gets its own connection. Callers passing different
   connection options (storage root, client options, `dialogPolicy`) are not
   shared. A holder never changes what another holder gets: on a shared handle
