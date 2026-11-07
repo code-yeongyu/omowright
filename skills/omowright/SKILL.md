@@ -49,11 +49,13 @@ tree). Read it as the new baseline. Baselines belong to each page; `diff: false`
 returns the ordinary full snapshot and replaces its baseline.
 
 To look for one thing on a long page, search instead of reading the whole tree:
-`page.snapshot({ find: "Checkout" })` (case-insensitive text, or a RegExp) returns only
+`page.snapshot({ find: "Checkout" })` (case-insensitive text, or a RegExp matched per
+line; its g and y flags are ignored) returns only
 the matching lines plus `context` lines around each (default 2, up to 10), `...` between
 gaps, `refs` for just those lines and `find: { query, matches }`. Zero matches is an
 empty tree, not an error. A search does not move the diff baseline, and `find` cannot
-be combined with `diff`.
+be combined with `diff`. `maxChars` still caps the whole captured tree before the
+search runs, so leave it off when searching a large page.
 
 ## Default engine: CloakBrowser
 

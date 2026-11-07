@@ -499,18 +499,35 @@ test("snapshot find returns matching lines with usable refs and keeps the diff b
   let browser;
   const filler = Array.from({ length: 12 }, (_, i) => `<h2>Section ${i}</h2>`).join("");
   const html = `<main><h1>Store</h1>${filler}<label>Coupon code<input></label>${filler}
-<button aria-pressed="false" onclick="this.setAttribute('aria-pressed','true')">Pay now</button><a href="#later">Pay later</a></main>`;
+<button aria-pressed="false" onclick="this.setAttribute('aria-pressed','true')">Pay now</button><a href="#later">Pay later</a>
+<button>see [ref=e1] notes</button></main>`;
   try {
     browser = await connectPipe({ browserPath: SHELL, browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`], storageRoot: ud });
     const page = await browser.newTab(`data:text/html,${encodeURIComponent(html)}`);
     const full = await page.snapshot();
-    const lines = full.tree.split("\n");
+    const fullRef = name => Object.keys(full.refs).find(ref => full.refs[ref].name === name);
+    const coupons = fullRef("Coupon code");
+    const button = fullRef("Pay now");
+    // Change the page between the full read and the searches, so a search that replaced the
+    // baseline with its own capture would hide this fill from the diff at the end.
+    // Set the value from script, not fill(): fill() focuses the field and the later click
+    // would then change its line through focus alone, whatever the baseline was.
+    await page.evaluate("document.querySelector('input').value = 'SAVE10'");
+    const lines = (await page.snapshot({ find: /[\s\S]/, context: 0 })).tree.split("\n");
+    assert.notEqual(lines.join("\n"), full.tree);
 
     const pay = await page.snapshot({ find: "PAY", context: 0 });
     assert.deepEqual(pay.find, { query: "PAY", matches: 2 });
     assert.deepEqual(pay.tree.split("\n"), lines.filter(line => /pay/i.test(line)));
     assert.deepEqual(Object.keys(pay.refs).sort(), [...pay.tree.matchAll(/\[ref=(e\d+)\]/g)].map(m => m[1]).sort());
     assert.equal(Object.keys(pay.refs).length, 2);
+    const sticky = /pay/giy;
+    assert.equal((await page.snapshot({ find: sticky, context: 0 })).find.matches, 2);
+    assert.equal(sticky.lastIndex, 0);
+    // A ref written inside an accessible name is text, not the line's own ref.
+    const quoted = await page.snapshot({ find: "see [ref=", context: 0 });
+    assert.deepEqual(Object.keys(quoted.refs), [fullRef("see [ref=e1] notes")]);
+    assert.notEqual(fullRef("see [ref=e1] notes"), "e1");
 
     // The label text and the textbox both match; context 2 widens around the first and last.
     const coupon = await page.snapshot({ find: /coupon/i });
@@ -528,14 +545,14 @@ test("snapshot find returns matching lines with usable refs and keeps the diff b
     await assert.rejects(page.snapshot({ find: "" }), TypeError);
     await assert.rejects(page.snapshot({ find: "Pay", context: 11 }), TypeError);
 
-    const coupons = Object.keys(coupon.refs).find(ref => coupon.refs[ref].name === "Coupon code");
-    await page.locator(coupons).fill("SAVE10");
-    const button = Object.keys(pay.refs).find(ref => pay.refs[ref].name === "Pay now");
+    assert.ok(coupons in coupon.refs);
+    assert.ok(button in pay.refs);
     await page.locator(button).click();
     // The searches above must not have replaced the baseline from the full read.
     const changes = await page.snapshot({ diff: true });
     assert.equal(changes.full, false, JSON.stringify(changes));
     assert.deepEqual(changes.diff.changed.map(node => node.ref).sort(), [button, coupons].sort());
+    assert.match(changes.diff.changed.find(node => node.ref === coupons).tree, /SAVE10/);
   } finally {
     await browser?.close();
     removeTreeSync(ud);
