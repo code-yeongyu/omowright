@@ -48,6 +48,13 @@ changed snapshot options, unreferenced text changes, or a delta larger than the
 tree). Read it as the new baseline. Baselines belong to each page; `diff: false`
 returns the ordinary full snapshot and replaces its baseline.
 
+To look for one thing on a long page, search instead of reading the whole tree:
+`page.snapshot({ find: "Checkout" })` (case-insensitive text, or a RegExp) returns only
+the matching lines plus `context` lines around each (default 2, up to 10), `...` between
+gaps, `refs` for just those lines and `find: { query, matches }`. Zero matches is an
+empty tree, not an error. A search does not move the diff baseline, and `find` cannot
+be combined with `diff`.
+
 ## Default engine: CloakBrowser
 
 Use the CloakBrowser binary by default, not a plain headless shell — most real

@@ -49,7 +49,9 @@ await browser.close();
 ```
 
 Re-snapshots come back as a unified diff against the previous tree, so a model
-reads what changed instead of the whole page again.
+reads what changed instead of the whole page again. To look for one thing,
+`page.snapshot({ find: "Checkout" })` returns only the matching lines, with
+their refs and a little context around each.
 
 ## Snapshot size
 

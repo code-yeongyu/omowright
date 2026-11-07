@@ -491,6 +491,57 @@ test("snapshot diffs describe form changes and reset on navigation", { skip: !SH
   }
 });
 
+// Protects the public snapshot({ find }) contract at the real page boundary: matching lines
+// with context and gaps, refs that still drive locators, empty searches, argument refusals,
+// and a diff baseline that a search must not move.
+test("snapshot find returns matching lines with usable refs and keeps the diff baseline", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
+  const ud = mkdtempSync(path.join(tmpdir(), "omowright-find-"));
+  let browser;
+  const filler = Array.from({ length: 12 }, (_, i) => `<h2>Section ${i}</h2>`).join("");
+  const html = `<main><h1>Store</h1>${filler}<label>Coupon code<input></label>${filler}
+<button aria-pressed="false" onclick="this.setAttribute('aria-pressed','true')">Pay now</button><a href="#later">Pay later</a></main>`;
+  try {
+    browser = await connectPipe({ browserPath: SHELL, browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`], storageRoot: ud });
+    const page = await browser.newTab(`data:text/html,${encodeURIComponent(html)}`);
+    const full = await page.snapshot();
+    const lines = full.tree.split("\n");
+
+    const pay = await page.snapshot({ find: "PAY", context: 0 });
+    assert.deepEqual(pay.find, { query: "PAY", matches: 2 });
+    assert.deepEqual(pay.tree.split("\n"), lines.filter(line => /pay/i.test(line)));
+    assert.deepEqual(Object.keys(pay.refs).sort(), [...pay.tree.matchAll(/\[ref=(e\d+)\]/g)].map(m => m[1]).sort());
+    assert.equal(Object.keys(pay.refs).length, 2);
+
+    // The label text and the textbox both match; context 2 widens around the first and last.
+    const coupon = await page.snapshot({ find: /coupon/i });
+    const hits = lines.flatMap((line, i) => /coupon/i.test(line) ? [i] : []);
+    assert.equal(coupon.find.matches, 2);
+    assert.equal(coupon.tree, lines.slice(hits[0] - 2, hits[1] + 3).join("\n"));
+    const separated = await page.snapshot({ find: /Section (0|11)\b/, context: 0 });
+    assert.equal(separated.find.matches, 4);
+    assert.equal(separated.tree.split("\n").filter(line => line === "...").length, 3);
+
+    const none = await page.snapshot({ find: "no such text" });
+    assert.deepEqual(none, { tree: "", refs: {}, find: { query: "no such text", matches: 0 } });
+    await assert.rejects(page.snapshot({ find: "Pay", diff: true }), TypeError);
+    await assert.rejects(page.snapshot({ context: 1 }), TypeError);
+    await assert.rejects(page.snapshot({ find: "" }), TypeError);
+    await assert.rejects(page.snapshot({ find: "Pay", context: 11 }), TypeError);
+
+    const coupons = Object.keys(coupon.refs).find(ref => coupon.refs[ref].name === "Coupon code");
+    await page.locator(coupons).fill("SAVE10");
+    const button = Object.keys(pay.refs).find(ref => pay.refs[ref].name === "Pay now");
+    await page.locator(button).click();
+    // The searches above must not have replaced the baseline from the full read.
+    const changes = await page.snapshot({ diff: true });
+    assert.equal(changes.full, false, JSON.stringify(changes));
+    assert.deepEqual(changes.diff.changed.map(node => node.ref).sort(), [button, coupons].sort());
+  } finally {
+    await browser?.close();
+    removeTreeSync(ud);
+  }
+});
+
 test("JavaScript dialogs are auto-accepted and surfaced as events", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-dialog-test-"));
   let connection;

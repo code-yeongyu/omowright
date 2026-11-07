@@ -30,8 +30,48 @@ function indexTree(tree) {
   return { nodes, focused, unreferenced: unreferenced.join("\n") };
 }
 
+const REF_ATTR = /\[ref=((?:f\d+)?e\d+)\]/g;
+
+function findLines(snapshot, find, context = 2) {
+  const isRegExp = find instanceof RegExp;
+  if (!isRegExp && (typeof find !== "string" || find === "")) {
+    throw new TypeError("snapshot({ find }) needs a non-empty string or a RegExp");
+  }
+  if (!Number.isInteger(context) || context < 0 || context > 10) {
+    throw new TypeError("snapshot({ context }) must be an integer from 0 to 10");
+  }
+  const needle = isRegExp ? null : find.toLowerCase();
+  const lines = snapshot.tree ? snapshot.tree.split("\n") : [];
+  const matched = [];
+  lines.forEach((line, index) => {
+    if (isRegExp) find.lastIndex = 0;
+    if (isRegExp ? find.test(line) : line.toLowerCase().includes(needle)) matched.push(index);
+  });
+  const included = new Set();
+  for (const index of matched) {
+    for (let i = Math.max(0, index - context); i <= Math.min(lines.length - 1, index + context); i++) included.add(i);
+  }
+  const out = [];
+  let previous = -1;
+  for (const index of [...included].sort((a, b) => a - b)) {
+    if (out.length && index > previous + 1) out.push("...");
+    out.push(lines[index]);
+    previous = index;
+  }
+  const tree = out.join("\n");
+  const refs = {};
+  for (const [, ref] of tree.matchAll(REF_ATTR)) if (snapshot.refs?.[ref]) refs[ref] = snapshot.refs[ref];
+  return { tree, refs, find: { query: String(find), matches: matched.length } };
+}
+
 export function snapshotResult(frameManager, options, snapshot) {
-  const { diff, ...scope } = options;
+  const { diff, find, context, ...scope } = options;
+  if (find !== undefined) {
+    if (diff === true) throw new TypeError("snapshot() accepts diff or find, not both");
+    // A search is a partial read: leave the diff baseline at the last full or diff read.
+    return findLines(snapshot, find, context);
+  }
+  if (context !== undefined) throw new TypeError("snapshot({ context }) needs find");
   const document = frameManager.getFrame(frameManager.mainFrameId);
   const contexts = JSON.stringify(frameManager.collectDescendantFrames(frameManager.mainFrameId)
     .map(({ frameId }) => [frameId, frameManager.getFrame(frameId)?.isolatedContextId]));
