@@ -30,8 +30,57 @@ function indexTree(tree) {
   return { nodes, focused, unreferenced: unreferenced.join("\n") };
 }
 
+const REF_ATTR = /\[ref=((?:f\d+)?e\d+)\]/g;
+const QUOTED = /"(?:\\.|[^"\\])*"/g;
+
+// Called by page.snapshot() before the in-page capture, so a bad call costs no capture.
+export function validateSnapshotOptions(options) {
+  const { diff, find, context } = options;
+  if (find === undefined) {
+    if (context !== undefined) throw new TypeError("snapshot({ context }) needs find");
+    return;
+  }
+  if (diff === true) throw new TypeError("snapshot() accepts diff or find, not both");
+  if (!(find instanceof RegExp) && (typeof find !== "string" || find === "")) {
+    throw new TypeError("snapshot({ find }) needs a non-empty string or a RegExp");
+  }
+  if (context !== undefined && (!Number.isInteger(context) || context < 0 || context > 10)) {
+    throw new TypeError("snapshot({ context }) must be an integer from 0 to 10");
+  }
+}
+
+function findLines(snapshot, find, context = 2) {
+  // Matching is per line: g and y would carry lastIndex between lines or pin a match to
+  // column 0, so drop them on a private copy and leave the caller's RegExp untouched.
+  const pattern = find instanceof RegExp ? new RegExp(find.source, find.flags.replace(/[gy]/g, "")) : null;
+  const needle = pattern ? null : find.toLowerCase();
+  const lines = snapshot.tree ? snapshot.tree.split("\n") : [];
+  const matched = [];
+  lines.forEach((line, index) => {
+    if (pattern ? pattern.test(line) : line.toLowerCase().includes(needle)) matched.push(index);
+  });
+  const included = new Set();
+  for (const index of matched) {
+    for (let i = Math.max(0, index - context); i <= Math.min(lines.length - 1, index + context); i++) included.add(i);
+  }
+  const out = [];
+  let previous = -1;
+  for (const index of [...included].sort((a, b) => a - b)) {
+    if (out.length && index > previous + 1) out.push("...");
+    out.push(lines[index]);
+    previous = index;
+  }
+  const tree = out.join("\n");
+  const refs = {};
+  // An accessible name can contain "[ref=e9]" as text; only the line's own ref attribute counts.
+  for (const [, ref] of tree.replace(QUOTED, "").matchAll(REF_ATTR)) if (snapshot.refs?.[ref]) refs[ref] = snapshot.refs[ref];
+  return { tree, refs, find: { query: String(find), matches: matched.length } };
+}
+
 export function snapshotResult(frameManager, options, snapshot) {
-  const { diff, ...scope } = options;
+  const { diff, find, context, ...scope } = options;
+  // A search is a partial read: leave the diff baseline at the last full or diff read.
+  if (find !== undefined) return findLines(snapshot, find, context);
   const document = frameManager.getFrame(frameManager.mainFrameId);
   const contexts = JSON.stringify(frameManager.collectDescendantFrames(frameManager.mainFrameId)
     .map(({ frameId }) => [frameId, frameManager.getFrame(frameId)?.isolatedContextId]));

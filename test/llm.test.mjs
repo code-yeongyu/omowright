@@ -45,6 +45,15 @@ test("compactSnapshot renders delta entries and frame-local removed ranges", () 
   assert.equal(compactSnapshot(JSON.stringify(snapshot)), compactSnapshot(snapshot));
 });
 
+// Protects the public compactSnapshot rendering of a snapshot({ find }) result: without the
+// header a model cannot tell a filtered view (or an empty search) from a whole page.
+test("compactSnapshot labels find results with their match count", () => {
+  const found = { tree: '- button "Pay" [ref=e4]\n...\n- link "Pay later" [ref=e9]', refs: {}, find: { query: "pay", matches: 2 } };
+  assert.equal(compactSnapshot(found), `2 matching lines for pay:\n${found.tree}`);
+  assert.equal(compactSnapshot(JSON.stringify(found)), compactSnapshot(found));
+  assert.equal(compactSnapshot({ tree: "", refs: {}, find: { query: "/zzz/i", matches: 0 } }), "0 matching lines for /zzz/i");
+});
+
 test("snapshotTokens reports bytes and token estimate", () => {
   const { bytes, estTokens } = snapshotTokens(GITHUB_LIKE);
   assert.equal(bytes, Buffer.byteLength(GITHUB_LIKE, "utf8"));

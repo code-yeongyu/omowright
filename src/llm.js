@@ -14,6 +14,11 @@ export function compactSnapshot(snapshot) {
     return lines.join("\n");
   }
   if (!obj || typeof obj.tree !== "string") throw new TypeError(SNAPSHOT_PARSE_ERROR);
+  if (obj.find) {
+    const { query, matches } = obj.find;
+    const header = `${matches} matching ${matches === 1 ? "line" : "lines"} for ${query}`;
+    return obj.tree ? `${header}:\n${obj.tree}` : header;
+  }
   return obj.tree;
 }
 
@@ -55,7 +60,7 @@ export const toolSchemas = [
   },
   {
     name: "page.snapshot",
-    description: "PRIMARY page read. Snapshot once, act on refs, then use {diff:true} for changes. Full fallbacks carry full:true and a reason. Options: diff, maxDepth, maxChars, interactive, showHidden, selector, ref.",
+    description: "PRIMARY page read. Snapshot once, act on refs, re-read with {diff:true} (fallback: full:true, reason) or {find} to search. Options: diff, find, context, maxDepth, maxChars, interactive, showHidden, selector, ref.",
     parameters: { type: "object", properties: { options: { type: "object" } } },
   },
   {
