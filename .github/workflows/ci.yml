@@ -73,6 +73,36 @@ jobs:
         shell: bash
         run: bun run test 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
 
+      # The same suite under real Node: bun is the development runner, and a package
+      # Node consumers install has to keep working there (see packages' exports).
+      - name: node test
+        env:
+          SHELL_BIN: ${{ steps.browser.outputs.bin }}
+          CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
+        shell: bash
+        run: bun run test:node 2>&1 | tee "$RUNNER_TEMP/node-test.log"
+
+      # The tarball a consumer installs, imported by its package name under Node, which
+      # is what `exports` has to resolve. The runtime half of the build only: the
+      # declarations step is still blocked, so prepack (the full build) is bypassed and
+      # this step is the guard for the export map until it lands.
+      - name: Packed artifact (Node import)
+        shell: bash
+        run: |
+          bun run build --only=js,assets,bin
+          mkdir -p "$RUNNER_TEMP/packed/consumer"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/packed"
+          cd "$RUNNER_TEMP/packed/consumer"
+          npm init -y >/dev/null
+          npm install ../omowright-*.tgz --no-audit --no-fund >/dev/null
+          node --input-type=module -e '
+            const api = await import("omowright");
+            for (const name of ["OmOPage", "OmOMouse", "OmOKeyboard"]) {
+              if (api[name]?.name !== name) throw new Error(`wrong runtime class name: ${name}`);
+            }
+            console.log(`packed import ok: ${Object.keys(api).length} exports`);
+          ' | tee "$RUNNER_TEMP/packed-import.log"
+
       - name: Workflow summary
         if: always()
         shell: bash
@@ -87,6 +117,7 @@ jobs:
             echo "| Runner | ${{ runner.os }} |"
             echo "| Browser | ${{ steps.browser.outputs.bin }} |"
             echo "| bun test pass / fail | $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ pass$') / $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ fail$') |"
+            echo "| node test pass / fail | $(count "$RUNNER_TEMP/node-test.log" '^# pass ') / $(count "$RUNNER_TEMP/node-test.log" '^# fail ') |"
             echo "| Ref | ${{ github.ref_name }} |"
             echo "| Commit | ${{ github.sha }} |"
           } >> "$GITHUB_STEP_SUMMARY"
