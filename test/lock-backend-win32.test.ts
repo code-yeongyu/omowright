@@ -10,8 +10,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const backendPath = new URL("../src/lock-backend-win32.ts", import.meta.url).pathname;
+const backendPath = fileURLToPath(new URL("../src/lock-backend-win32.ts", import.meta.url));
 
 function runWithMockedFfi(dlopenBody: string, scenario: string): unknown {
   const dir = mkdtempSync(path.join(tmpdir(), "omowright-ffi-"));

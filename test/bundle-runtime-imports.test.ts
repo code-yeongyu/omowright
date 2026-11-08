@@ -10,8 +10,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const entry = new URL("../src/index.ts", import.meta.url).pathname;
+const entry = fileURLToPath(new URL("../src/index.ts", import.meta.url));
 const STATIC_BUN_IMPORT =
   /(?:^|[;}\s])(?:import|export)\b[^;"'`]*?\bfrom\s*["']bun:[a-z]+["']|(?:^|[;}\s])import\s*["']bun:[a-z]+["']/gm;
 
