@@ -2,12 +2,16 @@
 
 Generated against origin/main. Suite line at generation: no suite run captured yet
 
-Modules compared: **83**. Ported: **83**. Modules that lost at least one export: **0**.
+Modules compared: **87**. Ported: **87**. Modules that lost at least one export: **0**.
 
 | module | ported | exports before | exports after | lost |
 |---|---|---|---|---|
 | src/agent-tabs.js | yes | 3 | 3 | - |
 | src/aria-hidden.js | yes | 1 | 1 | - |
+| src/aside/cli-contract.js | yes | 2 | 2 | - |
+| src/aside/errors.js | yes | 1 | 1 | - |
+| src/aside/line-transport.js | yes | 1 | 1 | - |
+| src/aside/mcp-transport.js | yes | 1 | 1 | - |
 | src/aside/onboard.js | yes | 6 | 6 | - |
 | src/aside/session.js | yes | 4 | 4 | - |
 | src/bridge-schemas.js | yes | 14 | 16 | - |
