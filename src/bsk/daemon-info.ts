@@ -16,7 +16,7 @@ export interface DaemonInfo {
 export interface StartDaemonOptions {
   home?: string;
   env?: NodeJS.ProcessEnv;
-  bskBin?: string;
+  bskBin?: string | undefined;
   timeoutMs?: number;
 }
 

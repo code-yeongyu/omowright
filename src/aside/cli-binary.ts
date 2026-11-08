@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 // The Aside CLI and any arguments before `repl`; the binary is absent when none was found.
-export type AsideCommand = readonly [bin?: string | null, ...lead: string[]];
+export type AsideCommand = readonly [bin?: string | null | undefined, ...lead: string[]];
 
 export interface FindAsideBinaryOptions {
   env?: NodeJS.ProcessEnv;

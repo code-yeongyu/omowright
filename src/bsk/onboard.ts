@@ -52,7 +52,11 @@ export interface InstallOutcome {
   [field: string]: unknown;
 }
 
-export type InstallCli = (options: { platform: string; home: string; installDir?: string }) => Promise<InstallOutcome>;
+export type InstallCli = (options: {
+  platform: string;
+  home: string;
+  installDir?: string | undefined;
+}) => Promise<InstallOutcome>;
 
 export interface HumanStepEvent {
   browser: unknown;

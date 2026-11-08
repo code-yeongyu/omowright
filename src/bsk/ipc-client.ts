@@ -49,13 +49,13 @@ export interface BskCallHandle {
 }
 
 export interface BskIpcClientOptions {
-  home?: string;
-  env?: NodeJS.ProcessEnv;
-  sockPath?: string;
-  autoStart?: boolean;
+  home?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  sockPath?: string | undefined;
+  autoStart?: boolean | undefined;
   startDaemon?: () => Promise<unknown>;
-  timeoutMs?: number;
-  bskBin?: string;
+  timeoutMs?: number | undefined;
+  bskBin?: string | undefined;
 }
 
 interface StaleRecord {
@@ -199,7 +199,7 @@ export class BskIpcClient {
   async resolveSocket({
     isAborted = () => false,
     stale,
-  }: { isAborted?: () => boolean; stale?: StaleRecord } = {}): Promise<string> {
+  }: { isAborted?: () => boolean; stale?: StaleRecord | undefined } = {}): Promise<string> {
     if (this.#sockPath) return this.#sockPath;
     const found = readDaemonInfo(this.#home);
     if (found && !sameRecord(found, stale)) return found.sock_path;

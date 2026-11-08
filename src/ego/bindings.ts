@@ -43,7 +43,7 @@ export interface EgoCdpClientOptions {
 
 export interface EgoSendOptions {
   capability?: symbol;
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
 }
 
 export interface EgoEventMeta {

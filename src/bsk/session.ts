@@ -7,8 +7,8 @@ import type { BskClient } from "./ipc-client.ts";
 const SESSION_STOP_TIMEOUT_MS = 3_600_000;
 
 export interface SharedTabOptions {
-  context?: string;
-  dependsOn?: readonly string[];
+  context?: string | undefined;
+  dependsOn?: readonly string[] | undefined;
 }
 
 export interface BskSessionInit {
@@ -25,8 +25,8 @@ export interface NavigationOptions extends SharedTabOptions {
 }
 
 export interface TabTimeoutOptions extends SharedTabOptions {
-  tabId?: number;
-  timeoutMs?: number;
+  tabId?: number | undefined;
+  timeoutMs?: number | undefined;
 }
 
 export interface EvaluateOptions extends TabTimeoutOptions {
@@ -182,7 +182,7 @@ export class BskSession {
       tabId,
       timeoutMs,
       ...shared
-    }: TabTimeoutOptions & { button?: string; clickCount?: number; modifiers?: string[] } = {},
+    }: TabTimeoutOptions & { button?: string | undefined; clickCount?: number; modifiers?: string[] } = {},
   ): Promise<unknown> {
     return this.tool("click", {
       ...resolveTarget(target),

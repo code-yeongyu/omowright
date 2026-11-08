@@ -107,7 +107,7 @@ function __exportAll<D extends Record<string, () => unknown>>(
   definitions: D,
   namespace?: boolean,
 ): { readonly [K in keyof D]: ReturnType<D[K]> };
-function __exportAll(definitions: Record<string, () => unknown>, namespace?: boolean): object {
+function __exportAll<K extends string>(definitions: Record<K, () => unknown>, namespace?: boolean): object {
   const exports = {};
   for (const name in definitions) __defProp(exports, name, { get: definitions[name], enumerable: true });
   if (!namespace) __defProp(exports, Symbol.toStringTag, { value: "Module" });
@@ -458,31 +458,31 @@ interface CdpWireCommand {
 }
 
 interface JsonVersion {
-  Browser?: string;
-  "Protocol-Version"?: string;
-  "User-Agent"?: string;
-  "V8-Version"?: string;
-  "WebKit-Version"?: string;
+  Browser?: string | undefined;
+  "Protocol-Version"?: string | undefined;
+  "User-Agent"?: string | undefined;
+  "V8-Version"?: string | undefined;
+  "WebKit-Version"?: string | undefined;
   webSocketDebuggerUrl: string;
 }
 
 export interface JsonTarget {
-  description?: string;
-  devtoolsFrontendUrl?: string;
-  faviconUrl?: string;
+  description?: string | undefined;
+  devtoolsFrontendUrl?: string | undefined;
+  faviconUrl?: string | undefined;
   id: string;
-  parentId?: string;
+  parentId?: string | undefined;
   title: string;
   type: string;
   url: string;
-  webSocketDebuggerUrl?: string;
+  webSocketDebuggerUrl?: string | undefined;
 }
 
 interface CdpWireResponse {
   [key: string]: unknown;
   id: number;
-  sessionId?: string;
-  error?: { [key: string]: unknown; code?: number; data?: unknown; message: string };
+  sessionId?: string | undefined;
+  error?: { [key: string]: unknown; code?: number | undefined; data?: unknown; message: string } | undefined;
   result?: unknown;
 }
 
@@ -490,7 +490,7 @@ interface CdpWireEvent {
   [key: string]: unknown;
   method: string;
   params?: unknown;
-  sessionId?: string;
+  sessionId?: string | undefined;
 }
 
 type CdpWireMessage = CdpWireResponse | CdpWireEvent | null;
@@ -1719,7 +1719,7 @@ function createOmOKeyboardClass() {
       if (Qn) throw Qn;
       if (ei) throw ei;
     }
-    async type(xn: string, jn?: { delay?: number }, Vn?: string) {
+    async type(xn: string, jn?: { delay?: number | undefined }, Vn?: string) {
       let qn = jn?.delay ?? 0;
       for (let jn of xn) {
         if (
@@ -1962,7 +1962,7 @@ export interface PageProbe extends PageProbeCounts {
 export type NavigationReadinessMode = "interactive" | "stable";
 export interface ActionWaitOptions {
   timeoutMs?: number;
-  frameSessionId?: string;
+  frameSessionId?: string | undefined;
   hookWindowMs?: number;
   requestTrackingBudgetMs?: number;
   postSettleMs?: number;
@@ -2363,7 +2363,7 @@ type NavigationReadinessTimeoutError = InstanceType<typeof NavigationReadinessTi
 function createNetworkTrackerClass() {
   return class NetworkTracker {
     #e = new Map<string, TrackedRequest>();
-    #t: Array<{ (): void; ready?: Promise<unknown> }> = [];
+    #t: Array<{ (): void; ready?: Promise<unknown> | undefined }> = [];
     #n: Set<string>;
     declare ready: Promise<unknown[]>;
     constructor(xn: CoreCdpTransport, jn: Iterable<string>) {
@@ -2464,9 +2464,9 @@ var DOM_READY_TIMEOUT_MS: number,
   });
 export interface ElementTarget {
   objectId: string;
-  frameId?: string;
-  frameSessionId?: string;
-  contextId?: number;
+  frameId?: string | undefined;
+  frameSessionId?: string | undefined;
+  contextId?: number | undefined;
 }
 export interface Point {
   x: number;
@@ -2552,7 +2552,7 @@ function isFiniteNumber(value: unknown): value is number {
 }
 export interface FilePayload {
   name: string;
-  mimeType?: string;
+  mimeType?: string | undefined;
   base64: string;
 }
 function isFilePathList(files: string[] | FilePayload[]): files is string[] {
@@ -2626,7 +2626,7 @@ export interface MouseButtonOptions {
 }
 export interface MouseClickOptions extends MouseButtonOptions {
   delay?: number;
-  steps?: number;
+  steps?: number | undefined;
 }
 interface MouseDispatch {
   x?: number;
@@ -2703,7 +2703,7 @@ function quadCenter(xn: number[]) {
     y: (definedOrThrow(xn[1]) + definedOrThrow(xn[3]) + definedOrThrow(xn[5]) + definedOrThrow(xn[7])) / 4,
   };
 }
-async function resolveActionSessionId(xn: OmOPage, jn: { frameSessionId?: string } | undefined) {
+async function resolveActionSessionId(xn: OmOPage, jn: { frameSessionId?: string | undefined } | undefined) {
   return await xn.resolveSessionId(jn?.frameSessionId);
 }
 function callOnElement<R = unknown>(xn: OmOPage, jn: ElementTarget, Vn: string, ...qn: unknown[]): Promise<R>;
@@ -5443,7 +5443,7 @@ function createOmOMouseClass() {
     constructor(xn: MouseTarget, jn: ModifierState) {
       ((this.context = xn), (this.modifierState = jn));
     }
-    async move(xn: number, jn: number, Vn: { steps?: number } = {}) {
+    async move(xn: number, jn: number, Vn: { steps?: number | undefined } = {}) {
       let qn = this.#e,
         Jn = this.#t,
         Yn = Math.max(Vn.steps ?? 1, 1),
@@ -6243,12 +6243,12 @@ export interface ScreenshotClip {
   scale?: number;
 }
 export interface ScreenshotOptions {
-  timeout?: number;
+  timeout?: number | undefined;
   clip?: ScreenshotClip;
   fullPage?: boolean;
   type?: "png" | "jpeg" | "webp";
-  quality?: number;
-  path?: string;
+  quality?: number | undefined;
+  path?: string | undefined;
 }
 export type PdfLength = number | string;
 export interface PdfOptions {

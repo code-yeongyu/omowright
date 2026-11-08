@@ -1,6 +1,6 @@
 declare global {
   interface Window {
-    __omowrightHumanDone?: boolean;
+    __omowrightHumanDone?: boolean | undefined;
   }
 }
 
