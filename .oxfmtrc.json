@@ -1,0 +1,7 @@
+{
+  "ignorePatterns": [
+    "src/page-bundle.js",
+    "dist/**",
+    "bun.lock"
+  ]
+}
