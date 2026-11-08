@@ -68,9 +68,11 @@ export const BROWSER_ENGINE_ADAPTERS = Object.freeze({
 export async function connectRankedBrowser({
   fallbackReason,
   adapters = BROWSER_ENGINE_ADAPTERS,
+  attempt = "best",
   ...options
 } = {}) {
   const plan = enginePlan({ fallbackReason });
+  if (attempt === "both") return connectBoth(plan, adapters, options);
   const skipped = [];
 
   for (const engine of plan) {
@@ -104,4 +106,54 @@ export async function connectRankedBrowser({
       .join("; ")}`,
     { skipped },
   );
+}
+
+/**
+ * `attempt: "both"`: try the two ends of the plan - the attached engine a person's own browser gives, and the engine
+ * that launches its own - and report each result on its own, with the one to use and whether both answered. A single
+ * success is the common case and is not a failure; a failure of one is reported, never hidden behind the other (#12805
+ * decided this shape; a caller must be able to say why the second did not answer).
+ */
+async function connectBoth(plan, adapters, options) {
+  const attached = plan[0];
+  const launched = plan[plan.length - 1];
+  const targets = attached.id === launched.id ? [attached] : [attached, launched];
+  const results = [];
+  let primary = null;
+  for (const engine of targets) {
+    const adapter = adapters[engine.id];
+    const engineOptions = options[engine.id] ?? {};
+    if (!adapter) {
+      results.push({ engine: engine.id, tier: engine.tier, ok: false, code: "no-adapter", detail: "no adapter is registered for this engine" });
+      continue;
+    }
+    const startedAt = Date.now();
+    let probe;
+    try {
+      probe = await adapter.probe(engineOptions);
+    } catch (error) {
+      results.push({ engine: engine.id, tier: engine.tier, ok: false, code: "unavailable", detail: error.message, ms: Date.now() - startedAt });
+      continue;
+    }
+    if (!probe?.available) {
+      results.push({ engine: engine.id, tier: engine.tier, ok: false, code: "unavailable", detail: probe?.reason ?? "unavailable", ms: Date.now() - startedAt });
+      continue;
+    }
+    try {
+      const session = await adapter.connect(engineOptions);
+      results.push({ engine: engine.id, tier: engine.tier, ok: true, probe, session, ms: Date.now() - startedAt });
+      if (primary === null) primary = engine.id;
+    } catch (error) {
+      results.push({ engine: engine.id, tier: engine.tier, ok: false, code: "connect-failed", detail: error.message, ms: Date.now() - startedAt });
+    }
+  }
+  if (primary === null) {
+    throw new NoBrowserEngine(
+      `no browser engine could serve this task; tried ${targets.map((engine) => engine.id).join(" and ")}: ${results
+        .map((entry) => `${entry.engine} ${entry.code} (${entry.detail})`)
+        .join("; ")}`,
+      { results },
+    );
+  }
+  return { engine: primary, results, bothSucceeded: results.filter((entry) => entry.ok).length === targets.length };
 }

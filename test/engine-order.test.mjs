@@ -206,3 +206,32 @@ test("the order check fires on an unguarded call and passes a guarded one", () =
   const guarded = `assertEngineChoice("cloakbrowser", { fallbackReason: "need-isolated-profile" });\nawait connectCloakProfile();`;
   assert.equal(scanEngineCalls(guarded).guarded, true);
 });
+test("attempt: both reports each end of the plan on its own, and says which one it would use", async () => {
+  const { adapters, calls } = recordingAdapters({ available: { bsk: false } });
+  const result = await connectRankedBrowser({ adapters, attempt: "both" });
+  assert.equal(result.engine, "aside");
+  assert.equal(result.bothSucceeded, true);
+  assert.deepEqual(
+    result.results.map((entry) => [entry.engine, entry.ok]),
+    [["aside", true], ["cloakbrowser", true]],
+  );
+  assert.equal(typeof result.results[0].ms, "number");
+  assert.deepEqual(calls, ["aside:probe", "aside:connect", "cloakbrowser:probe", "cloakbrowser:connect"]);
+});
+
+test("attempt: both keeps a failed end in its results instead of hiding it behind the one that answered", async () => {
+  const { adapters } = recordingAdapters({ connectFails: new Set(["cloakbrowser"]) });
+  const result = await connectRankedBrowser({ adapters, attempt: "both" });
+  assert.equal(result.engine, "aside");
+  assert.equal(result.bothSucceeded, false);
+  const launched = result.results.find((entry) => entry.engine === "cloakbrowser");
+  assert.equal(launched.ok, false);
+  assert.equal(launched.code, "connect-failed");
+  assert.match(launched.detail, /cloakbrowser refused/);
+});
+
+test("attempt: both throws only when neither end answered", async () => {
+  const { adapters } = recordingAdapters({ connectFails: new Set(["aside", "cloakbrowser"]) });
+  await assert.rejects(() => connectRankedBrowser({ adapters, attempt: "both" }), NoBrowserEngine);
+});
+
