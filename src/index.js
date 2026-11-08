@@ -75,6 +75,7 @@ export { BskSession } from "./bsk/session.js";
 export { connectBrowserSkill, listBrowsers } from "./bsk/connect.js";
 export { bskSnapshot, buildSnapshotExpression } from "./bsk/snapshot.js";
 export { AsideReplError, AsideSession, connectAside, findAsideBinary } from "./aside/session.js";
+export { EgoCdpClient, EgoCdpError, connectEgo } from "./ego/client.js";
 export { asideDoctor, asideOnboard, installAsideCli } from "./aside/onboard.js";
 export {
   BROWSERSKILL_EXTENSION_IDS,
