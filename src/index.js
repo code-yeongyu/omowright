@@ -90,3 +90,4 @@ export { probeBrowserSignals } from "./bsk/browser-signals.js";
 export { identifyBrowser } from "./bsk/identify-browser.js";
 export { installBskCli } from "./bsk/install-cli.js";
 export { bskDoctor, bskOnboard } from "./bsk/onboard.js";
+export { ENGINE_ORDER, NoBrowserEngineError, connectBrowser } from "./engines.js";

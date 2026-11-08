@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, stealth via CloakBrowser as the default owned engine with zero exposed CDP ports, and an attached engine that drives the user's own signed-in browser through BrowserSkill (connectBrowserSkill, bskSnapshot, one-click onboarding via bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in priority order: the user's agent browser (Aside, Ego Lite), then the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports; each engine has its own setup check (asideOnboard, bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
@@ -9,24 +9,38 @@ Browser automation as a code library. Install it with
 `bun add github:code-yeongyu/omowright` (or import it by the path of a local
 checkout). Bun >= 1.4 recommended, Node >= 22 supported.
 
-Two engines, one library:
+## Pick the engine with connectBrowser
 
-| Engine | Use when | Entry point |
-|---|---|---|
-| **Owned** (default) | scraping, WAF/bot-scored targets, headless, anything that must not touch the user's profile | `connectPipe` / `connectCloakProfile` — no CLI, no daemon, no open CDP port |
-| **Attached** | the task needs the user's logged-in sessions, cookies, or open tabs | `connectBrowserSkill` — stock BrowserSkill daemon + extension; `references/browserskill.md` |
+**START EVERY BROWSER TASK WITH `connectBrowser()`.** It tries the engines in
+this order and returns the first that connects:
 
-Never substitute one for the other silently: if the attached engine is not set
-up, run `bskOnboard()` and tell the user its single remaining step. It installs
-the extension only into the browser the user actually uses; when it returns
-`needsChoice`, ask which browser that is and pass `{ browser: "<id>" }`.
+| Order | Engine | Handle | Read |
+|---|---|---|---|
+| 1 | **Aside**: the user's Aside browser, signed in | `AsideSession` (`run`, `open`, `snapshot`) | `references/aside.md` |
+| 2 | **Ego Lite**: an agent task space in the user's Ego browser (only inside `ego-browser nodejs`) | `BrowserConnection` (full Page API) | this file |
+| 3 | **BrowserSkill**: the user's own Chrome/Edge/Brave via extension | `BskSession` | `references/browserskill.md` |
+| 4 | **CloakBrowser**: owned stealth browser, no user profile | `BrowserConnection` | `references/stealth.md` |
 
-## Core loop (owned engine)
+```js
+const { connectBrowser } = await import("omowright");
+const { engine, handle, attempts } = await connectBrowser();
+```
+
+`attempts` lists every engine tried, with `ok` or the reason it did not
+connect (often one step only the user can take, such as `aside login`). When a
+higher engine failed for a reason the user can fix, tell them that step along
+with the engine you used. Pass `allow` to forbid engines (leave out `"cloak"`
+when the task needs the user's sessions; leave out the user's browsers for
+scraping or WAF targets) and `prefer` to try one first; per-engine options go
+under its name (`{ cloak: { profileDir } }`). The handle type follows
+`engine`, so branch on it.
+
+## Core loop (Page API: Ego Lite and CloakBrowser)
 
 ```js
 const { connectPipe, compactSnapshot } = await import("omowright");
 const browser = await connectPipe({
-  browserPath: "<CloakBrowser binary>",           // DEFAULT engine
+  browserPath: "<CloakBrowser binary>",
   browserArgs: ["--no-first-run", `--user-data-dir=${profileDir}`],
   storageRoot: profileDir,
 });
@@ -57,12 +71,12 @@ empty tree, not an error. A search does not move the diff baseline, and `find` c
 be combined with `diff`. `maxChars` still caps the whole captured tree before the
 search runs, so leave it off when searching a large page.
 
-## Default engine: CloakBrowser
+## Owned engine: CloakBrowser
 
-Use the CloakBrowser binary by default, not a plain headless shell — most real
+When omowright owns the browser, use the CloakBrowser binary, not a plain headless shell: most real
 targets sit behind WAFs or bot scoring, and CloakBrowser's source-level
 fingerprint patches (Cloudflare Turnstile, FingerprintJS, BrowserScan) make it
-the safe default. Plain headless shell is the speed fallback for trivially open
+the safe choice. Plain headless shell is the speed fallback for trivially open
 pages: any Chrome/Chromium or
 `~/Library/Caches/ms-playwright/chromium_headless_shell-*/.../chrome-headless-shell`.
 
@@ -122,6 +136,7 @@ screenshot — coordinates read off an unpinned screenshot are stale.
 
 | Task | Read |
 |---|---|
+| The user's Aside browser: REPL session, setup, failure codes | `references/aside.md` |
 | The user's own signed-in browser and tabs, BrowserSkill sessions, trace-free `bskSnapshot`, one-click extension onboarding | `references/browserskill.md` |
 | Visual browsing, coordinate UI, viewport pinning, extension popups | `presets/visual-browse/SKILL.md` — consider delegating, below |
 | CAPTCHA (checkbox, slider, text OCR, image grid) | `presets/captcha/SKILL.md` — consider delegating, below |
@@ -177,7 +192,7 @@ task(category: "deep", run_in_background: true, prompt: `
 TASK: Get past the CAPTCHA blocking <url> and return the post-solve state.
 1. Read `presets/captcha/SKILL.md`, `presets/visual-browse/SKILL.md` (package
    root), and `references/stealth.md` (this skill).
-2. connectPipe with the CloakBrowser binary (default engine).
+2. connectPipe with the CloakBrowser binary.
 3. Pin the viewport (setDeviceMetricsOverride 1440x900 + refreshViewportSize)
    before computing any coordinate.
 4. createCaptcha(page) - click(bounds) for checkbox widgets, drag(from, to,
