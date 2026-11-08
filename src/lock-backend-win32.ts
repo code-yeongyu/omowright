@@ -1,19 +1,39 @@
-import { dlopen, ptr } from "bun:ffi";
 import path from "node:path";
 
-const systemRoot = process.env["SystemRoot"] || process.env["windir"] || "C:\\Windows";
-const { symbols } = dlopen(path.win32.join(systemRoot, "System32", "ntdll.dll"), {
-  // NTSTATUS is returned in the same native call, unlike GetLastError's
-  // thread-local state, whose preservation across FFI/JS is not guaranteed.
-  NtCreateFile: {
-    args: ["buffer", "u32", "buffer", "buffer", "ptr", "u32", "u32", "u32", "u32", "ptr", "u32"],
-    returns: "u32",
-  },
-  NtClose: { args: ["u64"], returns: "u32" },
-  RtlNtStatusToDosError: { args: ["u32"], returns: "u32" },
-});
+// `bun:ffi` is imported when ntdll is first needed, not at module scope: a static import is
+// hoisted to the top of any single-file bundle that inlines this module, and Node cannot
+// resolve `bun:` specifiers, so the whole bundle would fail to load there.
+async function openNtdll() {
+  const { dlopen, ptr } = await import("bun:ffi");
+  const systemRoot = process.env["SystemRoot"] || process.env["windir"] || "C:\\Windows";
+  const { symbols } = dlopen(path.win32.join(systemRoot, "System32", "ntdll.dll"), {
+    // NTSTATUS is returned in the same native call, unlike GetLastError's
+    // thread-local state, whose preservation across FFI/JS is not guaranteed.
+    NtCreateFile: {
+      args: ["buffer", "u32", "buffer", "buffer", "ptr", "u32", "u32", "u32", "u32", "ptr", "u32"],
+      returns: "u32",
+    },
+    NtClose: { args: ["u64"], returns: "u32" },
+    RtlNtStatusToDosError: { args: ["u32"], returns: "u32" },
+  });
+  return { symbols, ptr };
+}
 
-function nativeError(operation: string, lockPath: string, status: number) {
+type Ntdll = Awaited<ReturnType<typeof openNtdll>>;
+
+let ntdll: Promise<Ntdll> | undefined;
+
+// Opened once and shared by every later attempt; a failed open is forgotten so the next
+// attempt tries again instead of replaying the same rejection forever.
+function loadNtdll(): Promise<Ntdll> {
+  ntdll ??= openNtdll().catch((error: unknown) => {
+    ntdll = undefined;
+    throw error;
+  });
+  return ntdll;
+}
+
+function nativeError(symbols: Ntdll["symbols"], operation: string, lockPath: string, status: number) {
   const error = symbols.RtlNtStatusToDosError(status);
   return Object.assign(
     new Error(
@@ -23,7 +43,8 @@ function nativeError(operation: string, lockPath: string, status: number) {
   );
 }
 
-export function tryAcquireWindows(lockPath: string) {
+export async function tryAcquireWindows(lockPath: string) {
+  const { symbols, ptr } = await loadNtdll();
   // Bun Windows is 64-bit: UNICODE_STRING has its pointer at offset 8 and
   // OBJECT_ATTRIBUTES is 48 bytes. Translate the Win32 extended namespace to NT.
   const filename = Buffer.from(
@@ -46,12 +67,12 @@ export function tryAcquireWindows(lockPath: string) {
   const status = symbols.NtCreateFile(handleOut, 0xc0100000, attributes, ioStatus, null, 0x80, 0, 3, 0x60, null, 0);
   // STATUS_SHARING_VIOLATION is exactly ERROR_SHARING_VIOLATION (32).
   if (status === 0xc0000043) return null;
-  if (status >= 0x80000000) throw nativeError("NtCreateFile", lockPath, status);
+  if (status >= 0x80000000) throw nativeError(symbols, "NtCreateFile", lockPath, status);
   const handle = handleOut.readBigUInt64LE();
   return {
     release() {
       const closeStatus = symbols.NtClose(handle);
-      if (closeStatus >= 0x80000000) throw nativeError("NtClose", lockPath, closeStatus);
+      if (closeStatus >= 0x80000000) throw nativeError(symbols, "NtClose", lockPath, closeStatus);
     },
   };
 }
