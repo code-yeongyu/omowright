@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, globSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, globSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { removeTreeSync } from "./fixtures/remove-tree.mjs";
 import { CdpSessionCrashedError, EgoCdpClient, EgoCdpError, connectEgo } from "../src/index.js";
 
 // A stand-in for Ego Lite's globalThis.ego that relays the raw CDP text to a real headless
@@ -52,7 +53,7 @@ function egoOverRealBrowser(shellBin) {
     const exited = new Promise((resolve) => child.once("exit", resolve));
     child.kill();
     await exited;
-    rmSync(profile, { recursive: true, force: true });
+    removeTreeSync(profile);
   };
   return { ego, stop };
 }
