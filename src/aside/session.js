@@ -21,6 +21,9 @@ const MARKER = /^\[(ok|error) \| \d+ms\]$/;
 // Aside colours its banner, prompt and markers even on a pipe.
 const ANSI = /\x1B\[[0-9;?]*[ -/]*[@-~]/g;
 const plain = (text) => text.replace(ANSI, "");
+// Every call ends with its own result line and then [ok] (errors are caught into the result
+// line); page logs can print markers and prompts of their own, so the result line decides.
+const finished = (lines, tag) => MARKER.test(lines.at(-1) ?? "") && (lines.at(-2) ?? "").startsWith(tag);
 
 export class AsideReplError extends Error {
   constructor(code, message, { output = [], setup } = {}) {
@@ -90,18 +93,22 @@ export class AsideSession {
     // One line per call: Aside evaluates each stdin line on its own, so the source travels
     // as a JSON string literal and a direct eval runs it in the REPL's scope (page, tabs, snapshot).
     const body = `(async () => {\n${code}\n})()`;
-    const line = `console.log(${JSON.stringify(tag)} + JSON.stringify((await eval(${JSON.stringify(body)})) ?? null))`;
-    const output = await this.#call(line);
+    const line = `try { const omowValue = await eval(${JSON.stringify(body)}); const omowJson = JSON.stringify(omowValue ?? null); console.log(${JSON.stringify(tag)} + (omowJson === undefined ? '{"unserializable":true}' : '{"value":' + omowJson + '}')); } catch (omowError) { console.log(${JSON.stringify(tag)} + JSON.stringify({ error: String(omowError?.stack ?? omowError) })); }`;
+    const output = await this.#call(line, tag);
     const logs = [];
     let value;
     let found = false;
     for (const entry of output) {
       if (entry.startsWith(tag)) {
+        let result;
         try {
-          value = JSON.parse(entry.slice(tag.length));
+          result = JSON.parse(entry.slice(tag.length));
         } catch {
-          throw new AsideReplError("repl_unserializable", "the code returned a value with no JSON form (a function, symbol or undefined member); return plain data", { output });
+          result = { unserializable: true };
         }
+        if (result.error !== undefined) throw new AsideReplError("repl_error", result.error, { output: logs });
+        if (result.unserializable) throw new AsideReplError("repl_unserializable", "the code returned a value with no JSON form (a function, symbol or undefined member); return plain data", { output });
+        value = result.value;
         found = true;
       } else {
         logs.push(entry);
@@ -138,13 +145,13 @@ export class AsideSession {
     }
   }
 
-  #call(line) {
+  #call(line, tag) {
     const run = this.#queue.then(async () => {
       if (this.#closed) throw new AsideReplError("repl_closed", "aside repl session is closed");
       this.#child.stdin.write(`${line}\n`);
       // Page output can contain the prompt text and arrive split right after it, so a call is
       // finished only once its last complete line is the [ok|error] marker and a prompt follows.
-      const output = await this.#waitFor((pending, lines) => pending.endsWith(PROMPT) && MARKER.test(lines.at(-1) ?? ""), this.#callTimeoutMs, "repl_timeout");
+      const output = await this.#waitFor((pending, lines) => pending.endsWith(PROMPT) && finished(lines, tag), this.#callTimeoutMs, "repl_timeout");
       const markerAt = output.findLastIndex((entry) => MARKER.test(entry));
       if (markerAt === -1) throw new AsideReplError("repl_protocol", "aside repl answered without an [ok|error] marker", { output });
       const body = output.slice(0, markerAt);

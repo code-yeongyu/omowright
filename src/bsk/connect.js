@@ -59,7 +59,7 @@ export async function connectBrowserSkill({
   const ipc = client ?? new BskIpcClient({ home, env, sockPath, autoStart, timeoutMs, bskBin });
   const browsers = await listBrowsers(ipc, { waitForBrowserMs });
   if (browsers.length === 0) {
-    throw new BskRpcError("no_browser_connected", "the BrowserSkill daemon is up but no browser extension is connected; open the browser that has the BrowserSkill extension enabled (bskDoctor() explains the remaining step) instead of falling back to a headless browser");
+    throw new BskRpcError("no_browser_connected", "the BrowserSkill daemon is up but no browser extension is connected; open the browser that has the BrowserSkill extension enabled (bskDoctor() explains the remaining step); never substitute another browser for the user's without telling them");
   }
   const started = await ipc.call("session.start", compact({
     task_name: name,

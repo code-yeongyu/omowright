@@ -1,12 +1,9 @@
 # Attached engine: the user's own browser through BrowserSkill
 
-OmOWright has two engines. The **owned** engine (`connectPipe`,
-`connectCloakProfile`) launches a browser you control. The **attached** engine
-drives the browser the user is already signed into, through Tencent
-BrowserSkill (stock `bsk` daemon + Web Store extension, no fork). Pick the
-attached engine when the task needs the user's sessions, cookies, or their
-open tabs; pick the owned engine for scraping, WAF targets, headless runs, and
-anything that should not touch the user's profile.
+BrowserSkill is third in `connectBrowser()`'s order, after Aside and Ego Lite.
+It drives the browser the user is already signed into (Chrome, Edge, Brave)
+through Tencent BrowserSkill (stock `bsk` daemon + Web Store extension, no
+fork), so it serves tasks that need the user's sessions, cookies, or open tabs.
 
 ## Core loop
 
