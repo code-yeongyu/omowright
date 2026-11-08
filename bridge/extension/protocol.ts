@@ -97,40 +97,43 @@ const nonEmptyString = (value: unknown): value is string => typeof value === "st
 const SHAPES: { readonly [N in CommandName]: (details: unknown) => boolean } = {
   "bookmarks.create": (details) =>
     exact(details, ["parentId", "index", "title", "url"], ["title"]) &&
-    typeof details.title === "string" &&
-    details.title.length <= 8192 &&
-    (details.parentId === undefined || nonEmptyString(details.parentId)) &&
-    (details.index === undefined || nonNegativeInteger(details.index)) &&
-    (details.url === undefined || validUrl(details.url)),
+    typeof details["title"] === "string" &&
+    details["title"].length <= 8192 &&
+    (details["parentId"] === undefined || nonEmptyString(details["parentId"])) &&
+    (details["index"] === undefined || nonNegativeInteger(details["index"])) &&
+    (details["url"] === undefined || validUrl(details["url"])),
   "bookmarks.move": (details) =>
     exact(details, ["id", "parentId", "index"], ["id"]) &&
-    nonEmptyString(details.id) &&
-    (details.parentId === undefined || nonEmptyString(details.parentId)) &&
-    (details.index === undefined || nonNegativeInteger(details.index)),
-  "bookmarks.remove": (details) => exact(details, ["id"], ["id"]) && nonEmptyString(details.id),
-  "history.deleteUrl": (details) => exact(details, ["url"], ["url"]) && validUrl(details.url),
+    nonEmptyString(details["id"]) &&
+    (details["parentId"] === undefined || nonEmptyString(details["parentId"])) &&
+    (details["index"] === undefined || nonNegativeInteger(details["index"])),
+  "bookmarks.remove": (details) => exact(details, ["id"], ["id"]) && nonEmptyString(details["id"]),
+  "history.deleteUrl": (details) => exact(details, ["url"], ["url"]) && validUrl(details["url"]),
   "history.deleteRange": (details) =>
     exact(details, ["startTime", "endTime"], ["startTime", "endTime"]) &&
-    finiteNumber(details.startTime) &&
-    details.startTime >= 0 &&
-    finiteNumber(details.endTime) &&
-    details.endTime >= details.startTime,
+    finiteNumber(details["startTime"]) &&
+    details["startTime"] >= 0 &&
+    finiteNumber(details["endTime"]) &&
+    details["endTime"] >= details["startTime"],
   "tabGroups.update": (details) =>
     exact(details, ["groupId", "updateProperties"], ["groupId", "updateProperties"]) &&
-    nonNegativeInteger(details.groupId) &&
-    exact(details.updateProperties, ["collapsed", "color", "title"]) &&
-    Object.keys(details.updateProperties).length > 0 &&
-    (details.updateProperties.collapsed === undefined || typeof details.updateProperties.collapsed === "boolean") &&
-    (details.updateProperties.color === undefined || TAB_GROUP_COLORS.has(details.updateProperties.color)) &&
-    (details.updateProperties.title === undefined ||
-      details.updateProperties.title === null ||
-      (typeof details.updateProperties.title === "string" && details.updateProperties.title.length <= 1024)),
+    nonNegativeInteger(details["groupId"]) &&
+    exact(details["updateProperties"], ["collapsed", "color", "title"]) &&
+    Object.keys(details["updateProperties"]).length > 0 &&
+    (details["updateProperties"]["collapsed"] === undefined ||
+      typeof details["updateProperties"]["collapsed"] === "boolean") &&
+    (details["updateProperties"]["color"] === undefined ||
+      TAB_GROUP_COLORS.has(details["updateProperties"]["color"])) &&
+    (details["updateProperties"]["title"] === undefined ||
+      details["updateProperties"]["title"] === null ||
+      (typeof details["updateProperties"]["title"] === "string" &&
+        details["updateProperties"]["title"].length <= 1024)),
   "debugger.attach": (details) =>
     exact(details, ["tabId", "requiredVersion"], ["tabId", "requiredVersion"]) &&
-    nonNegativeInteger(details.tabId) &&
-    typeof details.requiredVersion === "string" &&
-    /^\d+\.\d+$/.test(details.requiredVersion),
-  "debugger.detach": (details) => exact(details, ["tabId"], ["tabId"]) && nonNegativeInteger(details.tabId),
+    nonNegativeInteger(details["tabId"]) &&
+    typeof details["requiredVersion"] === "string" &&
+    /^\d+\.\d+$/.test(details["requiredVersion"]),
+  "debugger.detach": (details) => exact(details, ["tabId"], ["tabId"]) && nonNegativeInteger(details["tabId"]),
 };
 
 export const validDetails = <N extends CommandName>(name: N, details: unknown): details is CommandDetails[N] =>
