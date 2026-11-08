@@ -112,6 +112,7 @@ test(
       browser = attached.browser;
       const page = await browser.newTab("data:text/html,<title>attached</title><button>Running browser</button>");
       const snapshot = await page.snapshot();
+      assert.ok("tree" in snapshot, "a no-options snapshot is the full shape");
       assert.ok(snapshot.tree.includes(`button "Running browser"`), snapshot.tree);
     } finally {
       await browser?.close().catch(() => {});

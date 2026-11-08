@@ -1,5 +1,5 @@
 import { CdpSessionDetachedError } from "./cdp-errors.ts";
-import WebSocket from "ws";
+import { WebSocket } from "ws";
 import {
   acquireNetwork,
   subscribePageNetworkEvents,
@@ -13,7 +13,6 @@ import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createReadStream, promises } from "node:fs";
 import * as fs$16 from "node:fs/promises";
-import { text as readProcessStream } from "node:stream/consumers";
 import { spawn } from "node:child_process";
 import type { ChildProcessByStdio, SpawnOptionsWithStdioTuple, StdioNull, StdioPipe } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
@@ -26,7 +25,7 @@ import { snapshotResult, validateSnapshotOptions } from "./snapshot-diff.ts";
 import { subscribeConsoleEvents } from "./console-events.ts";
 import { assertPageEvent, RUNTIME_PAGE_EVENTS, subscribePageErrors } from "./page-events.ts";
 import { targetCreationCapability } from "./internal-capability.ts";
-import { Dialog, answerWithPolicy, normalizeDialogPolicy } from "./dialog-policy.ts";
+import { Dialog, answerWithPolicy, dialogPolicyParams, normalizeDialogPolicy } from "./dialog-policy.ts";
 import { pageRoute, pageUnroute, pageUnrouteAll } from "./page-routes.ts";
 import { urlMatches } from "./url-match.ts";
 import {
@@ -188,7 +187,6 @@ const init_emittery = noop,
   init_store$1 = noop,
   init_drizzle_orm = noop,
   init_types$8 = noop,
-  init_agent_session_server = noop,
   init_nanoid = noop;
 
 function sleep$12(ms: number | undefined, signal?: AbortSignal) {
@@ -274,8 +272,6 @@ function isSessionDetachedError(error: unknown) {
   return error instanceof Error && error.name === "CdpSessionDetachedError";
 }
 
-const EventBus = { emit: async () => {} };
-const SessionStore = { get: () => undefined, update: () => undefined };
 export class VideoRecordingError extends Error {
   constructor(message: string | undefined, options?: ErrorOptions) {
     super(message, options);
@@ -413,11 +409,6 @@ function dialogOpeningParams(params: unknown): DialogOpeningParams | null | unde
   return typeof params == `object` ? params : undefined;
 }
 
-/** The same value for `answerWithPolicy`, whose signature takes no null. */
-function dialogPolicyParams(params: unknown): DialogOpeningParams | undefined {
-  return typeof params == `object` && params !== null ? params : undefined;
-}
-
 export interface CoreCdpTransport {
   send<M extends string>(
     method: M,
@@ -513,7 +504,10 @@ function createBrowserCdpCommandErrorClass() {
     code: number | undefined;
     data: unknown;
     constructor(xn: string, jn?: number, Vn?: unknown, qn?: string) {
-      (super(qn ?? `CDP command failed: ${xn}`), (this.method = xn), (this.code = jn), (this.data = Vn));
+      super(qn ?? `CDP command failed: ${xn}`);
+      this.method = xn;
+      this.code = jn;
+      this.data = Vn;
     }
   };
 }
@@ -1387,13 +1381,9 @@ var ISOLATED_WORLD_NAME: string,
       (ISOLATED_WORLD_NAME = `__omowright_utility`),
       (FrameManager = createFrameManagerClass()));
   });
-var omowrightNotificationPermissionValues: string[],
-  init_notification_grants = __esmMin(() => {
-    (init_drizzle_orm(),
-      init_schema(),
-      init_state_db(),
-      (omowrightNotificationPermissionValues = [`allow_for_ai`, `allow`, `deny`, `default`]));
-  });
+var init_notification_grants = __esmMin(() => {
+  (init_drizzle_orm(), init_schema(), init_state_db());
+});
 function formatCallFrame(xn: CdpCallFrame) {
   let jn = xn.url ? `${xn.url}:${(xn.lineNumber ?? 0) + 1}:${(xn.columnNumber ?? 0) + 1}` : null;
   if (!jn) return null;
@@ -1543,8 +1533,8 @@ type OmODownload = InstanceType<typeof OmODownload>;
 function createRefStaleErrorClass() {
   return class RefStaleError extends Error {
     constructor(xn: string) {
-      (super(`Ref "${xn}" is stale — the element was removed or the page changed. Take a new snapshot and retry.`),
-        (this.name = `RefStaleError`));
+      super(`Ref "${xn}" is stale — the element was removed or the page changed. Take a new snapshot and retry.`);
+      this.name = `RefStaleError`;
     }
   };
 }
@@ -2362,10 +2352,10 @@ function createNavigationReadinessTimeoutErrorClass() {
     mode: NavigationReadinessMode;
     timeoutMs: number;
     constructor(xn: NavigationReadinessMode, jn: number) {
-      (super(`Timed out waiting for ${xn} page after ${jn}ms`),
-        (this.name = `NavigationReadinessTimeoutError`),
-        (this.mode = xn),
-        (this.timeoutMs = jn));
+      super(`Timed out waiting for ${xn} page after ${jn}ms`);
+      this.name = `NavigationReadinessTimeoutError`;
+      this.mode = xn;
+      this.timeoutMs = jn;
     }
   };
 }
@@ -5642,7 +5632,6 @@ var REF_PATTERN: RegExp,
   NTH_SELECTOR_PATTERN: RegExp,
   isRef: (selector: string) => boolean,
   isRoleSelector: (selector: string) => boolean,
-  isTextSelector: (selector: string) => boolean,
   Locator: ReturnType<typeof createLocatorClass>,
   ElementHandle: ReturnType<typeof createElementHandleClass>,
   init_locator = __esmMin(() => {
@@ -5660,7 +5649,6 @@ var REF_PATTERN: RegExp,
       (NTH_SELECTOR_PATTERN = /:nth\((\d+|last)\)$/),
       (isRef = (xn: string) => /^(f\d+)?e\d+$/.test(xn)),
       (isRoleSelector = (xn: string) => xn.startsWith(`role:`)),
-      (isTextSelector = (xn: string) => xn.startsWith(`text:`)),
       (Locator = createLocatorClass()),
       (ElementHandle = createElementHandleClass()));
   }),
@@ -5672,14 +5660,10 @@ var REF_PATTERN: RegExp,
   init_mouse = __esmMin(() => {
     (init_utils$13(), init_keyboard(), (OmOMouse = createOmOMouseClass()));
   }),
-  AGENT_MANAGER_EXTENSION_ID: string,
   PASSWORD_MANAGER_EXTENSION_ID: string,
-  AGENT_MANAGER_EXTENSION_ORIGIN: string,
   PASSWORD_MANAGER_EXTENSION_ORIGIN: string,
   init_extension_ids = __esmMin(() => {
-    ((AGENT_MANAGER_EXTENSION_ID = `fjdhphbdlfjogobdofoaagnlnkoibdge`),
-      (PASSWORD_MANAGER_EXTENSION_ID = `clcdgiameigmljcbkkcbjiljinmfkncl`),
-      (AGENT_MANAGER_EXTENSION_ORIGIN = `chrome-extension://${AGENT_MANAGER_EXTENSION_ID}`),
+    ((PASSWORD_MANAGER_EXTENSION_ID = `clcdgiameigmljcbkkcbjiljinmfkncl`),
       (PASSWORD_MANAGER_EXTENSION_ORIGIN = `chrome-extension://${PASSWORD_MANAGER_EXTENSION_ID}`));
   });
 function getKnownIframeOriginLabel(xn: string) {
@@ -5715,7 +5699,8 @@ function inlineChildTree(xn: string, jn: string, Vn: string) {
       let Jn = qn[1] ?? ``,
         Yn = Vn.split(`
 `).map((xn) => `${Jn}  ${xn}`);
-      return [Vn.length > 0 ? `${xn}:` : xn, ...Yn];
+      Yn.unshift(Vn.length > 0 ? `${xn}:` : xn);
+      return Yn;
     }).join(`
 `);
 }
@@ -5866,7 +5851,7 @@ async function takeSnapshot(xn: CoreCdpTransport, jn: PageFrameManager, Vn: Snap
       (ai.set(Vn, Qn), ei.size > 0 && oi.set(Vn, ei));
     }),
   );
-  let si = [...ti].sort((xn, jn) => jn.depth - xn.depth),
+  let si = [...ti].toSorted((xn, jn) => jn.depth - xn.depth),
     ci: Record<string, SnapshotRef> = {};
   for (let xn of ni.values()) Object.assign(ci, xn.refs);
   for (let [xn, jn] of oi) {
@@ -5912,10 +5897,7 @@ var init_session_tab_queries = __esmMin(() => {
     init_utils$13(),
     init_store$1());
 });
-var ANNOTATION_OVERLAY_ID: string,
-  init_annotate_screenshot = __esmMin(() => {
-    ANNOTATION_OVERLAY_ID = `__omowright_annotations__`;
-  });
+var init_annotate_screenshot = __esmMin(() => {});
 var AI_TAB_STABLE_VIEWPORT: ViewportSize,
   init_browser = __esmMin(() => {
     (init_context(),

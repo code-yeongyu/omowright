@@ -69,7 +69,7 @@ Reflect.set(childProcess, "spawn", (command: string, args: readonly string[], op
   return started;
 });
 syncBuiltinESMExports();
-const { connectPipe, VideoRecordingError } = await import("../../src/index.js");
+const { connectPipe, VideoRecordingError } = await import("../../src/index.ts");
 let connection: Awaited<ReturnType<typeof connectPipe>> | undefined;
 try {
   connection = await connectPipe({

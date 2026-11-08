@@ -26,14 +26,32 @@ export const DEFAULT_AGENT_VIEWPORT: Readonly<ViewportSize> = Object.freeze({ wi
 
 function validateViewport(viewport: ViewportInput | null | undefined): ViewportSize {
   const width = viewport?.width;
-  if (!viewport || typeof width !== "number" || !Number.isInteger(width) || width <= 0) throw new TypeError("viewport width and height must be positive integers");
+  if (!viewport || typeof width !== "number" || !Number.isInteger(width) || width <= 0)
+    throw new TypeError("viewport width and height must be positive integers");
   const height = viewport.height;
-  if (typeof height !== "number" || !Number.isInteger(height) || height <= 0) throw new TypeError("viewport width and height must be positive integers");
+  if (typeof height !== "number" || !Number.isInteger(height) || height <= 0)
+    throw new TypeError("viewport width and height must be positive integers");
   return { width, height };
 }
-export async function repinViewport(page: ViewportPage, viewport: ViewportInput | null | undefined, options: RepinViewportOptions = {}) {
-  const size = validateViewport(viewport); const sessionId = await page.resolveSessionId();
-  await page.cdp.send("Emulation.setDeviceMetricsOverride", { ...size, screenWidth: size.width, screenHeight: size.height, deviceScaleFactor: options.deviceScaleFactor ?? 1, mobile: options.mobile ?? false }, sessionId);
-  page.setCachedViewportSize(size); return { ...size };
+export async function repinViewport(
+  page: ViewportPage,
+  viewport: ViewportInput | null | undefined,
+  options: RepinViewportOptions = {},
+) {
+  const size = validateViewport(viewport);
+  const sessionId = await page.resolveSessionId();
+  await page.cdp.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      ...size,
+      screenWidth: size.width,
+      screenHeight: size.height,
+      deviceScaleFactor: options.deviceScaleFactor ?? 1,
+      mobile: options.mobile ?? false,
+    },
+    sessionId,
+  );
+  page.setCachedViewportSize(size);
+  return { ...size };
 }
 export { validateViewport };

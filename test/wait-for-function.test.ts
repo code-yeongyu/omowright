@@ -139,7 +139,10 @@ test(
       });
       const { polls, ...state } = recordOf(value);
       assert.deepEqual(state, { badge: "3", items: 3 });
-      assert.ok(typeof polls === "number" && polls >= 2, `the first poll saw the old state, so the wait polled again (polls=${polls})`);
+      assert.ok(
+        typeof polls === "number" && polls >= 2,
+        `the first poll saw the old state, so the wait polled again (polls=${polls})`,
+      );
       // window is truthy but cyclic: returning it by value fails in CDP, and the met condition must still resolve.
       assert.equal(await page.waitForFunction(() => window.cart && window), true);
     });
@@ -159,7 +162,10 @@ test("waitForFunction passes arg through with millisecond polling", LIVE, async 
     );
     const { text, polls } = recordOf(value);
     assert.equal(text, "badge=3");
-    assert.ok(typeof polls === "number" && polls >= 2, `the first poll saw the old state, so the wait polled again (polls=${polls})`);
+    assert.ok(
+      typeof polls === "number" && polls >= 2,
+      `the first poll saw the old state, so the wait polled again (polls=${polls})`,
+    );
   });
 });
 
@@ -193,12 +199,10 @@ test("waitForFunction rejects on timeout with a named error carrying the truncat
     const predicate = new Function(`return window.flag === "${marker}";`);
     assert.ok(isPageFunction(predicate));
     const started = Date.now();
-    const error = await page
-      .waitForFunction(predicate, undefined, { timeout: 400 })
-      .then(
-        () => null,
-        (rejection: unknown) => rejection,
-      );
+    const error = await page.waitForFunction(predicate, undefined, { timeout: 400 }).then(
+      () => null,
+      (rejection: unknown) => rejection,
+    );
     assert.ok(error instanceof WaitForFunctionTimeoutError, `expected WaitForFunctionTimeoutError, got ${error}`);
     assert.equal(error.name, "WaitForFunctionTimeoutError");
     assert.equal(error.timeoutMs, 400);

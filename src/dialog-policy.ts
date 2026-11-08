@@ -50,9 +50,7 @@ function decisionFromResult(result: DialogPolicyResult): DialogDecision {
 
 export async function resolveDialogAction(policy: DialogPolicy, params: DialogOpeningParams = {}) {
   try {
-    const result = typeof policy === "function"
-      ? await policy(dialogFromOpening(params))
-      : policy;
+    const result = typeof policy === "function" ? await policy(dialogFromOpening(params)) : policy;
     return decisionFromResult(result);
   } catch {
     return { accept: true };
@@ -75,14 +73,24 @@ export class Dialog {
     this.#send = send;
   }
 
-  get url() { return this.#params.url; }
-  type() { return this.#params.type; }
-  message() { return this.#params.message; }
-  defaultValue() { return this.#params.defaultPrompt ?? ""; }
+  get url() {
+    return this.#params.url;
+  }
+  type() {
+    return this.#params.type;
+  }
+  message() {
+    return this.#params.message;
+  }
+  defaultValue() {
+    return this.#params.defaultPrompt ?? "";
+  }
   accept(promptText?: string) {
     return this.#answer(promptText === undefined ? { accept: true } : { accept: true, promptText });
   }
-  dismiss() { return this.#answer({ accept: false }); }
+  dismiss() {
+    return this.#answer({ accept: false });
+  }
 
   // Marks the dialog answered before the first await, so a listener that
   // answers synchronously always wins over the policy.
@@ -100,6 +108,14 @@ export class Dialog {
 
 // Runs once the dialog's listeners have run: the policy answers only a dialog
 // none of them answered.
+/**
+ * The value `answerWithPolicy` wants: CDP can hand the same event a non-object,
+ * and its signature takes no null. Shared so core and the ego client agree.
+ */
+export function dialogPolicyParams(params: unknown): DialogOpeningParams | undefined {
+  return typeof params === "object" && params !== null ? params : undefined;
+}
+
 export async function answerWithPolicy(dialog: Dialog, policy: DialogPolicy, params?: DialogOpeningParams) {
   if (isAnswered(dialog)) return;
   const action = await resolveDialogAction(policy, params);

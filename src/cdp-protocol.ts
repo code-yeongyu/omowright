@@ -142,6 +142,7 @@ export interface CdpCookie {
   secure: boolean;
   session: boolean;
   sameSite?: string;
+  partitionKey?: { topLevelSite: string; hasCrossSiteAncestor: boolean };
 }
 
 export interface CdpRequest {
@@ -192,6 +193,7 @@ export interface CdpCommandResults {
   "Emulation.setDeviceMetricsOverride": CdpEmpty;
   "Emulation.setFocusEmulationEnabled": CdpEmpty;
   "Emulation.setTouchEmulationEnabled": CdpEmpty;
+  "DOMStorage.getDOMStorageItems": { entries: [string, string][] };
   "Emulation.setUserAgentOverride": CdpEmpty;
   "Fetch.continueRequest": CdpEmpty;
   "Fetch.disable": CdpEmpty;
@@ -230,6 +232,7 @@ export interface CdpCommandResults {
   "Runtime.callFunctionOn": CdpEvaluateResult;
   "Runtime.evaluate": CdpEvaluateResult;
   "Runtime.releaseObject": CdpEmpty;
+  "Storage.getCookies": { cookies: CdpCookie[] };
   "Target.activateTarget": CdpEmpty;
   "Target.attachToTarget": { sessionId: string };
   "Target.closeTarget": { success: boolean };

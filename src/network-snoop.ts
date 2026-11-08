@@ -69,10 +69,11 @@ function toPredicate(match: NetworkEntryMatch): NetworkEntryPredicate {
   if (match === undefined || match === null) return () => true;
   if (typeof match === "function") return match;
   if (typeof match !== "object") throw new TypeError("match must be a predicate function or a descriptor object");
-  return (entry: NetworkEntry) => matchesText(entry.url, match.url)
-    && matchesToken(entry.method, match.method)
-    && matchesText(entry.mimeType, match.mimeType)
-    && matchesToken(entry.resourceType, match.resourceType);
+  return (entry: NetworkEntry) =>
+    matchesText(entry.url, match.url) &&
+    matchesToken(entry.method, match.method) &&
+    matchesText(entry.mimeType, match.mimeType) &&
+    matchesToken(entry.resourceType, match.resourceType);
 }
 
 function startedAtOf(params: { wallTime?: unknown } | undefined) {
@@ -136,7 +137,7 @@ export function createNetworkSnoop(page: NetworkPage, options: NetworkSnoopOptio
     for (const waiter of [...waiters]) if (waiter.test(entry)) waiter.resolve(entry);
   }
 
-  subscribe("Network.requestWillBeSent", params => {
+  subscribe("Network.requestWillBeSent", (params) => {
     const requestId = params?.requestId;
     if (!requestId) return;
     inflight.set(requestId, {
@@ -162,7 +163,7 @@ export function createNetworkSnoop(page: NetworkPage, options: NetworkSnoopOptio
     });
   });
 
-  subscribe("Network.responseReceived", params => {
+  subscribe("Network.responseReceived", (params) => {
     const entry = inflight.get(params?.requestId);
     if (!entry) return;
     const response = params.response ?? {};
@@ -187,7 +188,7 @@ export function createNetworkSnoop(page: NetworkPage, options: NetworkSnoopOptio
     });
   });
 
-  subscribe("Network.loadingFailed", params => {
+  subscribe("Network.loadingFailed", (params) => {
     const entry = inflight.get(params?.requestId);
     if (!entry) return;
     inflight.delete(entry.requestId);
@@ -196,7 +197,9 @@ export function createNetworkSnoop(page: NetworkPage, options: NetworkSnoopOptio
     // Network.loadingFailed carries no encodedDataLength; the read stays for parity with the JS original.
     entry.encodedDataLength = Number(readProperty(params, "encodedDataLength") ?? entry.encodedDataLength);
     entry.finishedAt = Date.now();
-    enqueue(async () => { if (wanted(entry)) commit(entry); });
+    enqueue(async () => {
+      if (wanted(entry)) commit(entry);
+    });
   });
 
   function pop() {
@@ -222,22 +225,27 @@ export function createNetworkSnoop(page: NetworkPage, options: NetworkSnoopOptio
     return values;
   }
 
-  function waitFor(match: NetworkEntryMatch, { timeoutMs = DEFAULT_TIMEOUT_MS }: { timeoutMs?: number | undefined } = {}): Promise<NetworkEntry> {
+  function waitFor(
+    entryMatch: NetworkEntryMatch,
+    { timeoutMs = DEFAULT_TIMEOUT_MS }: { timeoutMs?: number | undefined } = {},
+  ): Promise<NetworkEntry> {
     if (disposed) return Promise.reject(Error("Network snoop is disposed"));
-    const predicate = toPredicate(match);
+    const predicate = toPredicate(entryMatch);
     return new Promise<NetworkEntry>((resolve, reject) => {
       let settled = false;
-      const finish = <T>(callback: (value: T) => void) => (value: T) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        waiters.delete(waiter);
-        callback(value);
-      };
+      const finish =
+        <T>(callback: (value: T) => void) =>
+        (value: T) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          waiters.delete(waiter);
+          callback(value);
+        };
       const waiter: SnoopWaiter = {
         resolve: finish(resolve),
         reject: finish(reject),
-        test: entry => {
+        test: (entry) => {
           try {
             return Boolean(predicate(entry));
           } catch (error) {
@@ -256,13 +264,15 @@ export function createNetworkSnoop(page: NetworkPage, options: NetworkSnoopOptio
 
   function summary({ max = 50 }: { max?: number | undefined } = {}) {
     const shown = buffer.slice(0, max);
-    const lines = shown.map(entry => [
-      entry.method,
-      entry.status ?? (entry.failed ? "FAILED" : "-"),
-      entry.mimeType ?? "-",
-      `${entry.encodedDataLength}B`,
-      entry.url,
-    ].join(" "));
+    const lines = shown.map((entry) =>
+      [
+        entry.method,
+        entry.status ?? (entry.failed ? "FAILED" : "-"),
+        entry.mimeType ?? "-",
+        `${entry.encodedDataLength}B`,
+        entry.url,
+      ].join(" "),
+    );
     const hidden = buffer.length - shown.length;
     if (hidden > 0) lines.push(`... +${hidden} more`);
     return lines.join("\n");

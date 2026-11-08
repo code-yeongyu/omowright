@@ -27,7 +27,7 @@ test("connectBrowser takes the first engine in priority order and reports each a
     assert.ok(handle instanceof AsideSession);
     assert.deepEqual(attempts, [{ engine: "aside", ok: true }]);
   } finally {
-    await handle.close();
+    if (handle instanceof AsideSession) await handle.close();
   }
 });
 
@@ -88,8 +88,8 @@ test("allow and prefer shape the order, and an all-failed run throws with every 
             ["cloak", false],
           ],
         );
-        assert.match(error.attempts[2].reason, /no_browser_connected/);
-        assert.equal(error.attempts[3].reason, "not allowed by the caller");
+        assert.match(error.attempts[2]?.reason ?? "", /no_browser_connected/);
+        assert.equal(error.attempts[3]?.reason, "not allowed by the caller");
         return true;
       },
     );

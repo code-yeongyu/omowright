@@ -8,7 +8,10 @@ export class SerialEmitter<Data> {
     this.#listeners.set(event, list);
     return () => {
       const cur = this.#listeners.get(event) ?? [];
-      this.#listeners.set(event, cur.filter(f => f !== fn));
+      this.#listeners.set(
+        event,
+        cur.filter((f) => f !== fn),
+      );
     };
   }
   async emit(event: string, data: Data) {

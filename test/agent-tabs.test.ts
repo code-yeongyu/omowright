@@ -30,10 +30,10 @@ function cdpSend(reply: Send): CdpSend {
   return send;
 }
 // The fake page stands in for OmOPage; attachPage is replaced on this one connection.
-function withFakeAttach(connection: BrowserConnection, attach: (targetId: string) => Promise<unknown>) {
-  const attachable: { attachPage(targetId: string): Promise<unknown> } = connection;
+function withFakeAttach(handle: BrowserConnection, attach: (targetId: string) => Promise<unknown>) {
+  const attachable: { attachPage(targetId: string): Promise<unknown> } = handle;
   attachable.attachPage = attach;
-  return connection;
+  return handle;
 }
 type Viewport = { width: number; height: number };
 interface FakePage {
@@ -68,7 +68,8 @@ function connection({ headless = true, send = null }: { headless?: boolean; send
     calls,
     isHeadless: headless,
     transportEvents: new Emitter(),
-    on: <E extends string>(n: E, f: (payload: CdpEventPayload<E>, meta: CdpEventMeta) => unknown) => cdp.events.on(n, f),
+    on: <E extends string>(n: E, f: (payload: CdpEventPayload<E>, meta: CdpEventMeta) => unknown) =>
+      cdp.events.on(n, f),
     events: new Emitter(),
     ensureConnected: async () => {},
     discoverTargets: async () => [],
@@ -247,7 +248,8 @@ test("BrowserConnection exposes newTab on the attach path", async () => {
     send: cdpSend(async (method, params, sessionId, options) => {
       calls.push({ method, params, sessionId, options });
       if (method === "Target.createTarget") return { targetId: "attached-tab" };
-      if (method === "Target.closeTarget") cdp.events.emit("Target.targetDestroyed", { targetId: field(params, "targetId") });
+      if (method === "Target.closeTarget")
+        cdp.events.emit("Target.targetDestroyed", { targetId: field(params, "targetId") });
       return {};
     }),
   };
@@ -259,12 +261,12 @@ test("BrowserConnection exposes newTab on the attach path", async () => {
     on: () => () => {},
     async dispose() {},
   };
-  const connection = withFakeAttach(new BrowserConnection(cdp), async (targetId) => {
+  const attached = withFakeAttach(new BrowserConnection(cdp), async (targetId) => {
     calls.push({ method: "attachPage", targetId });
     return page;
   });
 
-  const opened = await connection.newTab();
+  const opened = await attached.newTab();
   assert.equal(opened, page);
   const create = calls.find((call) => call.method === "Target.createTarget");
   assert.deepEqual(create?.params, { url: "about:blank", background: true, newWindow: true });
@@ -276,11 +278,11 @@ test("BrowserConnection exposes newTab on the attach path", async () => {
   );
   assert.ok(order.includes("Emulation.setDeviceMetricsOverride"), "newTab must repin the viewport");
   assert.equal(
-    createAgentTabs(connection).get("attached-tab")?.page,
+    createAgentTabs(attached).get("attached-tab")?.page,
     page,
     "newTab must register with the per-connection manager",
   );
-  await connection.close();
+  await attached.close();
   assert.equal(
     calls.some((call) => call.method === "Target.closeTarget"),
     false,

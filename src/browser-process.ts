@@ -45,16 +45,22 @@ export async function terminateChild(child: ChildProcess, { quitRequested = fals
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<unknown>((resolve) => child.once("exit", resolve));
   if (signalsCanAskToQuit) {
-    try { child.kill("SIGTERM"); } catch {}
+    try {
+      child.kill("SIGTERM");
+    } catch {}
   }
   if (signalsCanAskToQuit || quitRequested) {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const graceOver = new Promise((resolve) => { timer = setTimeout(resolve, TERM_GRACE_MS); });
+    const graceOver = new Promise((resolve) => {
+      timer = setTimeout(resolve, TERM_GRACE_MS);
+    });
     await Promise.race([exited, graceOver]);
     clearTimeout(timer);
   }
   if (child.exitCode === null && child.signalCode === null) {
-    try { child.kill("SIGKILL"); } catch {}
+    try {
+      child.kill("SIGKILL");
+    } catch {}
     await exited;
   }
 }
@@ -128,11 +134,15 @@ export async function reapOrphanedBrowser(profileDir: string | null | undefined)
       ? await sameProcessAlive(undefined, undefined)
       : await sameProcessAlive(readProperty(owner, "pid"), readProperty(owner, "start"));
   if (ownerAlive !== false) return;
-  try { process.kill(pid, "SIGTERM"); } catch {}
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {}
   const deadline = Date.now() + TERM_GRACE_MS;
   while (isPidAlive(pid) && Date.now() < deadline) await sleep(REAP_POLL_MS);
   if (isPidAlive(pid)) {
-    try { process.kill(pid, "SIGKILL"); } catch {}
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
   }
   rmSync(pidFilePath(profileDir), { force: true });
 }

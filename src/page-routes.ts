@@ -44,12 +44,20 @@ export interface PageRouteOptions {
 const predicates = new WeakMap<PageRouteUrlPredicate, RouteMatchPredicate>();
 const handlers = new WeakMap<PageRouteHandler, RouteHandler>();
 const abortReasons: Readonly<Record<string, string>> = {
-  aborted: "Aborted", accessdenied: "AccessDenied", addressunreachable: "AddressUnreachable",
-  blockedbyclient: "BlockedByClient", blockedbyresponse: "BlockedByResponse",
-  connectionaborted: "ConnectionAborted", connectionclosed: "ConnectionClosed",
-  connectionfailed: "ConnectionFailed", connectionrefused: "ConnectionRefused",
-  connectionreset: "ConnectionReset", internetdisconnected: "InternetDisconnected",
-  namenotresolved: "NameNotResolved", timedout: "TimedOut", failed: "Failed",
+  aborted: "Aborted",
+  accessdenied: "AccessDenied",
+  addressunreachable: "AddressUnreachable",
+  blockedbyclient: "BlockedByClient",
+  blockedbyresponse: "BlockedByResponse",
+  connectionaborted: "ConnectionAborted",
+  connectionclosed: "ConnectionClosed",
+  connectionfailed: "ConnectionFailed",
+  connectionrefused: "ConnectionRefused",
+  connectionreset: "ConnectionReset",
+  internetdisconnected: "InternetDisconnected",
+  namenotresolved: "NameNotResolved",
+  timedout: "TimedOut",
+  failed: "Failed",
 };
 
 function urlMatcher(match: PageRouteUrl): RouteMatch {
@@ -76,15 +84,21 @@ function urlMatcher(match: PageRouteUrl): RouteMatch {
     } else if (char === "*") {
       const start = index;
       while (match[index + 1] === "*") index += 1;
-      const deep = index > start && (start === 0 || match[start - 1] === "/") &&
+      const deep =
+        index > start &&
+        (start === 0 || match[start - 1] === "/") &&
         (index + 1 === match.length || match[index + 1] === "/");
       if (deep && match[index + 1] === "/") {
         source += "(?:.*/)?";
         index += 1;
       } else source += deep ? ".*" : "[^/]*";
-    } else if (char === "{") { source += "(?:"; groups += 1; }
-    else if (char === "}" && groups > 0) { source += ")"; groups -= 1; }
-    else if (char === "," && groups > 0) source += "|";
+    } else if (char === "{") {
+      source += "(?:";
+      groups += 1;
+    } else if (char === "}" && groups > 0) {
+      source += ")";
+      groups -= 1;
+    } else if (char === "," && groups > 0) source += "|";
     else source += char.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
   }
   return new RegExp(`^${source}$`);
@@ -98,7 +112,8 @@ function adaptHandler(handler: PageRouteHandler): RouteHandler {
     const request: PageRouteRequest = {
       url: () => raw.request.url,
       method: () => raw.request.method,
-      headers: () => Object.fromEntries(Object.entries(raw.request.headers).map(([key, value]) => [key.toLowerCase(), value])),
+      headers: () =>
+        Object.fromEntries(Object.entries(raw.request.headers).map(([key, value]) => [key.toLowerCase(), value])),
       postData: () => raw.request.postData ?? null,
       resourceType: () => raw.request.resourceType?.toLowerCase(),
     };
@@ -128,7 +143,12 @@ function adaptHandler(handler: PageRouteHandler): RouteHandler {
   return created;
 }
 
-export function pageRoute(page: RoutesPage, match: PageRouteUrl, handler: PageRouteHandler, options: PageRouteOptions = {}) {
+export function pageRoute(
+  page: RoutesPage,
+  match: PageRouteUrl,
+  handler: PageRouteHandler,
+  options: PageRouteOptions = {},
+) {
   return createRoutes(page).route(urlMatcher(match), adaptHandler(handler), { times: options.times, prepend: true });
 }
 

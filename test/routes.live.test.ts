@@ -6,6 +6,7 @@ import path from "node:path";
 import http from "node:http";
 import { connectPipe, createAgentTabs } from "../src/index.ts";
 import { createRoutes } from "../src/routes.ts";
+import { field } from "./fixtures/read-field.ts";
 import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 interface FixtureServer {
@@ -111,8 +112,8 @@ test(
       img.addEventListener("load", finish);
       setTimeout(() => reject(new Error("timed out waiting for img error or load")), 8000);
     })`);
-      assert.equal(imgState.error, true, "aborted image fires onerror");
-      assert.equal(imgState.load, false, "aborted image does not load");
+      assert.equal(field(imgState, "error"), true, "aborted image fires onerror");
+      assert.equal(field(imgState, "load"), false, "aborted image does not load");
       await routes.dispose();
     } finally {
       await connection?.close();
@@ -175,7 +176,11 @@ test(
       });
       const page = (await createAgentTabs(connection).create("about:blank")).page;
       await page.goto(url);
-      const fetchText = (pathname: string) => page.evaluate(`fetch(${JSON.stringify(pathname)}).then(r => r.text())`);
+      const fetchText = async (pathname: string) => {
+        const text = await page.evaluate(`fetch(${JSON.stringify(pathname)}).then(r => r.text())`);
+        assert.ok(typeof text === "string", "a response body reads as text");
+        return text;
+      };
       const legacy = createRoutes(page);
       await legacy.route("*/legacy", (route) => route.fulfill({ body: "legacy" }));
       await page.route(

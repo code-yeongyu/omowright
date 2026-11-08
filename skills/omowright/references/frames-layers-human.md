@@ -4,8 +4,17 @@ Four modules for the moments when the plain snapshot-and-click loop stalls.
 All come from the package entrypoint:
 
 ```js
-const { reconcileFrames, snapshotWithFrames, describeLayers, layersHeader, snapshotWithLayers,
-  requestHuman, DEVICE_PRESETS, emulate, compactSnapshot } = await import("omowright");
+const {
+  reconcileFrames,
+  snapshotWithFrames,
+  describeLayers,
+  layersHeader,
+  snapshotWithLayers,
+  requestHuman,
+  DEVICE_PRESETS,
+  emulate,
+  compactSnapshot,
+} = await import("omowright");
 ```
 
 ## Out-of-process iframes and shadow DOM
@@ -58,7 +67,7 @@ console.log(layersHeader(layers));
 if (layers.blocking) {
   // Dismiss through a fresh ref: snapshot the overlay by its hint, click its button.
   const tree = compactSnapshot(await page.snapshot({ selector: layers.blocking.selectorHint, interactive: true }));
-  await page.locator(/\[ref=(e\d+)\]/.exec(tree)[1]).click();   // first interactive ref inside the overlay
+  await page.locator(/\[ref=(e\d+)\]/.exec(tree)[1]).click(); // first interactive ref inside the overlay
 }
 ```
 
@@ -85,7 +94,7 @@ captcha preset can't clear, hand the tab to the person and wait for a signal:
 ```js
 const result = await requestHuman(page, {
   prompt: "Sign in with your account, then click Done.",
-  until: { url: /\/dashboard/ },      // or { selector: "nav.account" } or async page => boolean
+  until: { url: /\/dashboard/ }, // or { selector: "nav.account" } or async page => boolean
   timeoutMs: 300000,
 });
 // { outcome: "continued" | "timed_out" | "cancelled", elapsedMs, reason: "until" | "done-button" | "timed_out" | "signal" }
@@ -107,11 +116,11 @@ browser and continue from that session.
 `emulate` sets viewport metrics, touch, and user agent in one call:
 
 ```js
-await emulate(page, "iphone-14");        // 390x844 @3x, touch, iOS Safari UA
+await emulate(page, "iphone-14"); // 390x844 @3x, touch, iOS Safari UA
 await page.goto("https://example.com");
 await page.screenshot({ path: "/tmp/home-iphone.png" });
-await emulate(page, "desktop-1440");     // 1440x900, mouse
-await emulate(page, null);               // clear the override, restore the original UA
+await emulate(page, "desktop-1440"); // 1440x900, mouse
+await emulate(page, null); // clear the override, restore the original UA
 ```
 
 Presets in `DEVICE_PRESETS`: `iphone-14` (390x844), `pixel-7` (412x915),

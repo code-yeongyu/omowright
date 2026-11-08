@@ -2,7 +2,8 @@
 // ego.sendCDPMessage takes JSON text for a browser-level CDP session with flattened
 // target sessions, answers through ego.onCDPMessage, and reports sends it refused before
 // they reached CDP (user control, no task space) through ego.onSendCDPMessageError.
-import { Dialog, answerWithPolicy, normalizeDialogPolicy } from "../dialog-policy.ts";
+import { Dialog, answerWithPolicy, dialogPolicyParams, normalizeDialogPolicy } from "../dialog-policy.ts";
+import type { CdpEventPayload, CdpResult, CdpTargetSummary } from "../cdp-protocol.ts";
 import type {
   DialogPolicyInput,
   EgoCdpBindings,
@@ -10,7 +11,6 @@ import type {
   EgoEvent,
   EgoEventMeta,
   EgoSendOptions,
-  EgoTarget,
   PendingCommand,
 } from "./bindings.ts";
 import { EgoCdpError, requireEgo } from "./errors.ts";
@@ -75,6 +75,12 @@ export class EgoCdpClient {
     await this.transportEvents.emit("connected", undefined);
   }
 
+  /**
+   * Overload declaration + loose implementation, the repo's idiom for a generic
+   * transport surface: a concrete client cannot return a caller-chosen CdpResult<M>
+   * from a concrete body, and a cast to fake it is banned by the lint ratchet.
+   */
+  send<M extends string>(method: M, params?: object, sessionId?: string, opts?: EgoSendOptions): Promise<CdpResult<M>>;
   async send(method: string, params?: unknown, sessionId?: string, opts: EgoSendOptions = {}): Promise<unknown> {
     if (method === "Target.createTarget" && opts.capability !== targetCreationCapability)
       throw Error("Target.createTarget is reserved for createAgentTabs");
@@ -119,19 +125,21 @@ export class EgoCdpClient {
     return promise;
   }
 
+  /** Overload declaration + loose body, same idiom as send: no cast needed. */
+  on<E extends string>(event: E, handler: (payload: CdpEventPayload<E>, meta: EgoEventMeta) => unknown): () => void;
   on(method: string, fn: (payload: unknown, meta: EgoEventMeta) => unknown) {
     return this.#events.on(method, ({ data }: EgoEvent) => fn(data.payload, data.meta));
   }
 
-  async discoverTargets(): Promise<EgoTarget[]> {
+  async discoverTargets(): Promise<CdpTargetSummary[]> {
     const result = await this.send("Target.getTargets");
     const targetInfos = isObject(result) ? result.targetInfos : undefined;
     if (!Array.isArray(targetInfos)) throw new TypeError("Target.getTargets returned no targetInfos array");
     return targetInfos.map((t: unknown) => {
       const info = isObject(t) ? t : {};
       return {
-        id: stringOr(info.targetId, undefined),
-        type: stringOr(info.type, undefined),
+        id: stringOr(info.targetId, ""),
+        type: stringOr(info.type, ""),
         url: stringOr(info.url, ""),
         title: stringOr(info.title, ""),
         description: stringOr(info.description, undefined),
@@ -251,12 +259,14 @@ export class EgoCdpClient {
     const meta: EgoEventMeta = { sessionId };
     const dialog =
       method === "Page.javascriptDialogOpening" && sessionId
-        ? new Dialog(typeof params === "object" ? params : undefined, (action: unknown) => this.send("Page.handleJavaScriptDialog", action, sessionId))
+        ? new Dialog(dialogPolicyParams(params), (action: object | undefined) =>
+            this.send("Page.handleJavaScriptDialog", action, sessionId),
+          )
         : undefined;
     if (dialog) meta.dialog = dialog;
     const emitted = this.#events.emit(method, { data: { payload: params, meta } }).catch(() => {});
     return dialog
-      ? emitted.then(() => answerWithPolicy(dialog, this.#dialogPolicy, params)).catch(() => {})
+      ? emitted.then(() => answerWithPolicy(dialog, this.#dialogPolicy, dialogPolicyParams(params))).catch(() => {})
       : undefined;
   }
 }

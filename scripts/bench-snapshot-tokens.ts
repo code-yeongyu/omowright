@@ -71,7 +71,7 @@ async function measure(url) {
   }
 }
 
-const count = n => n.toLocaleString("en-US");
+const count = (n) => n.toLocaleString("en-US");
 const percent = (part, whole) => `${((100 * part) / whole).toFixed(1)}%`;
 
 const rows = [];
@@ -80,7 +80,9 @@ for (const { url, shape } of PAGES) {
   const name = url.replace(/^https:\/\//, "").replace(/\/$/, "");
   try {
     const t = await measure(url);
-    rows.push(`| ${name} | ${shape} | ${count(t.html)} | ${count(t.snapshot)} | ${count(t.interactive)} | ${percent(t.snapshot, t.html)} | ${percent(t.interactive, t.html)} |`);
+    rows.push(
+      `| ${name} | ${shape} | ${count(t.html)} | ${count(t.snapshot)} | ${count(t.interactive)} | ${percent(t.snapshot, t.html)} | ${percent(t.interactive, t.html)} |`,
+    );
   } catch (error) {
     failures++;
     console.error(`${url}: ${error?.message ?? error}`);

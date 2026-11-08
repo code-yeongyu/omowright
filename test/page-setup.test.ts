@@ -208,6 +208,7 @@ test("exposeBinding supplies the real context, page and calling frame across doc
   fixture(async ({ page, url }) => {
     const off = page.on("console", () => {});
     await page.exposeBinding("who", async (source: BindingSource, ...args: unknown[]) => {
+      assert.ok(page.context);
       assert.equal(source.context, page.context());
       assert.equal(source.page, page);
       assert.ok(page.frameManager.getFrame(source.frame.frameId));
@@ -262,7 +263,7 @@ test("setViewportSize changes viewport and screen and updates the agent navigati
     await page.setViewportSize({ width: 801, height: 603 });
     await page.goto(url, { waitUntil: "load" });
     assert.deepEqual(page.viewportSize(), { width: 801, height: 603 });
-    assert.deepEqual(tabs.get(page.targetId).viewport, { width: 801, height: 603 });
+    assert.deepEqual(tabs.get(page.targetId)?.viewport, { width: 801, height: 603 });
     assert.deepEqual(
       await page.evaluate(
         "({ width: innerWidth, height: innerHeight, screenWidth: screen.width, screenHeight: screen.height })",

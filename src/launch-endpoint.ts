@@ -81,20 +81,26 @@ export async function snapshotActivePort(profileDir: string | null | undefined):
 
 function isSameFile(info: ActivePortIdentity, previous: ActivePortSnapshot | null) {
   return (
-    previous !== null &&
-    info.ino === previous.ino &&
-    info.mtimeMs === previous.mtimeMs &&
-    info.size === previous.size
+    previous !== null && info.ino === previous.ino && info.mtimeMs === previous.mtimeMs && info.size === previous.size
   );
 }
 
 // The endpoint is the launched browser's only if it answers with the browser id
 // that browser reported, and the browser is still the one we spawned.
+/** The child-process members launch discovery reads; a spawned ChildProcess (or an EventEmitter stub) satisfies it. */
+export interface LaunchedChild {
+  readonly exitCode: number | null;
+  readonly signalCode: NodeJS.Signals | null;
+  readonly stderr: Readable;
+  once(event: "error", listener: (error: Error) => void): unknown;
+  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+  off(event: "error", listener: (error: Error) => void): unknown;
+  off(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+}
+
 export function assertLaunchedBrowser(child: ChildProcess, report: LaunchReport, webSocketDebuggerUrl: string) {
   if (child.exitCode !== null || child.signalCode !== null) {
-    throw new Error(
-      `browser exited before its DevTools endpoint ${report.endpoint} could be verified`,
-    );
+    throw new Error(`browser exited before its DevTools endpoint ${report.endpoint} could be verified`);
   }
   const answered = new URL(webSocketDebuggerUrl).pathname;
   if (report.browserPath === null || answered !== report.browserPath) {
@@ -107,12 +113,10 @@ export function assertLaunchedBrowser(child: ChildProcess, report: LaunchReport,
 // Resolves undefined only if `finish` is handed a falsy error value, which no
 // caller below produces (every error is an Error object).
 export async function discoverLaunchedEndpoint(
-  child: ChildProcess & { stderr: Readable },
+  child: LaunchedChild,
   { profileDir, timeoutMs, previousActivePort = null }: DiscoverLaunchOptions = {},
 ): Promise<LaunchReport | undefined> {
-  const activePortPath = profileDir
-    ? path.join(profileDir, "DevToolsActivePort")
-    : null;
+  const activePortPath = profileDir ? path.join(profileDir, "DevToolsActivePort") : null;
 
   return new Promise<LaunchReport | undefined>((resolve, reject) => {
     let settled = false;
@@ -131,10 +135,10 @@ export async function discoverLaunchedEndpoint(
       else resolve(endpoint);
     };
 
-    const readActivePort = async (activePortPath: string) => {
-      const info = await stat(activePortPath);
+    const readActivePort = async (portPath: string) => {
+      const info = await stat(portPath);
       if (isSameFile(activePortIdentity(info), previousActivePort)) return;
-      const text = await readFile(activePortPath, "utf8");
+      const text = await readFile(portPath, "utf8");
       if (previousActivePort !== null && text === previousActivePort.text) return;
       const report = parseActivePort(text);
       if (report) finish(null, report);
@@ -169,8 +173,7 @@ export async function discoverLaunchedEndpoint(
           endpoint: httpEndpointFromWebSocket(webSocketUrl),
           browserPath: new URL(webSocketUrl).pathname,
         });
-      }
-      else void tryActivePort();
+      } else void tryActivePort();
     };
     const onError = (error: Error) => finish(error);
     const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
@@ -194,8 +197,7 @@ export async function discoverLaunchedEndpoint(
         activePortWatcher = watch(profileDir, (event, filename) => {
           if (
             (event === "rename" || event === "change") &&
-            (!filename ||
-              filename.toString() === path.basename(activePortPath))
+            (!filename || filename.toString() === path.basename(activePortPath))
           ) {
             void tryActivePort();
           }
@@ -210,9 +212,7 @@ export async function discoverLaunchedEndpoint(
 
     const timeout = setTimeout(() => {
       finish(
-        new Error(
-          `browser did not expose a DevTools endpoint within ${timeoutMs}ms${stderr ? `\n${stderr}` : ""}`,
-        ),
+        new Error(`browser did not expose a DevTools endpoint within ${timeoutMs}ms${stderr ? `\n${stderr}` : ""}`),
       );
     }, timeoutMs);
     cleanups.push(() => clearTimeout(timeout));

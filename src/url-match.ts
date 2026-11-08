@@ -3,7 +3,22 @@
 // predicates written for Playwright match the same URLs here. OmOWright has no baseURL option, so
 // globs resolve the way Playwright resolves them without one.
 
-const escapedChars: ReadonlySet<string> = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
+const escapedChars: ReadonlySet<string> = new Set([
+  "$",
+  "^",
+  "+",
+  ".",
+  "*",
+  "(",
+  ")",
+  "|",
+  "\\",
+  "?",
+  "{",
+  "}",
+  "[",
+  "]",
+]);
 
 function globToRegexPattern(glob: string) {
   const tokens = ["^"];
@@ -75,28 +90,36 @@ function resolveGlob(match: string) {
   }
   // Escaped `\\?` behaves the same as `?` in these glob patterns.
   match = match.replaceAll(/\\\\\?/g, "?");
-  if (match.startsWith("about:") || match.startsWith("data:")
-    || match.startsWith("chrome:") || match.startsWith("edge:")
-    || match.startsWith("file:")) return match;
+  if (
+    match.startsWith("about:") ||
+    match.startsWith("data:") ||
+    match.startsWith("chrome:") ||
+    match.startsWith("edge:") ||
+    match.startsWith("file:")
+  )
+    return match;
   // Glob symbols may be escaped in the URL and some of them such as ? affect resolution,
   // so they are replaced with safe components first.
-  const relativePath = match.split("/").map((token, index) => {
-    if (token === "." || token === ".." || token === "") return token;
-    // http*:// and similar: the stand-in scheme must be a web scheme so slashes follow the host.
-    if (index === 0 && token.endsWith(":")) {
-      if (token.indexOf("*") !== -1 || token.indexOf("{") !== -1) return mapToken(token, "http:");
-      // An explicit scheme is kept as is; it decides trailing slashes after the host.
-      return token;
-    }
-    // Literal components round-trip through new URL() so default ports, percent-encoding and IDN
-    // hosts are normalized; only components with glob characters are replaced.
-    if (!/[*?{}\\]/.test(token)) return token;
-    const questionIndex = token.indexOf("?");
-    if (questionIndex === -1) return mapToken(token, `$_${index}_$`);
-    const newPrefix = mapToken(token.substring(0, questionIndex), `$_${index}_$`);
-    const newSuffix = mapToken(token.substring(questionIndex), `?$_${index}_$`);
-    return newPrefix + newSuffix;
-  }).join("/");
+  const relativePath = match
+    .split("/")
+    .map((token, index) => {
+      if (token === "." || token === ".." || token === "") return token;
+      // http*:// and similar: the stand-in scheme must be a web scheme so slashes follow the host.
+      if (index === 0 && token.endsWith(":")) {
+        if (token.indexOf("*") !== -1 || token.indexOf("{") !== -1) return mapToken(token, "http:");
+        // An explicit scheme is kept as is; it decides trailing slashes after the host.
+        return token;
+      }
+      // Literal components round-trip through new URL() so default ports, percent-encoding and IDN
+      // hosts are normalized; only components with glob characters are replaced.
+      if (!/[*?{}\\]/.test(token)) return token;
+      const questionIndex = token.indexOf("?");
+      if (questionIndex === -1) return mapToken(token, `$_${index}_$`);
+      const newPrefix = mapToken(token.substring(0, questionIndex), `$_${index}_$`);
+      const newSuffix = mapToken(token.substring(questionIndex), `?$_${index}_$`);
+      return newPrefix + newSuffix;
+    })
+    .join("/");
   const result = resolveURL(relativePath);
   let resolved = result.resolved;
   for (const [token, original] of tokenMap) {

@@ -16,11 +16,11 @@ const sync = () => session.cooperate("sync").then((r) => r.context_id);
 const { tree, refs, css } = await bskSnapshot(session, { interactive: true, context: await sync() });
 // tree and refs look exactly like page.snapshot(); css[ref] is a light-DOM
 // selector for the same element (null inside shadow roots)
-await session.click({ selector: css.e3 }, { context: await sync() });   // or "@e3" after session.observe()
+await session.click({ selector: css.e3 }, { context: await sync() }); // or "@e3" after session.observe()
 await session.fill(css.e5, "hello", { clearBefore: true, context: await sync() });
 await session.press("Enter", { context: await sync() });
 await session.waitForNavigation({ waitUntil: "load" });
-await session.stop();                                // ALWAYS: returns borrowed tabs, closes the Agent Window
+await session.stop(); // ALWAYS: returns borrowed tabs, closes the Agent Window
 ```
 
 ### Shared control (BrowserSkill 0.4+)
@@ -67,16 +67,16 @@ Targets are a ref (`"e3"` / `"@e3"` from `session.observe()` or
 `session.snapshot()`), a CSS selector, or `{ captureId, x, y }` from a
 screenshot.
 
-| Need | Call |
-| --- | --- |
-| Navigate / history | `navigate(url, {waitUntil, timeoutMs})`, `back()`, `forward()`, `reload({hard})`, `waitForNavigation()` |
-| Read the page | `observe({maxTokens, cursor, probeHover})` (VOM text with `@eN` refs), `snapshot()`, `getHtml({ref, maxBytes})`, `bskSnapshot(session)` (OmOWright tree + css) |
-| Act | `click(target, {button, clickCount, modifiers})`, `hover`, `fill(target, value)`, `press(key, {target, holdMs})`, `select(target, values)`, `focus`, `blur`, `scrollTo`, `wheel({deltaY})` |
-| Script | `evaluate(expression, {awaitPromise, timeoutMs})` → `{ok, value, error}`; Agent Window tabs only |
-| Pixels | `screenshot({ref})` → `{buffer, width, height, captureId}`; `screenshot({fullPage: true})` streams the capture back in chunks |
-| Tabs | `tabList({scope: "user"})`, `tabCreate({url})`, `tabSelect(id)`, `tabClose(id)`, `tabBorrow(id)` (the user confirms), `tabReturn(id)` |
-| Humans | `requestHelp({prompt, targets, completionCriteria, timeoutMs})` for login, CAPTCHA, OTP, payment — the extension shows an overlay and waits |
-| Diagnostics | `console({since})`, `network({since})` (metadata only), `emulate({overrides})`, `resize(w, h)` |
+| Need               | Call                                                                                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Navigate / history | `navigate(url, {waitUntil, timeoutMs})`, `back()`, `forward()`, `reload({hard})`, `waitForNavigation()`                                                                                    |
+| Read the page      | `observe({maxTokens, cursor, probeHover})` (VOM text with `@eN` refs), `snapshot()`, `getHtml({ref, maxBytes})`, `bskSnapshot(session)` (OmOWright tree + css)                             |
+| Act                | `click(target, {button, clickCount, modifiers})`, `hover`, `fill(target, value)`, `press(key, {target, holdMs})`, `select(target, values)`, `focus`, `blur`, `scrollTo`, `wheel({deltaY})` |
+| Script             | `evaluate(expression, {awaitPromise, timeoutMs})` → `{ok, value, error}`; Agent Window tabs only                                                                                           |
+| Pixels             | `screenshot({ref})` → `{buffer, width, height, captureId}`; `screenshot({fullPage: true})` streams the capture back in chunks                                                              |
+| Tabs               | `tabList({scope: "user"})`, `tabCreate({url})`, `tabSelect(id)`, `tabClose(id)`, `tabBorrow(id)` (the user confirms), `tabReturn(id)`                                                      |
+| Humans             | `requestHelp({prompt, targets, completionCriteria, timeoutMs})` for login, CAPTCHA, OTP, payment — the extension shows an overlay and waits                                                |
+| Diagnostics        | `console({since})`, `network({since})` (metadata only), `emulate({overrides})`, `resize(w, h)`                                                                                             |
 
 Anything the daemon refuses comes back as a `BskRpcError` with the daemon's
 `code` (`not_found`, `invalid_params`, `permission_denied`, `timeout`,
@@ -103,7 +103,7 @@ bot detection; for WAF-heavy targets use the owned engine with CloakBrowser
 
 ```js
 const { bskDoctor, bskOnboard } = await import("omowright");
-const report = await bskDoctor();            // {cli, daemon, browsers, primary, identification, browsersConnected, ready, nextStep}
+const report = await bskDoctor(); // {cli, daemon, browsers, primary, identification, browsersConnected, ready, nextStep}
 if (!report.ready) {
   const result = await bskOnboard({ browser: knownBrowserOrUndefined, onHumanStep: (s) => console.log(s.step) });
   // result.needsChoice === true: nothing was registered; ask the user which
@@ -133,11 +133,11 @@ proves nothing — Chrome leaves one behind after a single launch — so
 Brave, Chromium, Arc, Dia, Vivaldi, Opera, Comet, Aside, Naver Whale) by
 usage signals from `probeBrowserSignals`:
 
-| Signal | macOS | Linux | Windows |
-| --- | --- | --- | --- |
-| Default browser | LaunchServices `https` handler | `xdg-settings get default-web-browser` | `UserChoice` ProgId |
-| Running now | the app bundle in `/Applications` or `~/Applications` (automation builds elsewhere do not count) | process name | `tasklist` image |
-| Recent use | `Local State` / `Default/History` mtime within 7 days | same | same |
+| Signal          | macOS                                                                                            | Linux                                  | Windows             |
+| --------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------- |
+| Default browser | LaunchServices `https` handler                                                                   | `xdg-settings get default-web-browser` | `UserChoice` ProgId |
+| Running now     | the app bundle in `/Applications` or `~/Applications` (automation builds elsewhere do not count) | process name                           | `tasklist` image    |
+| Recent use      | `Local State` / `Default/History` mtime within 7 days                                            | same                                   | same                |
 
 The decision, in order, with the `confidence` each step reports: an explicit
 `browser` option or `OMOWRIGHT_BROWSER` (`explicit`); the one browser whose
@@ -165,13 +165,13 @@ reverted — the library calls the binary by absolute path); `bsk status` to
 start the daemon; then, for the identified browser only, Chrome's
 external-extension registration for the Web Store listing:
 
-| Platform | Where the entry goes | What the user does |
-| --- | --- | --- |
-| macOS | `<user data dir>/External Extensions/<id>.json` | relaunch the browser, click **Enable** once |
-| Windows | `HKCU\Software\<vendor>\<browser>\Extensions\<id>` (`reg add`, no admin) | click **Enable** on the toolbar badge; no restart |
-| Linux (Chromium) | `<user data dir>/External Extensions/<id>.json` | relaunch; installs silently |
-| Linux (Chrome/Edge/Brave) | `/opt/google/chrome/extensions/<id>.json` etc. — needs root | otherwise: open the store link and click Add |
-| Opera, and Vivaldi/Whale off macOS | no external-extension path | open the store link in that browser and click Add |
+| Platform                           | Where the entry goes                                                     | What the user does                                |
+| ---------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------- |
+| macOS                              | `<user data dir>/External Extensions/<id>.json`                          | relaunch the browser, click **Enable** once       |
+| Windows                            | `HKCU\Software\<vendor>\<browser>\Extensions\<id>` (`reg add`, no admin) | click **Enable** on the toolbar badge; no restart |
+| Linux (Chromium)                   | `<user data dir>/External Extensions/<id>.json`                          | relaunch; installs silently                       |
+| Linux (Chrome/Edge/Brave)          | `/opt/google/chrome/extensions/<id>.json` etc. — needs root              | otherwise: open the store link and click Add      |
+| Opera, and Vivaldi/Whale off macOS | no external-extension path                                               | open the store link in that browser and click Add |
 
 Then it waits on `system.status{wait_for_browser_ms}` until the extension
 connects. Tell the user exactly `result.humanStep`, nothing more. If the user

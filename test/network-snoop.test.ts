@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createNetworkSnoop } from "../src/network-snoop.ts";
 import { OmOPage } from "../src/core.ts";
+import type { PageFrameManager, PageHost } from "../src/core.ts";
 import { connectPipe } from "../src/pipe.ts";
 import { createServer } from "node:http";
 import { mkdtempSync } from "node:fs";
@@ -9,6 +10,33 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { removeTreeSync } from "./fixtures/remove-tree.ts";
 import type { CdpEventMeta, CdpEventPayload, CdpResult, CdpSendOptions, CdpUnsubscribe } from "../src/cdp-protocol.ts";
+
+/** A PageFrameManager stub that answers every member the page may call; no frame is ever real here. */
+const fakeFrameManager = (overrides: Partial<PageFrameManager> = {}): PageFrameManager => ({
+  mainFrameId: "f1",
+  getFrame: () => null,
+  frames: new Map(),
+  hasSession: () => true,
+  collectDescendantFrames: () => [],
+  ensureInjected: async () => null,
+  invalidateContext: () => {},
+  resolveFrameIdForSnapshotPrefix: () => null,
+  setSnapshotFramePrefixMap: () => {},
+  ...overrides,
+});
+/** A PageHost stub: the page reads no path, popup or download here, so every one is a no-op it never asks for. */
+const fakeHost = (overrides: Partial<PageHost> = {}): PageHost => ({
+  extensionBridgeRoute: {},
+  page: null,
+  resolvePageSession: async () => "s1",
+  resolvePath: (value: string) => value,
+  ensurePath: async (value: string) => value,
+  registerReadableDownloadPath: (value: string) => value,
+  resolvePopup: async () => null,
+  openPopupTab: async () => null,
+  closeTab: async () => null,
+  ...overrides,
+});
 
 interface CdpMeta {
   sessionId: string;
@@ -348,17 +376,7 @@ for (const method of ["waitForRequest", "waitForResponse"] as const) {
   ] as const) {
     test(`${method} uses Playwright URL globs: ${name}`, async () => {
       const cdp = new FakeCdp();
-      const page = new OmOPage(
-        cdp,
-        {
-          mainFrameId: "f1",
-          getFrame: () => null,
-          frames: new Map(),
-        },
-        "t1",
-        "s1",
-        { resolvePageSession: async () => "s1" },
-      );
+      const page = new OmOPage(cdp, fakeFrameManager(), "t1", "s1", fakeHost());
       try {
         const pending = page[method](match, { timeout: 1000 });
         await roundTrip(cdp, "rejected", { url: rejected });
@@ -373,17 +391,7 @@ for (const method of ["waitForRequest", "waitForResponse"] as const) {
 
 test("page network objects reject refused bodies and unsubscribe on disposal", async () => {
   const cdp = new FakeCdp();
-  const page = new OmOPage(
-    cdp,
-    {
-      mainFrameId: "f1",
-      getFrame: () => null,
-      frames: new Map(),
-    },
-    "t1",
-    "s1",
-    { resolvePageSession: async () => "s1" },
-  );
+  const page = new OmOPage(cdp, fakeFrameManager(), "t1", "s1", fakeHost());
   const snoop = createNetworkSnoop(page, { bodies: false });
   try {
     const pending = page.waitForResponse("https://x.test/api/items", { timeout: 1000 });
@@ -431,17 +439,7 @@ test("network ownership is lazy, shared, and released even when enable is refuse
     if (args[0] === "Network.enable") throw Error("enable refused");
     return result;
   };
-  const page = new OmOPage(
-    cdp,
-    {
-      mainFrameId: "f1",
-      getFrame: () => null,
-      frames: new Map(),
-    },
-    "t1",
-    "s1",
-    { resolvePageSession: async () => "s1" },
-  );
+  const page = new OmOPage(cdp, fakeFrameManager(), "t1", "s1", fakeHost());
   const baseline = cdp.listenerCount();
   assert.equal(cdp.calls.length, 0, "page setup enables no Network or Runtime domain");
   const request = () => {};
@@ -477,17 +475,7 @@ test("network ownership is lazy, shared, and released even when enable is refuse
 test("response body decoding survives automatic wait listener removal", async () => {
   const cdp = new FakeCdp();
   cdp.bodies.set("r1", { body: Buffer.from("binary \u00e9").toString("base64"), base64Encoded: true });
-  const page = new OmOPage(
-    cdp,
-    {
-      mainFrameId: "f1",
-      getFrame: () => null,
-      frames: new Map(),
-    },
-    "t1",
-    "s1",
-    { resolvePageSession: async () => "s1" },
-  );
+  const page = new OmOPage(cdp, fakeFrameManager(), "t1", "s1", fakeHost());
   try {
     const pending = page.waitForResponse(/api\/items$/g, { timeout: 1000 });
     await flush();
@@ -545,7 +533,7 @@ test(
         const requestWait = page.waitForRequest(origin + "/api", { timeout: 10_000 });
         const responseWait = page.waitForResponse(origin + "/api", { timeout: 10_000 });
         const predicateWait = page.waitForResponse(
-          async (response) => response.url().endsWith("/api") && response.status() === 201,
+          async (response) => response.url().endsWith("/api") && "status" in response && response.status() === 201,
           { timeout: 10_000 },
         );
         const captured = snoop.waitFor({ url: "/api" }, { timeoutMs: 10_000 });
@@ -632,18 +620,7 @@ test("history steps settle on a frame-tree reply requested after the cross-docum
     return args[0] === "Page.getFrameTree" ? frameTree.promise : result;
   };
   const frameTreeRequests = () => cdp.calls.filter((call) => call.method === "Page.getFrameTree").length;
-  const page = new OmOPage(
-    cdp,
-    {
-      mainFrameId: "f1",
-      getFrame: () => null,
-      frames: new Map(),
-      hasSession: () => true,
-    },
-    "t1",
-    "s1",
-    { resolvePageSession: async () => "s1" },
-  );
+  const page = new OmOPage(cdp, fakeFrameManager(), "t1", "s1", fakeHost());
   try {
     let settled = false;
     const back = page.goBack().then((response) => {

@@ -18,8 +18,8 @@ export interface LayersPage {
   evaluate<A, R>(pageFunction: (arg: A) => R, arg: A): Promise<R>;
 }
 
-export interface LayersSnapshotPage<S extends { tree: string }> extends LayersPage {
-  snapshot(options?: object): Promise<S>;
+export interface LayersSnapshotPage extends LayersPage {
+  snapshot(options?: object): Promise<unknown>;
 }
 
 export async function describeLayers(page: LayersPage, { grid = 5 }: { grid?: number } = {}) {
@@ -162,11 +162,11 @@ export function layersHeader(result: Pick<LayersResult, "blocking"> | null | und
   return `@layers blocking=${who} "${blocking.name}" coverage=${pct}% hint=${blocking.selectorHint}`;
 }
 
-export async function snapshotWithLayers<S extends { tree: string }>(
-  page: LayersSnapshotPage<S>,
-  snapshotOptions?: object,
-) {
+export async function snapshotWithLayers(page: LayersSnapshotPage, snapshotOptions?: object) {
   const snapshot = await page.snapshot(snapshotOptions);
+  if (typeof snapshot !== "object" || snapshot === null || !("tree" in snapshot) || typeof snapshot.tree !== "string") {
+    throw new TypeError("snapshotWithLayers needs the full snapshot (no diff or find options)");
+  }
   const layers = await describeLayers(page);
   return { ...snapshot, layers, tree: `${layersHeader(layers)}\n${snapshot.tree}` };
 }

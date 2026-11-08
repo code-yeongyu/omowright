@@ -14,7 +14,7 @@ interface TraceDialog {
   defaultValue(): string;
   url: string;
 }
-type DialogListener = (dialog: TraceDialog | null | undefined) => unknown;
+type DialogListener = (dialog: TraceDialog) => unknown;
 
 interface ResponseBody {
   body: string;

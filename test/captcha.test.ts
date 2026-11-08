@@ -120,7 +120,7 @@ test("waitFor matches strict application acceptance without input or snapshots",
       return true;
     },
   });
-  assert.deepEqual(Object.keys(result).sort(), ["elapsedMs", "outcome"]);
+  assert.deepEqual(Object.keys(result).toSorted(), ["elapsedMs", "outcome"]);
   assert.equal(result.outcome, "matched");
   assert.ok(result.elapsedMs >= 0);
   assert.equal(operationSignal?.aborted, true);

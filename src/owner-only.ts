@@ -49,11 +49,15 @@ const ownerOnlyDirectories = new Set<string>();
 // OWNER (whoever creates a child, on that child). SDDL writes well-known SIDs
 // as aliases; their numeric forms are listed too.
 const TRUSTED_TRUSTEES: ReadonlySet<string | undefined> = new Set([
-  "SY", "S-1-5-18",
-  "BA", "S-1-5-32-544",
+  "SY",
+  "S-1-5-18",
+  "BA",
+  "S-1-5-32-544",
   "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
-  "OW", "S-1-3-4",
-  "CO", "S-1-3-0",
+  "OW",
+  "S-1-3-4",
+  "CO",
+  "S-1-3-0",
 ]);
 const DENY_ACE_TYPES: ReadonlySet<string | undefined> = new Set(["D", "OD", "XD"]);
 let currentUserSid: Promise<string> | undefined;
@@ -141,13 +145,26 @@ function inspectDirectoryDacl(text: string, sid: string) {
   const isUser = (trustee: string | undefined) =>
     trustee === sid || (trustee === "LA" && sid.endsWith("-500")) || (trustee === "LG" && sid.endsWith("-501"));
   const own = dacl.aces.filter((fields) => isUser(fields[5]));
-  const others = dacl.aces.filter(([type, , , , , trustee]) => !isUser(trustee) && !TRUSTED_TRUSTEES.has(trustee) && !DENY_ACE_TYPES.has(type));
+  const others = dacl.aces.filter(
+    ([type, , , , , trustee]) => !isUser(trustee) && !TRUSTED_TRUSTEES.has(trustee) && !DENY_ACE_TYPES.has(type),
+  );
   return {
     parsed: true,
-    ownerOnly: dacl.flags.includes("P") && others.length === 0 &&
-      own.length === 1 && own[0]?.[0] === "A" && own[0]?.[1] === "OICI" && own[0]?.[2] === "FA",
+    ownerOnly:
+      dacl.flags.includes("P") &&
+      others.length === 0 &&
+      own.length === 1 &&
+      own[0]?.[0] === "A" &&
+      own[0]?.[1] === "OICI" &&
+      own[0]?.[2] === "FA",
     // An ACE with no flags field throws here (TypeError), failing restrictToOwner closed.
-    foreign: [...new Set(others.filter(([, flags]) => !String.prototype.includes.call(flags, "ID")).map(([, , , , , trustee]) => trustee))],
+    foreign: [
+      ...new Set(
+        others
+          .filter(([, flags]) => !String.prototype.includes.call(flags, "ID"))
+          .map(([, , , , , trustee]) => trustee),
+      ),
+    ],
   };
 }
 
@@ -198,10 +215,14 @@ export async function restrictToOwner(
   // The grant keeps explicit entries; another trustee's is removed by SID (an
   // SDDL alias such as WD is a SID string icacls accepts after `*`).
   if (dacl.foreign.length > 0) {
-    await command(windowsSystemTool("icacls.exe"), [target, "/remove:g", ...dacl.foreign.map((trustee) => `*${trustee}`), "/Q"], {
-      timeout: WINDOWS_COMMAND_TIMEOUT_MS,
-      windowsHide: true,
-    });
+    await command(
+      windowsSystemTool("icacls.exe"),
+      [target, "/remove:g", ...dacl.foreign.map((trustee) => `*${trustee}`), "/Q"],
+      {
+        timeout: WINDOWS_COMMAND_TIMEOUT_MS,
+        windowsHide: true,
+      },
+    );
   }
   // Entries of a DACL that could not be read may still grant someone else.
   if (dacl.parsed) await rememberOwnerOnlyDirectory(target);

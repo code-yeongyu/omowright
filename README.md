@@ -44,7 +44,7 @@ console.log(compactSnapshot(await page.snapshot()));
 // - paragraph:
 //   - link "Learn more" [ref=e1]
 
-await page.locator("e1").click();          // refs come straight from the snapshot
+await page.locator("e1").click(); // refs come straight from the snapshot
 await browser.close();
 ```
 
@@ -62,13 +62,13 @@ and `compactSnapshot(await page.snapshot({ interactive: true }))`. Measured on
 2026-11-05 (UTC) at commit `4845ef5` with Chrome for Testing 156.0.8078.4
 (headless shell) on Linux.
 
-| Page | Shape | Raw HTML | Snapshot | Interactive snapshot | Snapshot / HTML | Interactive / HTML |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| news.ycombinator.com | link-heavy | 11,615 | 4,220 | 3,811 | 36.3% | 32.8% |
-| en.wikipedia.org/wiki/Web_browser | long article | 143,312 | 14,155 | 12,591 | 9.9% | 8.8% |
-| github.com/code-yeongyu/omowright \* | app-like | 116,378 | 5,432 | 5,481 | 4.7% | 4.7% |
-| example.com | trivial | 637 | 222 | 222 | 34.9% | 34.9% |
-| httpbin.org/forms/post | form | 428 | 370 | 245 | 86.4% | 57.2% |
+| Page                                 | Shape        | Raw HTML | Snapshot | Interactive snapshot | Snapshot / HTML | Interactive / HTML |
+| ------------------------------------ | ------------ | -------: | -------: | -------------------: | --------------: | -----------------: |
+| news.ycombinator.com                 | link-heavy   |   11,615 |    4,220 |                3,811 |           36.3% |              32.8% |
+| en.wikipedia.org/wiki/Web_browser    | long article |  143,312 |   14,155 |               12,591 |            9.9% |               8.8% |
+| github.com/code-yeongyu/omowright \* | app-like     |  116,378 |    5,432 |                5,481 |            4.7% |               4.7% |
+| example.com                          | trivial      |      637 |      222 |                  222 |           34.9% |              34.9% |
+| httpbin.org/forms/post               | form         |      428 |      370 |                  245 |           86.4% |              57.2% |
 
 \* The interactive snapshot is read after the full one, and here it came out
 larger, so the page likely changed between the two reads: `page.goto()` can
@@ -105,15 +105,15 @@ await page.goto("https://example.com/feed");
 
 const items = [];
 const run = collectWhileScrolling(page, snoop, {
-  minItems: 200,                 // stop once this many items are in hand
-  maxScrolls: 15,                // or after this many scroll rounds
+  minItems: 200, // stop once this many items are in hand
+  maxScrolls: 15, // or after this many scroll rounds
   extract: (json) => json.items, // pull items out of each JSON body
-  scroll: "wheel",               // "end" jumps to the bottom instead
-  settleMs: 800,                 // wait for the next page to land
+  scroll: "wheel", // "end" jumps to the bottom instead
+  settleMs: 800, // wait for the next page to land
 });
 let step;
 while (!(step = await run.next()).done) items.push(step.value);
-step.value;                      // { rounds, total, stoppedBecause: "minItems" | "maxScrolls" | "noGrowth" }
+step.value; // { rounds, total, stoppedBecause: "minItems" | "maxScrolls" | "noGrowth" }
 ```
 
 It drains first, scrolls second, and stops on its own when the document stops
@@ -242,14 +242,14 @@ browser log), stealth profiles, eval-kernel usage, frames and human handoff,
 the attached BrowserSkill engine, and reading a 1Password web-vault item
 safely. Task presets live in `presets/`:
 
-| Preset | Covers |
-| --- | --- |
-| `presets/network` | Snoop JSON APIs, wait for requests, **collect while scrolling**, traces, routes |
-| `presets/visual-browse` | Coordinate UI, **CUA scroll**, viewport pinning, extension popups |
-| `presets/captcha` | Checkbox, slider, OCR and image-grid challenges |
-| `presets/chrome` | Tabs, windows, bookmarks, history, downloads, topSites |
-| `presets/agent-events` | Tab, popup and download push events |
-| `presets/cloak-bridge` | The MV3 bridge extension and native-messaging host |
+| Preset                  | Covers                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `presets/network`       | Snoop JSON APIs, wait for requests, **collect while scrolling**, traces, routes |
+| `presets/visual-browse` | Coordinate UI, **CUA scroll**, viewport pinning, extension popups               |
+| `presets/captcha`       | Checkbox, slider, OCR and image-grid challenges                                 |
+| `presets/chrome`        | Tabs, windows, bookmarks, history, downloads, topSites                          |
+| `presets/agent-events`  | Tab, popup and download push events                                             |
+| `presets/cloak-bridge`  | The MV3 bridge extension and native-messaging host                              |
 
 Install the skill by copying or symlinking `skills/omowright` (in an npm
 install, `node_modules/omowright/skills/omowright`) into your harness's

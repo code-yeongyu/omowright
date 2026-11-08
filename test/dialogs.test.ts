@@ -11,9 +11,25 @@ import { BrowserConnection } from "../src/connection.ts";
 import type { ConnectOptions } from "../src/connection.ts";
 import { resolveDialogAction } from "../src/dialog-policy.ts";
 import type { Dialog, DialogInfo } from "../src/dialog-policy.ts";
+import type { CdpResult, CdpSend, CdpSendOptions } from "../src/cdp-protocol.ts";
 import { createAgentTabs } from "../src/agent-tabs.ts";
 import { readProperty } from "../src/read-property.ts";
 import { removeTreeSync } from "./fixtures/remove-tree.ts";
+
+// A fake that records each command and answers {}; the overload is the generic CdpSend contract.
+function recordingSend(sent: SentCommand[]): CdpSend {
+  function send<M extends string>(
+    method: M,
+    params?: object,
+    sessionId?: string,
+    opts?: CdpSendOptions,
+  ): Promise<CdpResult<M>>;
+  async function send(method: string, params?: object, sessionId?: string): Promise<unknown> {
+    sent.push({ method, params, sessionId });
+    return {};
+  }
+  return send;
+}
 
 interface SentCommand {
   method: string;
@@ -50,10 +66,7 @@ const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
 function captureClient(options = {}) {
   const client = new PipeCdpClient({ browserPath: process.execPath, ...options });
   const sent: SentCommand[] = [];
-  client.send = async (method: string, params?: unknown, sessionId?: string) => {
-    sent.push({ method, params, sessionId });
-    return {};
-  };
+  client.send = recordingSend(sent);
   return { client, sent };
 }
 
@@ -200,7 +213,7 @@ test("BrowserConnection.setDialogPolicy delegates or rejects by transport", () =
 
   const unsupported = new BrowserConnection({
     ensureConnected: async () => {},
-    send: async () => ({}),
+    send: recordingSend([]),
     on: () => () => {},
     close: async () => {},
     discoverTargets: async () => [],
@@ -290,7 +303,7 @@ test(
       assert.equal(await confirmed, false, "the policy dismissed the confirm");
 
       connection.setDialogPolicy({ accept: true, promptText: "hello" });
-      assert.deepEqual(connection.cdp.dialogPolicy, { accept: true, promptText: "hello" });
+      assert.deepEqual(readProperty(connection.cdp, "dialogPolicy"), { accept: true, promptText: "hello" });
       const prompted = page.evaluate(() => prompt("q"));
       assert.equal(await prompted, "hello", "the policy answered the prompt");
     } finally {

@@ -9,7 +9,12 @@ export {
   PipeCdpClient,
 } from "./pipe.ts";
 export { connectNamed, listInstances } from "./instances.ts";
-export { RunningBrowserError, connectRunningBrowser, findRunningBrowser, readDevToolsActivePort } from "./running-browser.ts";
+export {
+  RunningBrowserError,
+  connectRunningBrowser,
+  findRunningBrowser,
+  readDevToolsActivePort,
+} from "./running-browser.ts";
 export { SharedConnectionError } from "./shared-connections.ts";
 export {
   buildCloakBrowserArgs,

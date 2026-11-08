@@ -19,9 +19,10 @@ export interface CaptchaWaitOptions<P> {
   signal?: AbortSignal | undefined;
 }
 
-export async function waitForCaptcha<P>(page: P, {
-  until, timeoutMs = 10000, pollMs = 100, signal,
-}: CaptchaWaitOptions<P> = {}): Promise<CaptchaWaitResult> {
+export async function waitForCaptcha<P>(
+  page: P,
+  { until, timeoutMs = 10000, pollMs = 100, signal }: CaptchaWaitOptions<P> = {},
+): Promise<CaptchaWaitResult> {
   if (typeof until !== "function") throw new TypeError("until must be a function");
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMER_MS) {
     throw new RangeError("timeoutMs must be between 0 and 2147483647");
@@ -29,8 +30,12 @@ export async function waitForCaptcha<P>(page: P, {
   if (!Number.isFinite(pollMs) || pollMs <= 0 || pollMs > MAX_TIMER_MS) {
     throw new RangeError("pollMs must be greater than 0 and at most 2147483647");
   }
-  if (signal !== undefined && (typeof signal?.aborted !== "boolean"
-    || typeof signal.addEventListener !== "function" || typeof signal.removeEventListener !== "function")) {
+  if (
+    signal !== undefined &&
+    (typeof signal?.aborted !== "boolean" ||
+      typeof signal.addEventListener !== "function" ||
+      typeof signal.removeEventListener !== "function")
+  ) {
     throw new TypeError("signal must be AbortSignal-compatible");
   }
 
@@ -41,9 +46,12 @@ export async function waitForCaptcha<P>(page: P, {
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   const { promise: stopped, resolve: resolveStopped } = Promise.withResolvers<typeof STOP>();
   const stop = () => resolveStopped(STOP);
-  const terminal = (): CaptchaWaitOutcome | null => signal?.aborted ? "cancelled"
-    : performance.now() >= deadline ? "timed_out" : null;
-  const result = (outcome: CaptchaWaitOutcome): CaptchaWaitResult => ({ outcome, elapsedMs: performance.now() - started });
+  const terminal = (): CaptchaWaitOutcome | null =>
+    signal?.aborted ? "cancelled" : performance.now() >= deadline ? "timed_out" : null;
+  const result = (outcome: CaptchaWaitOutcome): CaptchaWaitResult => ({
+    outcome,
+    elapsedMs: performance.now() - started,
+  });
   const scheduleDeadline = () => {
     const remaining = deadline - performance.now();
     if (remaining <= 0) stop();
@@ -64,8 +72,9 @@ export async function waitForCaptcha<P>(page: P, {
         // Promise.race keeps a rejection handler on a non-cooperative predicate
         // even after this wait has timed out or been cancelled.
         accepted = await Promise.race([
-          Promise.resolve().then(() => (evaluated ? terminal() : signal?.aborted)
-            ? STOP : until(page, { signal: operation.signal })),
+          Promise.resolve().then(() =>
+            (evaluated ? terminal() : signal?.aborted) ? STOP : until(page, { signal: operation.signal }),
+          ),
           stopped,
         ]);
       } catch (error) {
@@ -78,7 +87,7 @@ export async function waitForCaptcha<P>(page: P, {
       if (outcome) return result(outcome);
       if (accepted === true) return result("matched");
       await Promise.race([
-        new Promise(resolve => {
+        new Promise((resolve) => {
           pollTimer = setTimeout(resolve, Math.ceil(Math.min(pollMs, deadline - performance.now())));
         }),
         stopped,

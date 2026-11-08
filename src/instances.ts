@@ -270,14 +270,14 @@ async function removeOwnedRecord(recordPath: string, name: string, pid: number |
 }
 
 function connectionOptions(options: ConnectNamedOptions, profileDir: string | null | undefined): ConnectOptions {
-  const result: ConnectOptions = { ...(options.connectionOptions ?? {}) };
+  const result: ConnectOptions = { ...options.connectionOptions };
   if (options.storageRoot !== undefined) result.storageRoot = options.storageRoot;
   else if (result.storageRoot === undefined && profileDir) {
     result.storageRoot = profileDir;
   }
   if (options.client !== undefined) {
     result.client = {
-      ...(result.client ?? {}),
+      ...result.client,
       ...options.client,
     };
   }
@@ -341,7 +341,7 @@ async function launchNamed(name: string, { root, recordPath, lockPath }: Registr
       // (DETACHED_PROCESS also gives a console-subsystem browser no console).
       // No windowsHide: it would start a headful browser's window hidden.
       ...(process.platform === "win32" ? { detached: true } : {}),
-      ...(options.spawnOptions ?? {}),
+      ...options.spawnOptions,
       stdio: ["ignore", "ignore", "pipe"],
     },
   );
@@ -513,10 +513,9 @@ export async function listInstances(options: ListInstancesOptions = {}): Promise
             () => false,
           );
         }
-        return { ...record, alive, responsive };
+        // record is this call's own JSON.parse result, so extending it in place is unobservable.
+        return Object.assign(record, { alive, responsive });
       }),
   );
-  return records
-    .filter((record) => record !== null)
-    .sort((left, right) => left.name.localeCompare(right.name));
+  return records.filter((record) => record !== null).toSorted((left, right) => left.name.localeCompare(right.name));
 }

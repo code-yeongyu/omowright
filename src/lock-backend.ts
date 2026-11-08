@@ -14,7 +14,7 @@ export interface HeldLock {
 }
 
 const probedPaths = new Set<string>();
-const DARWIN_BUSY_CODES: readonly unknown[] = ["EAGAIN", "EWOULDBLOCK"];
+const DARWIN_BUSY_CODES: ReadonlySet<unknown> = new Set(["EAGAIN", "EWOULDBLOCK"]);
 
 async function lockLinux(fd: number): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
@@ -27,11 +27,17 @@ async function lockLinux(fd: number): Promise<boolean> {
     const stderrStream = child.stderr;
     if (stderrStream === null) throw new TypeError("flock child has no stderr pipe");
     stderrStream.setEncoding("utf8");
-    stderrStream.on("data", (chunk: string) => { stderr += chunk; });
+    stderrStream.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
     child.once("error", (error: NodeJS.ErrnoException) => {
-      reject(error.code === "ENOENT"
-        ? new Error(`instance lock needs the flock utility (util-linux or busybox) on Linux: ${error.message}`, { cause: error })
-        : error);
+      reject(
+        error.code === "ENOENT"
+          ? new Error(`instance lock needs the flock utility (util-linux or busybox) on Linux: ${error.message}`, {
+              cause: error,
+            })
+          : error,
+      );
     });
     // close follows exit and drains stderr, so real utility errors are intact.
     child.once("close", (code, signal) => {
@@ -39,10 +45,12 @@ async function lockLinux(fd: number): Promise<boolean> {
       // util-linux and BusyBox are silent on EWOULDBLOCK. BusyBox also
       // returns 1 for real errors, but prints their errno description.
       else if (code === 1 && stderr.trim() === "") resolve(false);
-      else reject(Object.assign(
-        new Error(`instance lock flock failed (${signal ?? code}): ${stderr.trim()}`),
-        { code: "ERR_INSTANCE_LOCK" },
-      ));
+      else
+        reject(
+          Object.assign(new Error(`instance lock flock failed (${signal ?? code}): ${stderr.trim()}`), {
+            code: "ERR_INSTANCE_LOCK",
+          }),
+        );
     });
   });
 }
@@ -64,12 +72,12 @@ export async function tryAcquire(lockPath: string): Promise<HeldLock | null> {
   try {
     handle = await open(lockPath, flags, 0o600);
   } catch (error) {
-    if (platform === "darwin" && DARWIN_BUSY_CODES.includes(readProperty(error, "code"))) return null;
+    if (platform === "darwin" && DARWIN_BUSY_CODES.has(readProperty(error, "code"))) return null;
     if (platform === "win32" && readProperty(error, "code") === "EBUSY") return null;
     throw error;
   }
   try {
-    if (platform === "linux" && !await lockLinux(handle.fd)) {
+    if (platform === "linux" && !(await lockLinux(handle.fd))) {
       await handle.close();
       return null;
     }

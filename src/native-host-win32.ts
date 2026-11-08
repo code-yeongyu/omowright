@@ -80,7 +80,7 @@ interface RunResult {
   stderr: string;
 }
 
-export const WIN32_REGISTRY_KEYS = Object.freeze({
+export const WIN32_REGISTRY_KEYS: Readonly<Record<string, string | undefined>> = Object.freeze({
   chrome: "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts",
   chromium: "HKCU\\Software\\Chromium\\NativeMessagingHosts",
 });

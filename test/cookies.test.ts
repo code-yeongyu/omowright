@@ -16,7 +16,7 @@ function findHeadlessShell() {
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
-  if (candidates.length > 0) return candidates.sort().at(-1);
+  if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   if (existsSync(chrome)) return chrome;
   return null;
@@ -115,7 +115,7 @@ test(
         secure: false,
         sameSite: "Lax",
       });
-      const names = (cookies: readonly BrowserCookie[]) => cookies.map((c) => `${c.name}:${c.value}`).sort();
+      const names = (cookies: readonly BrowserCookie[]) => cookies.map((c) => `${c.name}:${c.value}`).toSorted();
       assert.deepEqual(names(await context.cookies(`${url}/scope/next`)), [
         "server:received",
         "session:root",
@@ -162,11 +162,11 @@ test(
       assert.equal(await page.url(), `${otherOrigin}/`, "snapshot must not navigate the caller's page");
       assert.deepEqual(JSON.parse(readFileSync(path.join(ud, "nested", "state.json"), "utf8")), state);
       assert.deepEqual(
-        state.origins.sort(byOrigin),
+        state.origins.toSorted(byOrigin),
         [
           { origin: url, localStorage: [{ name: "login", value: "fixture-token" }] },
           { origin: otherOrigin, localStorage: [{ name: "theme", value: "dark" }] },
-        ].sort(byOrigin),
+        ].toSorted(byOrigin),
       );
       await context.clearCookies();
       await context.addCookies(JSON.parse(JSON.stringify(state)).cookies);
@@ -188,10 +188,7 @@ test(
         }
         const restored = await contextOf(fresh).storageState();
         assert.deepEqual(restored.cookies, state.cookies);
-        assert.deepEqual(
-          restored.origins.sort(byOrigin),
-          state.origins,
-        );
+        assert.deepEqual(restored.origins.toSorted(byOrigin), state.origins.toSorted(byOrigin));
       } finally {
         await connection.cdp.send("Target.disposeBrowserContext", { browserContextId });
       }

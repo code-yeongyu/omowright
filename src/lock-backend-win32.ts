@@ -16,7 +16,9 @@ const { symbols } = dlopen(path.win32.join(systemRoot, "System32", "ntdll.dll"),
 function nativeError(operation: string, lockPath: string, status: number) {
   const error = symbols.RtlNtStatusToDosError(status);
   return Object.assign(
-    new Error(`instance lock ${operation} failed for ${lockPath} (Windows error ${error}, NTSTATUS 0x${status.toString(16)})`),
+    new Error(
+      `instance lock ${operation} failed for ${lockPath} (Windows error ${error}, NTSTATUS 0x${status.toString(16)})`,
+    ),
     { code: "ERR_INSTANCE_LOCK" },
   );
 }
@@ -24,7 +26,10 @@ function nativeError(operation: string, lockPath: string, status: number) {
 export function tryAcquireWindows(lockPath: string) {
   // Bun Windows is 64-bit: UNICODE_STRING has its pointer at offset 8 and
   // OBJECT_ATTRIBUTES is 48 bytes. Translate the Win32 extended namespace to NT.
-  const filename = Buffer.from(`${path.toNamespacedPath(path.resolve(lockPath)).replace(/^\\\\\?\\/, "\\??\\")}\0`, "utf16le");
+  const filename = Buffer.from(
+    `${path.toNamespacedPath(path.resolve(lockPath)).replace(/^\\\\\?\\/, "\\??\\")}\0`,
+    "utf16le",
+  );
   const name = Buffer.alloc(16);
   name.writeUInt16LE(filename.length - 2, 0);
   name.writeUInt16LE(filename.length, 2);
@@ -38,9 +43,7 @@ export function tryAcquireWindows(lockPath: string) {
   // GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, share mode 0, FILE_OPEN_IF
   // (OPEN_ALWAYS), synchronous non-directory file. NULL security descriptor
   // inherits the registry's DACL; no truncation, deletion, or inheritance.
-  const status = symbols.NtCreateFile(
-    handleOut, 0xc0100000, attributes, ioStatus, null, 0x80, 0, 3, 0x60, null, 0,
-  );
+  const status = symbols.NtCreateFile(handleOut, 0xc0100000, attributes, ioStatus, null, 0x80, 0, 3, 0x60, null, 0);
   // STATUS_SHARING_VIOLATION is exactly ERROR_SHARING_VIOLATION (32).
   if (status === 0xc0000043) return null;
   if (status >= 0x80000000) throw nativeError("NtCreateFile", lockPath, status);

@@ -191,7 +191,7 @@ export function findCloakBrowserPath({
 }: { browserRoot?: string | undefined } = {}): string {
   const candidates = globSync(
     path.join(path.resolve(browserRoot), "chromium-*", "Chromium.app", "Contents", "MacOS", "Chromium"),
-  ).sort();
+  ).toSorted();
   const browserPath = candidates.at(-1);
   if (!browserPath) {
     throw new Error(`CloakBrowser binary not found under ${path.resolve(browserRoot)}; set CLOAKBROWSER_BIN`);

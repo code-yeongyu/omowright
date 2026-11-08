@@ -18,7 +18,7 @@ function findHeadlessShell() {
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
-  if (candidates.length > 0) return candidates.sort().at(-1);
+  if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   if (existsSync(chrome)) return chrome;
   return null;
@@ -315,7 +315,7 @@ test(
       ] as const) {
         for (const getter of ["getByText", "getByRole", "getByLabel"] as const) {
           await t.test(`${name}.${getter}`, async () => {
-            for (const [method, args, expected] of TEXT_CASES.filter(([method]) => method === getter)) {
+            for (const [method, args, expected] of TEXT_CASES.filter(([rowMethod]) => rowMethod === getter)) {
               const scopedExpected = name === "locator" ? expected.filter((id) => id !== "outside") : expected;
               // The three getters take different arguments; each row's args match its own getter.
               const locator =

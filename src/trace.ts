@@ -32,9 +32,11 @@ export interface TraceOptions {
   network?: boolean | undefined;
   console?: boolean | undefined;
   maxBodyBytes?: number | undefined;
-  events?: {
-    on<N extends TraceDownloadEvent>(name: N, listener: (payload: BrowserEventPayloads[N]) => unknown): () => void;
-  } | undefined;
+  events?:
+    | {
+        on<N extends TraceDownloadEvent>(name: N, listener: (payload: BrowserEventPayloads[N]) => unknown): () => void;
+      }
+    | undefined;
 }
 
 interface TraceRecord {
@@ -66,7 +68,10 @@ const SLUG_MAX = 48;
 const SNOOP_MAX_ENTRIES = 5000;
 
 function slug(name: unknown) {
-  const value = String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const value = String(name ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   return (value || "step").slice(0, SLUG_MAX);
 }
 
@@ -132,42 +137,59 @@ export function createTrace(page: TracePage, options: TraceOptions = {}) {
     return entry;
   }
 
-  const sessionReady = Promise.resolve(page.resolveSessionId()).then(id => { sessionId = id; });
+  const sessionReady = Promise.resolve(page.resolveSessionId()).then((id) => {
+    sessionId = id;
+  });
   sessionReady.catch((error: unknown) => record({ kind: "warning", scope: "session", message: messageOf(error) }));
 
-  unsubscribers.push(page.cdp.on("Page.frameNavigated", (params, meta) => {
-    if (stopped || params?.frame?.parentId) return;
-    const add = () => record({ kind: "navigation", url: params?.frame?.url ?? "", frameId: params?.frame?.id ?? null });
-    if (sessionId === null) {
-      // The session id resolves asynchronously; hold early events until it is known.
-      sessionReady.then(() => { if (!stopped && meta?.sessionId === sessionId) add(); }).catch(() => {});
-      return;
-    }
-    if (meta?.sessionId === sessionId) add();
-  }));
+  unsubscribers.push(
+    page.cdp.on("Page.frameNavigated", (params, meta) => {
+      if (stopped || params?.frame?.parentId) return;
+      const add = () =>
+        record({ kind: "navigation", url: params?.frame?.url ?? "", frameId: params?.frame?.id ?? null });
+      if (sessionId === null) {
+        // The session id resolves asynchronously; hold early events until it is known.
+        sessionReady
+          .then(() => {
+            if (!stopped && meta?.sessionId === sessionId) add();
+          })
+          .catch(() => {});
+        return;
+      }
+      if (meta?.sessionId === sessionId) add();
+    }),
+  );
 
-  unsubscribers.push(page.on("dialog", dialog => record({
-    kind: "dialog",
-    type: dialog.type() ?? null,
-    message: dialog.message() ?? "",
-    defaultPrompt: dialog.defaultValue(),
-    url: dialog.url ?? null,
-  })));
+  unsubscribers.push(
+    page.on("dialog", (dialog) =>
+      record({
+        kind: "dialog",
+        type: dialog.type() ?? null,
+        message: dialog.message() ?? "",
+        defaultPrompt: dialog.defaultValue(),
+        url: dialog.url ?? null,
+      }),
+    ),
+  );
 
   if (events) {
-    unsubscribers.push(events.on("downloadStarted", payload => record({ kind: "download", phase: "started", ...payload })));
-    unsubscribers.push(events.on("downloadFinished", payload => record({ kind: "download", phase: "finished", ...payload })));
+    unsubscribers.push(
+      events.on("downloadStarted", (payload) => record({ kind: "download", phase: "started", ...payload })),
+    );
+    unsubscribers.push(
+      events.on("downloadFinished", (payload) => record({ kind: "download", phase: "finished", ...payload })),
+    );
   }
 
-  async function capture(step: StepRecord & TraceRecord, phase: "before" | "after") {
-    const file = path.join(shotDir, `${step.seq}-${slug(step.name)}-${phase}.png`);
+  async function capture(stepRecord: StepRecord & TraceRecord, phase: "before" | "after") {
+    const file = path.join(shotDir, `${stepRecord.seq}-${slug(stepRecord.name)}-${phase}.png`);
     try {
       // The buffer is written here rather than through screenshot({ path }) so the file
       // always lands in the trace directory, whatever the page's path resolution does.
       await writeFile(file, await page.screenshot({ type: "png" }));
-      step.screenshots[phase] = file;
+      stepRecord.screenshots[phase] = file;
     } catch (error) {
-      record({ kind: "warning", scope: `screenshot:${phase}`, step: step.seq, message: messageOf(error) });
+      record({ kind: "warning", scope: `screenshot:${phase}`, step: stepRecord.seq, message: messageOf(error) });
     }
   }
 
@@ -230,24 +252,31 @@ export function createTrace(page: TracePage, options: TraceOptions = {}) {
     stopped = true;
     for (const off of unsubscribers.splice(0, unsubscribers.length)) off();
     snoop?.dispose();
-    const ordered = [...records].sort((a, b) => a.seq - b.seq);
+    const ordered = records.toSorted((a, b) => a.seq - b.seq);
     const summary: TraceSummary = {
-      steps: ordered.filter(entry => entry.kind === "step").length,
+      steps: ordered.filter((entry) => entry.kind === "step").length,
       events: ordered.length,
       network: netEntries.length,
       startedAt,
       endedAt: Date.now(),
       url: page.url(),
     };
-    await writeFile(path.join(traceDir, "trace.jsonl"), ordered.map(entry => `${JSON.stringify(entry)}\n`).join(""));
+    await writeFile(path.join(traceDir, "trace.jsonl"), ordered.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
     await writeFile(path.join(traceDir, "trace.har"), `${JSON.stringify(toHar(netEntries), null, 2)}\n`);
     await writeFile(path.join(traceDir, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
     return summary;
   }
 
   function stop() {
-    return stopping ??= finish();
+    return (stopping ??= finish());
   }
 
-  return { step, mark, stop, get dir() { return dir; } };
+  return {
+    step,
+    mark,
+    stop,
+    get dir() {
+      return dir;
+    },
+  };
 }

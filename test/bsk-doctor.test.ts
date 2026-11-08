@@ -96,7 +96,7 @@ test("installBskCli restores shell rc files the installer appended to", async ()
       "export A=1\n",
       "pre-existing rc file restored byte for byte",
     );
-    assert.deepEqual(result.restoredRcFiles.map((f) => path.basename(f)).sort(), [".bashrc", ".zshrc"]);
+    assert.deepEqual(result.restoredRcFiles.map((f) => path.basename(f)).toSorted(), [".bashrc", ".zshrc"]);
     let bashrcExists = true;
     try {
       readFileSync(path.join(home, ".bashrc"));

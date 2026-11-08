@@ -37,6 +37,7 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { windowsSystemTool } from "../src/owner-only.ts";
 import { readProperty } from "../src/read-property.ts";
+import type { ChromeConnection } from "../src/chrome.ts";
 import * as z from "zod";
 
 const extensionId = "a".repeat(32);
@@ -225,7 +226,9 @@ test(
         ...registry.options,
       });
       assert.deepEqual(JSON.parse(readFileSync(result.path, "utf8")), result.manifest);
-      assert.equal(result.manifest.allowed_origins[0], `chrome-extension://${extensionId}/`);
+      const allowedOrigins = readProperty(result.manifest, "allowed_origins");
+      assert.ok(Array.isArray(allowedOrigins), "the manifest lists allowed_origins");
+      assert.equal(allowedOrigins[0], `chrome-extension://${extensionId}/`);
       if (win32) {
         assert.ok("registryKey" in result, "win32 install returned no registryKey");
         assert.equal(result.registryKey, `${registry.options.registryKey}\\com.omowright.cloakbridge`);
@@ -341,7 +344,25 @@ test("chrome API routes negotiated writes and preserves unsupported fallback", a
       return { id: "2", title: "x" };
     },
   };
-  const chrome = createChromeApi({}, { bridge });
+  // Bridge routing never reaches the page connection; every member fails loudly if it ever does.
+  const unused = () => new Error("the page connection is not used by bridge routing");
+  const connection: ChromeConnection = {
+    cdp: {
+      send: async () => {
+        throw unused();
+      },
+      on: () => {
+        throw unused();
+      },
+    },
+    listTargets: async () => {
+      throw unused();
+    },
+    newTab: async () => {
+      throw unused();
+    },
+  };
+  const chrome = createChromeApi(connection, { bridge });
   assert.deepEqual(await chrome.bookmarks.create({ title: "x" }), { id: "2", title: "x" });
   assert.deepEqual(calls[0], ["bookmarks.create", { details: { title: "x" } }]);
   await assert.rejects(() => chrome.history.deleteUrl({ url: "https://x.test/" }), /requires the extension bridge/);

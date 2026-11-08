@@ -1,13 +1,8 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
-import {
-  CdpClient,
-  FrameManager,
-  OmOPage,
-  SessionManager,
-} from "./core.ts";
+import { CdpClient, FrameManager, OmOPage, SessionManager } from "./core.ts";
 import type { CdpClientOptions } from "./core.ts";
-import type { CdpTargetInfo, CdpTransport, CdpUnsubscribe } from "./cdp-protocol.ts";
+import type { CdpTransport, CdpUnsubscribe } from "./cdp-protocol.ts";
 import type { ChildProcess } from "node:child_process";
 import type { DialogPolicy } from "./dialog-policy.ts";
 import { acquireSharedConnection, canShareConnection } from "./shared-connections.ts";
@@ -59,8 +54,12 @@ export interface ConnectOptions extends BrowserConnectionOptions {
 
 export class TabRepository {
   #client: CdpTransport;
-  constructor(client: CdpTransport) { this.#client = client; }
-  async listTargets() { return this.#client.discoverTargets(); }
+  constructor(client: CdpTransport) {
+    this.#client = client;
+  }
+  async listTargets() {
+    return this.#client.discoverTargets();
+  }
 }
 
 export class BrowserConnection {
@@ -83,25 +82,29 @@ export class BrowserConnection {
     this.#sessions = new SessionManager(client);
     this.tabs = new TabRepository(client);
     this.#storageRoot = path.resolve(options.storageRoot ?? process.cwd());
-    this.#popupOff.push(client.on("Target.targetCreated", ({ targetInfo }) => {
-      const openerId = targetInfo?.openerId;
-      if (targetInfo?.type !== "page" || !this.#acceptsPopup(openerId)) return;
-      // Target discovery and Page.windowOpen are independently dispatched. Keep
-      // the target's opener identity even when discovery wins that race.
-      const targets = this.#popupTargets.get(openerId) ?? [];
-      targets.push({ targetId: targetInfo.targetId });
-      this.#popupTargets.set(openerId, targets);
-      this.#matchPopups(openerId);
-    }));
-    this.#popupOff.push(client.on("Target.targetDestroyed", ({ targetId }) => {
-      this.#ownedPopups.delete(targetId);
-      const error = Error("Popup closed before attachment completed");
-      this.#attachingPopups.get(targetId)?.reject(error);
-      for (const targets of this.#popupTargets.values()) {
-        const target = targets.find(target => target.targetId === targetId);
-        if (target) target.error = error;
-      }
-    }));
+    this.#popupOff.push(
+      client.on("Target.targetCreated", ({ targetInfo }) => {
+        const openerId = targetInfo?.openerId;
+        if (targetInfo?.type !== "page" || !this.#acceptsPopup(openerId)) return;
+        // Target discovery and Page.windowOpen are independently dispatched. Keep
+        // the target's opener identity even when discovery wins that race.
+        const targets = this.#popupTargets.get(openerId) ?? [];
+        targets.push({ targetId: targetInfo.targetId });
+        this.#popupTargets.set(openerId, targets);
+        this.#matchPopups(openerId);
+      }),
+    );
+    this.#popupOff.push(
+      client.on("Target.targetDestroyed", ({ targetId }) => {
+        this.#ownedPopups.delete(targetId);
+        const error = Error("Popup closed before attachment completed");
+        this.#attachingPopups.get(targetId)?.reject(error);
+        for (const targets of this.#popupTargets.values()) {
+          const target = targets.find((candidate) => candidate.targetId === targetId);
+          if (target) target.error = error;
+        }
+      }),
+    );
   }
 
   async initialize() {
@@ -109,7 +112,9 @@ export class BrowserConnection {
     return this;
   }
 
-  get cdp() { return this.#client; }
+  get cdp() {
+    return this.#client;
+  }
 
   setDialogPolicy(policy: DialogPolicy) {
     if (typeof this.#client.setDialogPolicy !== "function") {
@@ -118,7 +123,9 @@ export class BrowserConnection {
     this.#client.setDialogPolicy(policy);
   }
 
-  async listTargets() { return this.tabs.listTargets(); }
+  async listTargets() {
+    return this.tabs.listTargets();
+  }
 
   async newTab(url = "about:blank") {
     return (await (getAgentTabs(this) ?? createAgentTabs(this)).create(url)).page;
@@ -126,8 +133,11 @@ export class BrowserConnection {
 
   // An undefined opener never has an agent tab, so checking it first only skips that lookup.
   #acceptsPopup(openerId: string | undefined): openerId is string {
-    return openerId !== undefined && !!getAgentTabs(this)?.get(openerId) &&
-      (this.#pages.get(openerId)?.page.events.listenerCount("popup") ?? 0) > 0;
+    return (
+      openerId !== undefined &&
+      !!getAgentTabs(this)?.get(openerId) &&
+      (this.#pages.get(openerId)?.page.events.listenerCount("popup") ?? 0) > 0
+    );
   }
 
   #matchPopups(openerId: string) {
@@ -142,9 +152,11 @@ export class BrowserConnection {
       else {
         this.#attachingPopups.set(target.targetId, pending);
         this.#ownedPopups.add(target.targetId);
-        pending.operation = this.#attachPopup(target.targetId, pending).catch(pending.reject).finally(() => {
-          this.#attachingPopups.delete(target.targetId);
-        });
+        pending.operation = this.#attachPopup(target.targetId, pending)
+          .catch(pending.reject)
+          .finally(() => {
+            this.#attachingPopups.delete(target.targetId);
+          });
       }
     }
     if (!targets?.length) this.#popupTargets.delete(openerId);
@@ -208,19 +220,25 @@ export class BrowserConnection {
         await mkdir(path.dirname(resolved), { recursive: true });
         return resolved;
       },
-      registerReadableDownload: (value: string) => value,
+      registerReadableDownloadPath: (value: string) => value,
       isReadableDownload: () => false,
       resolvePopup: async (metadata: PopupMetadata) => {
         if (!this.#acceptsPopup(targetId)) return;
         const queue = this.#popups.get(targetId) ?? [];
-        const promise = new Promise<OmOPageInstance>((resolve, reject) => queue.push({
-          resolve, reject, metadata: { url: metadata.url, windowName: metadata.windowName },
-        }));
+        const promise = new Promise<OmOPageInstance>((resolve, reject) =>
+          queue.push({
+            resolve,
+            reject,
+            metadata: { url: metadata.url, windowName: metadata.windowName },
+          }),
+        );
         this.#popups.set(targetId, queue);
         this.#matchPopups(targetId);
         return promise;
       },
-      openPopupTab: async () => { throw Error("Popup tab control requires the extension bridge"); },
+      openPopupTab: async () => {
+        throw Error("Popup tab control requires the extension bridge");
+      },
       closeTab: async (_page: unknown, options: ClosePageOptions = {}) => {
         if (options.runBeforeUnload) {
           await this.#client.send("Page.close", undefined, await this.#sessions.resolvePageSession(targetId));
@@ -242,10 +260,10 @@ export class BrowserConnection {
     this.#popups.clear();
     this.#popupTargets.clear();
     for (const pending of this.#attachingPopups.values()) pending.reject(Error("Browser connection closed"));
-    await Promise.all([...this.#attachingPopups.values()].map(pending => pending.operation));
+    await Promise.all([...this.#attachingPopups.values()].map((pending) => pending.operation));
     const tabs = getAgentTabs(this);
     if (tabs) {
-      await Promise.all([...this.#ownedPopups].filter(id => tabs.get(id)).map(id => tabs.close(id)));
+      await Promise.all([...this.#ownedPopups].filter((id) => tabs.get(id)).map((id) => tabs.close(id)));
       await tabs.dispose({ closeOwned: false });
     }
     for (const [targetId, entry] of [...this.#pages]) {
@@ -277,7 +295,11 @@ function createClient(cdpHttpUrl: unknown, options: ConnectOptions) {
   if (typeof cdpHttpUrl !== "string" || cdpHttpUrl.length === 0) {
     throw new TypeError("connect(cdpHttpUrl) requires a Chromium CDP HTTP URL");
   }
-  return new CdpClient({ cdpUrl: cdpHttpUrl, ...options.client, dialogPolicy: options.dialogPolicy ?? options.client?.dialogPolicy });
+  return new CdpClient({
+    cdpUrl: cdpHttpUrl,
+    ...options.client,
+    dialogPolicy: options.dialogPolicy ?? options.client?.dialogPolicy,
+  });
 }
 
 // A connection of its own, never shared: for callers that lease or own the

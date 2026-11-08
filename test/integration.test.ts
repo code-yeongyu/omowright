@@ -40,9 +40,44 @@ interface QueryAudit {
 type AuditWindow = Window & { queryAudit?: QueryAudit };
 type HydrationWindow = Window & { lastMutation?: number };
 const SnapshotRefs = z.record(z.string(), z.object({ role: z.string().optional(), name: z.string().optional() }));
+// snapshot() returns a union: a plain tree, a diff read that fell back to a full tree (with a
+// reason), or a delta. Each guard below fails the test when the read has the wrong shape.
+type PipePage = Awaited<ReturnType<PipeBrowser["newTab"]>>;
+type SnapshotResult = Awaited<ReturnType<PipePage["snapshot"]>>;
+type TreeSnapshot = Extract<SnapshotResult, { tree: string }>;
+
+// A plain or find read: a tree plus a refs map.
+function assertTreeRead(
+  snapshot: SnapshotResult,
+): asserts snapshot is TreeSnapshot & { refs: NonNullable<TreeSnapshot["refs"]> } {
+  assert.ok("tree" in snapshot && snapshot.refs, `expected a tree with refs, got ${JSON.stringify(snapshot)}`);
+}
+
+// A diff read that fell back to a full tree and says why.
+function assertFallback(snapshot: SnapshotResult): asserts snapshot is Extract<SnapshotResult, { reason: string }> {
+  assert.ok("reason" in snapshot, `expected a full fallback, got ${JSON.stringify(snapshot)}`);
+}
+
+// A diff read that produced a delta.
+function assertDelta(snapshot: SnapshotResult): asserts snapshot is Extract<SnapshotResult, { diff: unknown }> {
+  assert.ok("diff" in snapshot, `expected a delta, got ${JSON.stringify(snapshot)}`);
+}
+
+// The { query, matches } summary of a find read; the snapshot() return type does not name it.
+const FindSummary = z.strictObject({ query: z.string(), matches: z.number() });
+function findSummaryOf(snapshot: SnapshotResult) {
+  return FindSummary.parse(readProperty(snapshot, "find"));
+}
+
+// list[index] for an entry the test expects to exist; a missing entry fails the test.
+function entryAt<T>(list: readonly T[], index: number): T {
+  const entry = list[index];
+  assert.ok(entry !== undefined, `no entry at index ${index}`);
+  return entry;
+}
 
 // The ref of the first snapshot entry with this accessible name; a missing name fails the test.
-function refOf(snapshot: { refs?: unknown }, name: string) {
+function refOf(snapshot: TreeSnapshot, name: string) {
   const entry = Object.entries(SnapshotRefs.parse(snapshot.refs)).find(([, meta]) => meta.name === name);
   assert.ok(entry, `no snapshot ref named ${name}`);
   return entry[0];
@@ -517,7 +552,9 @@ window.rerender = () => {
         storageRoot: ud,
       });
       const page = await browser.newTab(`data:text/html,${encodeURIComponent(html)}`);
-      const { refs } = await page.snapshot();
+      const read = await page.snapshot();
+      assertTreeRead(read);
+      const { refs } = read;
       const buttonRef = (name: string, nth: number) => {
         const entry = Object.entries(SnapshotRefs.parse(refs)).filter(
           ([, meta]) => meta.role === "button" && meta.name === name,
@@ -528,8 +565,8 @@ window.rerender = () => {
       const alphaDelete = buttonRef("Delete", 0);
       const save = buttonRef("Save", 0);
       await page.evaluate("window.rerender()");
-      await assert.rejects(page.locator(alphaDelete).click({ timeout: 2000 }));
-      await page.locator(save).click({ timeout: 5000 });
+      await assert.rejects(page.locator(alphaDelete).click());
+      await page.locator(save).click();
       assert.equal(await page.evaluate("document.getElementById('log').textContent"), "save;");
     } finally {
       await browser?.close();
@@ -554,6 +591,7 @@ test(
       });
       const page = await browser.newTab("data:text/html,<label>Name<input></label><button>Save</button>");
       const before = await page.snapshot();
+      assertTreeRead(before);
       const name = refOf(before, "Name");
       const save = refOf(before, "Save");
       await page.locator(name).fill("Ada");
@@ -561,10 +599,12 @@ test(
         "document.body.prepend(Object.assign(document.createElement('button'), {textContent:'Earlier'}))",
       );
       const after = await page.snapshot();
+      assertTreeRead(after);
       assert.equal(refOf(after, "Name"), name);
       assert.equal(refOf(after, "Save"), save);
       await page.evaluate("document.querySelector('button:last-of-type').textContent = 'Submit'");
       const renamed = await page.snapshot();
+      assertTreeRead(renamed);
       assert.notEqual(refOf(renamed, "Submit"), save);
       assert.ok(!renamed.refs[save]);
       await page.locator(name).fill("Grace");
@@ -613,6 +653,7 @@ test(
       });
       const page = await browser.newTab(url);
       const first = await page.snapshot({ diff: true });
+      assertFallback(first);
       assert.equal(first.full, true);
       assert.equal(first.reason, "no-baseline");
       const fieldName = "Full name";
@@ -620,6 +661,7 @@ test(
       const more = refOf(first, "More");
       await page.locator(field).fill("Ada");
       const filled = await page.snapshot({ diff: true });
+      assertDelta(filled);
       assert.equal(filled.full, false);
       assert.deepEqual(filled.diff.added, []);
       assert.deepEqual(filled.diff.removed, []);
@@ -627,17 +669,19 @@ test(
         filled.diff.changed.map((node: DiffNode) => node.ref),
         [field],
       );
-      assert.ok(filled.diff.changed[0].tree.includes('"Ada"'));
+      assert.ok(entryAt(filled.diff.changed, 0).tree.includes('"Ada"'));
       assert.equal(filled.diff.focused, field);
       await page.locator(more).click();
       const opened = await page.snapshot({ diff: true });
+      assertDelta(opened);
       assert.equal(opened.full, false, JSON.stringify(opened));
       assert.equal(opened.diff.added.length, 1);
-      const extra = opened.diff.added[0].ref;
-      assert.match(opened.diff.added[0].tree, /Extra details/);
+      const extra = entryAt(opened.diff.added, 0).ref;
+      assert.match(entryAt(opened.diff.added, 0).tree, /Extra details/);
       assert.ok(opened.diff.changed.some((node: DiffNode) => node.ref === field));
       assert.equal(opened.diff.focused, more);
       const full = await page.snapshot({ diff: false });
+      assertTreeRead(full);
       assert.equal(refOf(full, fieldName), field);
       assert.equal(refOf(full, "Extra details"), extra);
       assert.deepEqual(await page.snapshot({ diff: true }), {
@@ -648,20 +692,26 @@ test(
       const dismiss = refOf(full, "Dismiss");
       await page.evaluate("document.getElementById('banner').remove()");
       const removed = await page.snapshot({ diff: true });
+      assertDelta(removed);
       assert.equal(removed.full, false);
       assert.deepEqual(removed.diff.removed, [banner, dismiss]);
       assert.deepEqual(removed.diff.added, []);
       const other = await browser.newTab(url);
-      assert.equal((await other.snapshot({ diff: true })).reason, "no-baseline");
+      const otherFirst = await other.snapshot({ diff: true });
+      assertFallback(otherFirst);
+      assert.equal(otherFirst.reason, "no-baseline");
       await page.goto(url);
       const navigated = await page.snapshot({ diff: true });
+      assertFallback(navigated);
       assert.equal(navigated.full, true);
       assert.equal(navigated.reason, "navigation");
       await page.locator(refOf(navigated, "More")).click();
       const stepBaseline = await page.snapshot();
+      assertTreeRead(stepBaseline);
       await page.locator(refOf(navigated, fieldName)).fill("Ada");
       await page.locator(refOf(navigated, "More")).click();
       const step = await page.snapshot({ diff: true });
+      assertDelta(step);
       assert.equal(step.full, false);
       const bytes = Buffer.byteLength(JSON.stringify(step));
       const fullBytes = Buffer.byteLength(stepBaseline.tree);
@@ -671,14 +721,18 @@ test(
       await page.snapshot();
       await page.evaluate("document.querySelector('button').disabled = true");
       const larger = await page.snapshot({ diff: true });
+      assertFallback(larger);
       assert.equal(larger.full, true);
       assert.equal(larger.reason, "diff-larger-than-full");
       assert.match(larger.tree, /\[disabled\]/);
-      assert.equal((await page.snapshot({ diff: true, interactive: true })).reason, "options-changed");
+      const rescoped = await page.snapshot({ diff: true, interactive: true });
+      assertFallback(rescoped);
+      assert.equal(rescoped.reason, "options-changed");
       await page.goto("data:text/html,<h1>Before</h1><button>Go</button>");
       await page.snapshot();
       await page.evaluate("document.querySelector('h1').textContent = 'After'");
       const text = await page.snapshot({ diff: true });
+      assertFallback(text);
       assert.equal(text.full, true);
       assert.equal(text.reason, "unreferenced-content");
       assert.match(text.tree, /After/);
@@ -710,7 +764,8 @@ test(
       });
       const page = await browser.newTab(`data:text/html,${encodeURIComponent(html)}`);
       const full = await page.snapshot();
-      const fullRef = (name: string) => Object.keys(full.refs).find((ref) => full.refs[ref].name === name);
+      assertTreeRead(full);
+      const fullRef = (name: string) => Object.keys(full.refs).find((ref) => full.refs[ref]?.name === name);
       const coupons = fullRef("Coupon code");
       const button = fullRef("Pay now");
       // Change the page between the full read and the searches, so a search that replaced the
@@ -718,11 +773,14 @@ test(
       // Set the value from script, not fill(): fill() focuses the field and the later click
       // would then change its line through focus alone, whatever the baseline was.
       await page.evaluate("document.querySelector('input').value = 'SAVE10'");
-      const lines = (await page.snapshot({ find: /[\s\S]/, context: 0 })).tree.split("\n");
+      const everyLine = await page.snapshot({ find: /[\s\S]/, context: 0 });
+      assertTreeRead(everyLine);
+      const lines = everyLine.tree.split("\n");
       assert.notEqual(lines.join("\n"), full.tree);
 
       const pay = await page.snapshot({ find: "PAY", context: 0 });
-      assert.deepEqual(pay.find, { query: "PAY", matches: 2 });
+      assertTreeRead(pay);
+      assert.deepEqual(findSummaryOf(pay), { query: "PAY", matches: 2 });
       assert.deepEqual(
         pay.tree.split("\n"),
         lines.filter((line: string) => /pay/i.test(line)),
@@ -733,20 +791,23 @@ test(
       );
       assert.equal(Object.keys(pay.refs).length, 2);
       const sticky = /pay/giy;
-      assert.equal((await page.snapshot({ find: sticky, context: 0 })).find.matches, 2);
+      assert.equal(findSummaryOf(await page.snapshot({ find: sticky, context: 0 })).matches, 2);
       assert.equal(sticky.lastIndex, 0);
       // A ref written inside an accessible name is text, not the line's own ref.
       const quoted = await page.snapshot({ find: "see [ref=", context: 0 });
+      assertTreeRead(quoted);
       assert.deepEqual(Object.keys(quoted.refs), [fullRef("see [ref=e1] notes")]);
       assert.notEqual(fullRef("see [ref=e1] notes"), "e1");
 
       // The label text and the textbox both match; context 2 widens around the first and last.
       const coupon = await page.snapshot({ find: /coupon/i });
+      assertTreeRead(coupon);
       const hits = lines.flatMap((line: string, i: number) => (/coupon/i.test(line) ? [i] : []));
-      assert.equal(coupon.find.matches, 2);
-      assert.equal(coupon.tree, lines.slice(hits[0] - 2, hits[1] + 3).join("\n"));
+      assert.equal(findSummaryOf(coupon).matches, 2);
+      assert.equal(coupon.tree, lines.slice(entryAt(hits, 0) - 2, entryAt(hits, 1) + 3).join("\n"));
       const separated = await page.snapshot({ find: /Section (0|11)\b/, context: 0 });
-      assert.equal(separated.find.matches, 4);
+      assertTreeRead(separated);
+      assert.equal(findSummaryOf(separated).matches, 4);
       assert.equal(separated.tree.split("\n").filter((line: string) => line === "...").length, 3);
 
       const none = await page.snapshot({ find: "no such text" });
@@ -761,9 +822,12 @@ test(
       await page.locator(button).click();
       // The searches above must not have replaced the baseline from the full read.
       const changes = await page.snapshot({ diff: true });
+      assertDelta(changes);
       assert.equal(changes.full, false, JSON.stringify(changes));
       assert.deepEqual(changes.diff.changed.map((node: DiffNode) => node.ref).toSorted(), [button, coupons].toSorted());
-      assert.match(changes.diff.changed.find((node: DiffNode) => node.ref === coupons).tree, /SAVE10/);
+      const couponChange = changes.diff.changed.find((node: DiffNode) => node.ref === coupons);
+      assert.ok(couponChange, `no diff entry for ${coupons}`);
+      assert.match(couponChange.tree, /SAVE10/);
     } finally {
       await browser?.close();
       removeTreeSync(ud);
@@ -847,7 +911,9 @@ test(
         assert.ok(elapsed < 8000, `${route} took ${elapsed} ms`);
         assert.equal(await page.title(), route.slice(1));
       }
-      assert.ok((await page.snapshot()).tree.length > 0);
+      const settled = await page.snapshot();
+      assertTreeRead(settled);
+      assert.ok(settled.tree.length > 0);
     } finally {
       await browser?.close();
       removeTreeSync(ud);

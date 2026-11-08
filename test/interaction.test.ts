@@ -592,10 +592,14 @@ test(
           url: `${origin}/linked`,
           windowName: trigger === "window.open" ? "qa-popup" : "_blank",
         });
-        assert.match((await popup.snapshot()).tree, /the linked page body text/);
+        const popupSnapshot = await popup.snapshot();
+        assert.ok("tree" in popupSnapshot);
+        assert.match(popupSnapshot.tree, /the linked page body text/);
         await popup.goto(`${origin}/`);
         assert.equal(popup.url(), `${origin}/`);
-        assert.match((await popup.snapshot()).tree, /Open in a new tab/);
+        const afterGoto = await popup.snapshot();
+        assert.ok("tree" in afterGoto);
+        assert.match(afterGoto.tree, /Open in a new tab/);
         assert.equal(tabs.get(popup.targetId)?.page, popup, "popup belongs to the connection's manager");
       }
       await tabs.closeAll();

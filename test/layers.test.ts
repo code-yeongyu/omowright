@@ -17,7 +17,7 @@ function findHeadlessShell() {
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
-  if (candidates.length > 0) return candidates.sort().at(-1);
+  if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   if (existsSync(chrome)) return chrome;
   return null;
@@ -147,10 +147,11 @@ test(
       assert.equal(layersHeader(plainLayers), "@layers none");
 
       const snapshot = await page.snapshot();
+      assert.ok("tree" in snapshot);
       const withLayers = await snapshotWithLayers(page);
       const headerLine = layersHeader(withLayers.layers);
       assert.equal(withLayers.tree.startsWith(`${headerLine}\n`), true);
-      const snapshotFirstLine = snapshot.tree.split("\n")[0];
+      const snapshotFirstLine = snapshot.tree.split("\n")[0] ?? "";
       assert.ok(snapshotFirstLine.length > 0);
       assert.ok(
         withLayers.tree.split("\n").slice(1).join("\n").includes(snapshotFirstLine),

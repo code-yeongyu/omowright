@@ -3,14 +3,8 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": [
-      "ESNext",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "types": [
-      "bun"
-    ],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "allowJs": true,
@@ -22,16 +16,6 @@
     "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": [
-    "src/**/*",
-    "bin/**/*",
-    "bridge/**/*",
-    "test/**/*.mjs",
-    "test/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "src/page-bundle.js"
-  ]
+  "include": ["src/**/*", "bin/**/*", "bridge/**/*", "test/**/*.mjs", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/page-bundle.js"]
 }

@@ -1,5 +1,5 @@
 declare module "ws" {
-  import { EventEmitter } from "node:events";
+  import type { EventEmitter } from "node:events";
   import type { IncomingMessage } from "node:http";
   import type { Duplex } from "node:stream";
 

@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
+import type { CdpResult } from "../src/cdp-protocol.ts";
 import { connectPipe, OmOPage } from "../src/index.ts";
 
 // Public API contract: a real download can be copied with saveAs, including
@@ -67,10 +68,15 @@ test(
       downloadPath: path.join(root, "downloads"),
       eventsEnabled: true,
     });
+    // OmO.waitForDownload resolves from the progress listener; the overload is the generic CdpSend contract.
+    function forwardSend<M extends string>(method: M, params?: object, sessionId?: string): Promise<CdpResult<M>>;
+    function forwardSend(method: string, params?: object, sessionId?: string): Promise<unknown> {
+      return method === "OmO.waitForDownload" ? completed : connected.cdp.send(method, params, sessionId);
+    }
     const cdp = {
-      on: (...args: Parameters<typeof connected.cdp.on>) => connected.cdp.on(...args),
-      send: (method: string, ...args: [params?: object, sessionId?: string]) =>
-        method === "OmO.waitForDownload" ? completed : connected.cdp.send(method, ...args),
+      on: connected.cdp.on.bind(connected.cdp),
+      discoverTargets: () => connected.cdp.discoverTargets(),
+      send: forwardSend,
     };
     page = new OmOPage(cdp, attached.frameManager, attached.targetId, await attached.resolveSessionId(), {
       ...attached.browser,

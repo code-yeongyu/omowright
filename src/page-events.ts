@@ -3,8 +3,21 @@
 import type { CdpEventMeta, CdpExceptionDetails, CdpRemoteObject, CdpUnsubscribe } from "./cdp-protocol.ts";
 
 export const PAGE_EVENT_NAMES = Object.freeze([
-  "close", "console", "crash", "dialog", "domcontentloaded", "download", "filechooser", "frameattached",
-  "framedetached", "framenavigated", "load", "pageerror", "popup", "request", "response",
+  "close",
+  "console",
+  "crash",
+  "dialog",
+  "domcontentloaded",
+  "download",
+  "filechooser",
+  "frameattached",
+  "framedetached",
+  "framenavigated",
+  "load",
+  "pageerror",
+  "popup",
+  "request",
+  "response",
 ] as const);
 
 export type PageEventName = (typeof PAGE_EVENT_NAMES)[number];
@@ -18,7 +31,10 @@ export interface ExceptionThrownEvent {
 
 export interface PageErrorsPage {
   cdp: {
-    on(event: "Runtime.exceptionThrown", handler: (event: ExceptionThrownEvent, meta: CdpEventMeta | undefined) => unknown): CdpUnsubscribe;
+    on(
+      event: "Runtime.exceptionThrown",
+      handler: (event: ExceptionThrownEvent, meta: CdpEventMeta | undefined) => unknown,
+    ): CdpUnsubscribe;
   };
   frameManager: {
     hasSession(sessionId: string): boolean;
@@ -41,7 +57,8 @@ function pageError(details: Partial<CdpExceptionDetails> = {}) {
   const exception: Partial<CdpRemoteObject> = details.exception ?? {};
   const description = typeof exception.description === "string" ? exception.description : "";
   if (exception.subtype !== "error" || !description) {
-    const text = exception.value !== undefined ? String(exception.value) : description || details.text || "Uncaught exception";
+    const text =
+      exception.value !== undefined ? String(exception.value) : description || details.text || "Uncaught exception";
     return new Error(text);
   }
   const name = exception.className ?? "Error";
@@ -62,7 +79,8 @@ export function subscribePageErrors(page: PageErrorsPage) {
     for (const frame of page.frameManager.frames.values()) {
       if (frame.sessionId === meta.sessionId && frame.isolatedContextId === details.executionContextId) return;
     }
-    page.events.emit("pageerror", pageError(details))
+    page.events
+      .emit("pageerror", pageError(details))
       .catch((error: unknown) => console.warn("[pageerror] page event listener failed", error));
   });
 }

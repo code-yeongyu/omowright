@@ -881,11 +881,14 @@ for (const crossRuntime of [false, true]) {
                   return;
                 }
                 const payload = stdout.trim().split("\n").at(-1);
+                let parsed: unknown;
                 try {
-                  resolve(JSON.parse(payload ?? ""));
+                  parsed = JSON.parse(payload ?? "");
                 } catch (error) {
                   reject(new Error(`child ${index} printed ${payload}: ${String(readProperty(error, "message"))}`));
+                  return;
                 }
+                resolve(parsed);
               });
             }),
         );

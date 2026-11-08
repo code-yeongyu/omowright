@@ -49,6 +49,7 @@ export function isElementHiddenForAria(element: Element, cache: Map<Node, boolea
   // <option> inside <select> and <slot> ignore visibility and content-visibility; checkVisibility() covers
   // content-visibility and closed <details> up the flat tree.
   const isOptionInsideSelect = element.nodeName === "OPTION" && !!element.closest("select");
-  if (!isOptionInsideSelect && !isSlot && style && (!element.checkVisibility() || style.visibility !== "visible")) return true;
+  if (!isOptionInsideSelect && !isSlot && style && (!element.checkVisibility() || style.visibility !== "visible"))
+    return true;
   return belongsToDisplayNoneOrAriaHiddenOrNonSlotted(element);
 }

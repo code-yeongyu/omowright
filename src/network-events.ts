@@ -46,7 +46,9 @@ export interface NetworkRecord {
 }
 
 /** The record each event carries: requestWillBeSent always makes one; later events find it only while it is in flight. */
-type RecordFor<M extends NetworkMethod> = M extends "Network.requestWillBeSent" ? NetworkRecord : NetworkRecord | undefined;
+type RecordFor<M extends NetworkMethod> = M extends "Network.requestWillBeSent"
+  ? NetworkRecord
+  : NetworkRecord | undefined;
 
 export type NetworkObserver = {
   [M in NetworkMethod]?: (params: CdpEventPayload<M>, record: RecordFor<M>) => void;
@@ -77,7 +79,7 @@ const streams = new WeakMap<NetworkPage, NetworkStream>();
 // A refused enable is not a page-setup failure (embedded transports may refuse it).
 export function acquireNetwork(cdp: Pick<CdpTransport, "send">, sessionId: string | undefined): NetworkRelease {
   let active = sessions.get(cdp);
-  if (!active) sessions.set(cdp, active = new Map());
+  if (!active) sessions.set(cdp, (active = new Map()));
   let state = active.get(sessionId);
   if (!state) {
     state = { users: 0 };
@@ -115,8 +117,12 @@ function headers(values: Record<string, unknown> = {}) {
 function bodyReaders(body: () => Promise<Buffer>): NetworkBodyReaders {
   return {
     body,
-    async text() { return (await body()).toString("utf8"); },
-    async json(): Promise<unknown> { return JSON.parse(await this.text()); },
+    async text() {
+      return (await body()).toString("utf8");
+    },
+    async json(): Promise<unknown> {
+      return JSON.parse(await this.text());
+    },
   };
 }
 
@@ -132,14 +138,14 @@ function recordFor(
     exposed: false,
     finish: finished.resolve,
     rawBody() {
-      return rawBody ??= finished.promise.then(async failure => {
+      return (rawBody ??= finished.promise.then(async (failure) => {
         try {
           if (failure) throw failure;
           return await cdp.send("Network.getResponseBody", { requestId: params.requestId }, sessionId);
         } catch (cause) {
           throw new NetworkBodyUnavailableError(`Response body is unavailable for ${request.url}`, cause);
         }
-      });
+      }));
     },
     request: {
       url: () => request.url ?? params.documentURL ?? "",
@@ -147,7 +153,7 @@ function recordFor(
       headers: () => headers(request.headers),
       ...bodyReaders(async () => Buffer.from(request.postData ?? "", "utf8")),
     },
-    setResponse: response => {
+    setResponse: (response) => {
       record.response = {
         url: () => response.url ?? record.request.url(),
         method: record.request.method,
@@ -175,7 +181,7 @@ export function subscribeNetwork(page: NetworkPage, handlers: NetworkObserver) {
     let sessionId: string | undefined;
     let release: NetworkRelease | undefined;
     let closed = false;
-    const ready = Promise.resolve(page.resolveSessionId()).then(async id => {
+    const ready = Promise.resolve(page.resolveSessionId()).then(async (id) => {
       sessionId = id;
       if (!closed) {
         release = acquireNetwork(page.cdp, id);
@@ -219,8 +225,7 @@ export function subscribeNetwork(page: NetworkPage, handlers: NetworkObserver) {
       if (event.method === "Network.loadingFinished" || event.method === "Network.loadingFailed") {
         // Preserve bodies for returned response objects before the last
         // listener releases the domain (disable clears the browser cache).
-        const done = record?.exposed && record.response
-          ? record.rawBody().catch(() => {}) : Promise.resolve();
+        const done = record?.exposed && record.response ? record.rawBody().catch(() => {}) : Promise.resolve();
         done.finally(() => {
           if (inflight.get(params.requestId) === record) inflight.delete(params.requestId);
           close();
@@ -230,16 +235,26 @@ export function subscribeNetwork(page: NetworkPage, handlers: NetworkObserver) {
     const onEvent = (event: NetworkEvent, meta: CdpEventMeta | undefined) => {
       if (closed) return;
       if (sessionId === undefined) {
-        ready.then(() => {
-          if (!closed && meta?.sessionId === sessionId) dispatch(event);
-        }).catch(() => {});
+        ready
+          .then(() => {
+            if (!closed && meta?.sessionId === sessionId) dispatch(event);
+          })
+          .catch(() => {});
       } else if (meta?.sessionId === sessionId) dispatch(event);
     };
     unsubscribers.push(
-      page.cdp.on("Network.requestWillBeSent", (params, meta) => onEvent({ method: "Network.requestWillBeSent", params }, meta)),
-      page.cdp.on("Network.responseReceived", (params, meta) => onEvent({ method: "Network.responseReceived", params }, meta)),
-      page.cdp.on("Network.loadingFinished", (params, meta) => onEvent({ method: "Network.loadingFinished", params }, meta)),
-      page.cdp.on("Network.loadingFailed", (params, meta) => onEvent({ method: "Network.loadingFailed", params }, meta)),
+      page.cdp.on("Network.requestWillBeSent", (params, meta) =>
+        onEvent({ method: "Network.requestWillBeSent", params }, meta),
+      ),
+      page.cdp.on("Network.responseReceived", (params, meta) =>
+        onEvent({ method: "Network.responseReceived", params }, meta),
+      ),
+      page.cdp.on("Network.loadingFinished", (params, meta) =>
+        onEvent({ method: "Network.loadingFinished", params }, meta),
+      ),
+      page.cdp.on("Network.loadingFailed", (params, meta) =>
+        onEvent({ method: "Network.loadingFailed", params }, meta),
+      ),
     );
     stream = { observers, close, inflight, ready };
     streams.set(page, stream);
@@ -290,8 +305,10 @@ export function networkReady(page: NetworkPage) {
 }
 
 export function subscribePageNetworkEvents(page: NetworkEventsPage) {
-  const emit = (name: "request" | "response", value: NetworkRequest | NetworkResponse | undefined) => page.events.emit(name, value)
-    .catch((error: unknown) => console.warn("[network] page event listener failed", error));
+  const emit = (name: "request" | "response", value: NetworkRequest | NetworkResponse | undefined) =>
+    page.events
+      .emit(name, value)
+      .catch((error: unknown) => console.warn("[network] page event listener failed", error));
   return subscribeNetwork(page, {
     "Network.requestWillBeSent": (_params, record) => emit("request", record.request),
     "Network.responseReceived": (_params, record) => {
@@ -312,10 +329,11 @@ export function networkPredicate<T extends NetworkRequest | NetworkResponse = Ne
   match: NetworkMatch<T>,
 ): (value: T) => unknown {
   if (typeof match === "function") return match;
-  if (match instanceof RegExp) return value => {
-    match.lastIndex = 0;
-    return match.test(value.url());
-  };
-  if (typeof match === "string") return value => urlMatches(value.url(), match);
+  if (match instanceof RegExp)
+    return (value) => {
+      match.lastIndex = 0;
+      return match.test(value.url());
+    };
+  if (typeof match === "string") return (value) => urlMatches(value.url(), match);
   throw new TypeError("urlOrPredicate must be a URL string, RegExp or predicate");
 }

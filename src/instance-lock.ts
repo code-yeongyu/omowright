@@ -65,7 +65,11 @@ async function acquireLocalLock(key: string) {
 
 // The kernel owns exclusion and crash release; the local FIFO avoids polling
 // between callers in this process. Neither acquisition nor release removes files.
-export async function withLock<T>(lockPath: string, { timeoutMs }: { timeoutMs: number }, run: () => Promise<T>): Promise<T> {
+export async function withLock<T>(
+  lockPath: string,
+  { timeoutMs }: { timeoutMs: number },
+  run: () => Promise<T>,
+): Promise<T> {
   const releaseLocal = await acquireLocalLock(lockPath);
   try {
     const held = await acquireLock(lockPath, timeoutMs);

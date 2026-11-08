@@ -81,7 +81,9 @@ test("URL strings match with Playwright's glob rules", async () => {
   assert.equal(await urlMatches("https://playwright.dev/done", global), true, "a global RegExp restarts at index 0");
   await assert.rejects(urlMatches("https://playwright.dev/", "{foo"), /Invalid glob pattern "\{foo": unmatched '\{'/);
   await assert.rejects(urlMatches("https://playwright.dev/", "{{foo}"), /nested '\{' is not supported/);
-  await assert.rejects(urlMatches("https://playwright.dev/", 42), TypeError);
+  // The guard against a matcher that is neither string, RegExp nor function is the contract, so 42 reaches it untyped.
+  const untyped: { urlMatches(url: string, match: unknown): Promise<unknown> } = { urlMatches };
+  await assert.rejects(untyped.urlMatches("https://playwright.dev/", 42), TypeError);
 });
 
 const html = (body: string) => `<!doctype html><title>wait</title><main><p>${body}</p></main>`;

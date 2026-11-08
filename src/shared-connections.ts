@@ -55,7 +55,9 @@ export class SharedConnectionError extends Error {
   declare code: string;
 
   constructor() {
-    super("this browser connection is shared; pass dialogPolicy to connect()/connectNamed() so this holder gets its own connection");
+    super(
+      "this browser connection is shared; pass dialogPolicy to connect()/connectNamed() so this holder gets its own connection",
+    );
     this.name = "SharedConnectionError";
     this.code = "shared_connection";
   }
@@ -66,7 +68,18 @@ const RESERVED: ReadonlySet<PropertyKey> = new Set(["cdp", "close", "setDialogPo
 
 function refuse(what: string) {
   return (_target: object, property: PropertyKey): never => {
-    throw new TypeError(`cannot change ${String(property)} on ${what} through a handle: every holder of this connection uses it`);
+    throw new TypeError(
+      `cannot change ${String(property)} on ${what} through a handle: every holder of this connection uses it`,
+    );
+  };
+}
+
+function readOnly<T extends object>(what: string, get: NonNullable<ProxyHandler<T>["get"]>): ProxyHandler<T> {
+  return {
+    get,
+    set: refuse(what),
+    defineProperty: refuse(what),
+    deleteProperty: refuse(what),
   };
 }
 
@@ -117,54 +130,58 @@ function lease(key: string, entry: SharedEntry, connection: BrowserConnection): 
   const tracked =
     <A extends unknown[]>(subscribe: (...args: A) => Unsubscribe, ...sets: Set<Unsubscribe>[]) =>
     (...args: A) => {
-    const remove = subscribe(...args);
-    let removed = false;
-    const unsubscribe = () => {
-      if (removed) return;
-      removed = true;
-      for (const set of sets) set.delete(unsubscribe);
-      remove();
+      const remove = subscribe(...args);
+      let removed = false;
+      const unsubscribe = () => {
+        if (removed) return;
+        removed = true;
+        for (const set of sets) set.delete(unsubscribe);
+        remove();
+      };
+      for (const set of sets) set.add(unsubscribe);
+      return unsubscribe;
     };
-    for (const set of sets) set.add(unsubscribe);
-    return unsubscribe;
-  };
-  const readOnly = <T extends object>(what: string, get: NonNullable<ProxyHandler<T>["get"]>): ProxyHandler<T> => ({
-    get,
-    set: refuse(what),
-    defineProperty: refuse(what),
-    deleteProperty: refuse(what),
-  });
   const client = connection.cdp;
   // `new Proxy` over a missing transportEvents threw this TypeError in the JS original too.
   const sharedTransportEvents = client.transportEvents;
-  if (sharedTransportEvents === undefined) throw new TypeError("Cannot create proxy with a non-object as target or handler");
+  if (sharedTransportEvents === undefined)
+    throw new TypeError("Cannot create proxy with a non-object as target or handler");
   // Transport events reach every holder: through a handle, clearListeners
   // removes only that handle's listeners and emit is refused. The emitter keys
   // listeners by function, so each registration gets a function of its own:
   // two holders adding the same function never share one entry that either
   // could remove (#140).
-  const transportEvents = new Proxy(sharedTransportEvents, readOnly("the shared transport events", (target, property) => {
-    ensureOpen(property);
-    if (property === "on") {
-      const on = (name: string, listener: (event?: unknown) => unknown) => target.on(name, (event?: unknown) => listener(event));
-      return tracked(on, subscriptions, transportSubscriptions);
-    }
-    if (property === "clearListeners") return () => unsubscribeAll(transportSubscriptions);
-    if (property === "emit") {
-      return () => {
-        throw new TypeError("cannot emit transport events through a handle: every holder of this connection hears them");
-      };
-    }
-    return bindTo(target, Reflect.get(target, property, target));
-  }));
-  const clientView = new Proxy(client, readOnly("the shared CDP client", (target, property) => {
-    ensureOpen(property);
-    if (property === "setDialogPolicy") return setDialogPolicy;
-    if (property === "close") return close;
-    if (property === "on") return tracked(target.on.bind(target), subscriptions);
-    if (property === "transportEvents") return transportEvents;
-    return bindTo(target, Reflect.get(target, property, target));
-  }));
+  const transportEvents = new Proxy(
+    sharedTransportEvents,
+    readOnly("the shared transport events", (target, property) => {
+      ensureOpen(property);
+      if (property === "on") {
+        const on = (name: string, listener: (event?: unknown) => unknown) =>
+          target.on(name, (event?: unknown) => listener(event));
+        return tracked(on, subscriptions, transportSubscriptions);
+      }
+      if (property === "clearListeners") return () => unsubscribeAll(transportSubscriptions);
+      if (property === "emit") {
+        return () => {
+          throw new TypeError(
+            "cannot emit transport events through a handle: every holder of this connection hears them",
+          );
+        };
+      }
+      return bindTo(target, Reflect.get(target, property, target));
+    }),
+  );
+  const clientView = new Proxy(
+    client,
+    readOnly("the shared CDP client", (target, property) => {
+      ensureOpen(property);
+      if (property === "setDialogPolicy") return setDialogPolicy;
+      if (property === "close") return close;
+      if (property === "on") return tracked(target.on.bind(target), subscriptions);
+      if (property === "transportEvents") return transportEvents;
+      return bindTo(target, Reflect.get(target, property, target));
+    }),
+  );
   return new Proxy(connection, {
     get(target, property) {
       // Disposing a lease releases only this holder, like close() (#244).
@@ -245,9 +262,13 @@ function isPlainData(value: unknown, path = new Set<object>()): boolean {
 function frozenCopy<T>(value: T): Readonly<T>;
 function frozenCopy(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
-  const copy: object = Array.isArray(value)
-    ? new Array(value.length)
-    : Object.create(Object.getPrototypeOf(value));
+  let copy: object;
+  if (Array.isArray(value)) {
+    // A sparse array of the source length, exactly what `new Array(length)` makes.
+    const sparse: unknown[] = [];
+    sparse.length = value.length;
+    copy = sparse;
+  } else copy = Object.create(Object.getPrototypeOf(value));
   for (const key of Object.keys(value)) {
     Object.defineProperty(copy, key, { value: frozenCopy(readProperty(value, key)), enumerable: true });
   }

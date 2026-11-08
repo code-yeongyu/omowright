@@ -95,7 +95,12 @@ function candidateDirs({
 
 // Never deletes or edits anything in the profile: a stale DevToolsActivePort is skipped,
 // because the user-data folder is the user's real browser profile.
-export async function findRunningBrowser({ browser, userDataDirs, portCheckMs = DEFAULT_PORT_CHECK_MS, catalog = catalogBrowsers }: FindRunningBrowserOptions = {}): Promise<RunningBrowser> {
+export async function findRunningBrowser({
+  browser,
+  userDataDirs,
+  portCheckMs = DEFAULT_PORT_CHECK_MS,
+  catalog = catalogBrowsers,
+}: FindRunningBrowserOptions = {}): Promise<RunningBrowser> {
   const live: RunningBrowser[] = [];
   for (const candidate of candidateDirs({ browser, userDataDirs, catalog })) {
     const active = await readDevToolsActivePort(candidate.userDataDir);

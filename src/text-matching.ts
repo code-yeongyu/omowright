@@ -86,7 +86,7 @@ export function createTextMatching(
         .split(/\s+/)
         .filter(Boolean)
         .map((id) => scopeOf(node).getElementById?.(id))
-        .filter(Boolean);
+        .filter((ref) => ref !== null && ref !== undefined);
     return refs.length ? [...new Set(refs)] : null;
   };
   const labels = (node: MatchElement) => {
@@ -168,7 +168,7 @@ export function createTextMatching(
         return element.getAttribute("title") || (usePlaceholder ? element.getAttribute("placeholder") : "") || "";
       }
       const nativeChild = nativeCaptions[tag];
-      const child = nativeChild && Array.from(element.children).find((child) => child.nodeName === nativeChild);
+      const child = nativeChild && Array.from(element.children).find((candidate) => candidate.nodeName === nativeChild);
       if (child) return alternative(child, true, isHidden(child));
       if (referenced || descendant || tag === "SUMMARY" || contentRoles.has(getRole(element))) {
         let value = "";
@@ -176,13 +176,13 @@ export function createTextMatching(
         const children: readonly SlotChild[] = assigned.length
           ? assigned
           : [...element.childNodes, ...(element.shadowRoot?.childNodes ?? [])];
-        for (const child of children) {
-          if (!assigned.length && child.assignedSlot) continue;
-          if (child.nodeType === 3) value += child.nodeValue;
-          else if (isElement(child)) {
-            const token = alternative(child, referenced, hiddenReference, true, inLabelledBy);
-            const display = viewOf(child.ownerDocument).getComputedStyle(child).display;
-            value += display !== "inline" || child.nodeName === "BR" ? ` ${token} ` : token;
+        for (const childNode of children) {
+          if (!assigned.length && childNode.assignedSlot) continue;
+          if (childNode.nodeType === 3) value += childNode.nodeValue;
+          else if (isElement(childNode)) {
+            const token = alternative(childNode, referenced, hiddenReference, true, inLabelledBy);
+            const display = viewOf(childNode.ownerDocument).getComputedStyle(childNode).display;
+            value += display !== "inline" || childNode.nodeName === "BR" ? ` ${token} ` : token;
           }
         }
         if (normalize(value)) return value;

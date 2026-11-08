@@ -31,17 +31,25 @@ class CdpCommandError extends Error {
 }
 
 export class CdpCommandTimeoutError extends CdpCommandError {
-  constructor(message: string, details?: CdpCommandErrorDetails) { super("CdpCommandTimeoutError", message, details); }
+  constructor(message: string, details?: CdpCommandErrorDetails) {
+    super("CdpCommandTimeoutError", message, details);
+  }
 }
 
 export class CdpPipeClosedError extends CdpCommandError {
-  constructor(message: string, details?: CdpCommandErrorDetails) { super("CdpPipeClosedError", message, details); }
+  constructor(message: string, details?: CdpCommandErrorDetails) {
+    super("CdpPipeClosedError", message, details);
+  }
 }
 
 export class CdpSessionDetachedError extends CdpCommandError {
-  constructor(message: string, details?: CdpCommandErrorDetails) { super("CdpSessionDetachedError", message, details); }
+  constructor(message: string, details?: CdpCommandErrorDetails) {
+    super("CdpSessionDetachedError", message, details);
+  }
 }
 
 export class CdpSessionCrashedError extends CdpCommandError {
-  constructor(message: string, details?: CdpCommandErrorDetails) { super("CdpSessionCrashedError", message, details); }
+  constructor(message: string, details?: CdpCommandErrorDetails) {
+    super("CdpSessionCrashedError", message, details);
+  }
 }

@@ -28,7 +28,12 @@ for (const asset of RUNTIME_ASSETS) {
   copyFileSync(path.join(ROOT, asset), path.join(DIST, path.basename(asset)));
 }
 
-const extension = Bun.spawnSync({ cmd: ["bun", path.join(ROOT, "bridge/build-extension.ts")], cwd: ROOT, stdout: "inherit", stderr: "inherit" });
+const extension = Bun.spawnSync({
+  cmd: ["bun", path.join(ROOT, "bridge/build-extension.ts")],
+  cwd: ROOT,
+  stdout: "inherit",
+  stderr: "inherit",
+});
 if (extension.exitCode !== 0) throw new Error(`build:extension failed with exit code ${extension.exitCode}`);
 
 console.log("build: dist/index.js + runtime assets + bridge/extension/background.js");

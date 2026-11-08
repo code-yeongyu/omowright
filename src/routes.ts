@@ -16,7 +16,9 @@ export interface RouteRequest {
   resourceType: string;
 }
 
-export type RouteMatchPredicate = (request: Pick<RouteRequest, "url" | "method" | "resourceType" | "headers">) => unknown;
+export type RouteMatchPredicate = (
+  request: Pick<RouteRequest, "url" | "method" | "resourceType" | "headers">,
+) => unknown;
 /** A glob (`*`, `?`), a substring, a RegExp, or a predicate. */
 export type RouteMatch = string | RegExp | RouteMatchPredicate;
 
@@ -97,12 +99,14 @@ function hasGlobChars(value: string) {
 
 function matches(match: RouteMatch, request: RouteRequest) {
   if (typeof match === "function") {
-    return Boolean(match({
-      url: request.url,
-      method: request.method,
-      resourceType: request.resourceType,
-      headers: request.headers,
-    }));
+    return Boolean(
+      match({
+        url: request.url,
+        method: request.method,
+        resourceType: request.resourceType,
+        headers: request.headers,
+      }),
+    );
   }
   if (match instanceof RegExp) return match.test(request.url);
   if (typeof match === "string") {
@@ -114,14 +118,15 @@ function matches(match: RouteMatch, request: RouteRequest) {
 
 function sameMatch(left: RouteMatch | undefined, right: RouteMatch) {
   if (left === right) return true;
-  if (left instanceof RegExp && right instanceof RegExp) return left.source === right.source && left.flags === right.flags;
+  if (left instanceof RegExp && right instanceof RegExp)
+    return left.source === right.source && left.flags === right.flags;
   return false;
 }
 
 function toHeaderEntries(headers: RouteHeaders | null | undefined): HeaderEntry[] {
   if (!headers) return [];
   if (Array.isArray(headers)) {
-    return headers.map(header => ({ name: String(header.name), value: String(header.value ?? "") }));
+    return headers.map((header) => ({ name: String(header.name), value: String(header.value ?? "") }));
   }
   return Object.entries(headers).map(([name, value]) => ({ name, value: String(value ?? "") }));
 }
@@ -134,7 +139,9 @@ function encodeBody(body: unknown) {
 }
 
 function buildContinue(requestId: string, { url, method, headers, postData }: RouteContinueOverrides = {}) {
-  const params: { requestId: string; url?: string; method?: string; headers?: HeaderEntry[]; postData?: string } = { requestId };
+  const params: { requestId: string; url?: string; method?: string; headers?: HeaderEntry[]; postData?: string } = {
+    requestId,
+  };
   if (url !== undefined) params.url = url;
   if (method !== undefined) params.method = method;
   if (headers !== undefined) params.headers = toHeaderEntries(headers);
@@ -142,10 +149,13 @@ function buildContinue(requestId: string, { url, method, headers, postData }: Ro
   return params;
 }
 
-function buildFulfill(requestId: string, { status = 200, headers = {}, contentType, body = "" }: RouteFulfillOptions = {}) {
+function buildFulfill(
+  requestId: string,
+  { status = 200, headers = {}, contentType, body = "" }: RouteFulfillOptions = {},
+) {
   const responseHeaders = toHeaderEntries(headers);
   if (contentType != null && String(contentType).length > 0) {
-    const hasType = responseHeaders.some(header => header.name.toLowerCase() === "content-type");
+    const hasType = responseHeaders.some((header) => header.name.toLowerCase() === "content-type");
     if (!hasType) responseHeaders.push({ name: "content-type", value: String(contentType) });
   }
   return {
@@ -213,7 +223,7 @@ export function createRoutes(page: RoutesPage): RoutesController {
         if (--entry.remaining === 0) entries.splice(entries.indexOf(entry), 1);
         let acted = false;
         let fallbackPromise: Promise<void> | undefined;
-        const route: Route = {
+        const pausedRoute: Route = {
           request,
           continue(overrides = {}) {
             acted = true;
@@ -235,7 +245,7 @@ export function createRoutes(page: RoutesPage): RoutesController {
           },
         };
         try {
-          await entry.handler(route);
+          await entry.handler(pausedRoute);
           await fallbackPromise;
         } catch (error) {
           warnOnce(entry.handler, error);
@@ -289,9 +299,14 @@ export function createRoutes(page: RoutesPage): RoutesController {
     return operation;
   }
 
-  async function route(match: RouteMatch, handler: RouteHandler, { times = Infinity, prepend = false }: RouteOptions = {}) {
+  async function route(
+    match: RouteMatch,
+    handler: RouteHandler,
+    { times = Infinity, prepend = false }: RouteOptions = {},
+  ) {
     if (typeof handler !== "function") throw new TypeError("handler must be a function");
-    if (times !== Infinity && (!Number.isInteger(times) || times < 1)) throw new TypeError("times must be a positive integer");
+    if (times !== Infinity && (!Number.isInteger(times) || times < 1))
+      throw new TypeError("times must be a positive integer");
     const entry: RouteEntry = { match, handler, remaining: times };
     if (prepend) entries.unshift(entry);
     else entries.push(entry);
@@ -308,7 +323,8 @@ export function createRoutes(page: RoutesPage): RoutesController {
     if (match === undefined) entries.length = 0;
     else {
       for (let index = entries.length - 1; index >= 0; index -= 1) {
-        if (sameMatch(entries[index]?.match, match) && (handler === undefined || entries[index]?.handler === handler)) entries.splice(index, 1);
+        if (sameMatch(entries[index]?.match, match) && (handler === undefined || entries[index]?.handler === handler))
+          entries.splice(index, 1);
       }
     }
     await syncFetch();
