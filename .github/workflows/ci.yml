@@ -33,6 +33,14 @@ jobs:
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
 
+      # Strict toolchain (issue #259): typecheck, lint and format are gates, not suggestions.
+      - name: Typecheck (strict)
+        run: bun run check
+      - name: Lint (oxlint)
+        run: bun run lint
+      - name: Format (oxfmt)
+        run: bun run format:check
+
       # Ubuntu 24.04 runners restrict unprivileged user namespaces via AppArmor,
       # which makes Chromium's sandbox abort (SIGTRAP) at launch.
       - name: Allow unprivileged user namespaces for the Chromium sandbox

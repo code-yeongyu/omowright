@@ -27,19 +27,30 @@
     "bun": ">=1.4"
   },
   "bin": {
-    "omowright-cloak": "./bin/omowright-cloak.mjs"
+    "omowright-cloak": "./bin/omowright-cloak.ts"
   },
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "test": "bun test test/no-raw-tls-client.test.mjs test/branding.test.mjs test/hygiene.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/captcha.test.mjs test/captcha.integration.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/scoped-endpoint.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs test/bridge-host-dir.test.mjs test/skill-docs.test.mjs test/dialogs.test.mjs test/emulate.test.mjs test/frames-snapshot.test.mjs test/frames-snapshot.live-attach.test.mjs test/har.test.mjs test/human-handoff.test.mjs test/index-exports.test.mjs test/layers.test.mjs test/network-snoop.test.mjs test/routes.test.mjs test/routes.live.test.mjs test/scroll-collect.test.mjs test/trace.test.mjs test/trace.live.test.mjs test/bsk-ipc-client.test.mjs test/bsk-session.test.mjs test/bsk-snapshot.test.mjs test/bsk-external-extension.test.mjs test/bsk-browser-choice.test.mjs test/bsk-doctor.test.mjs test/bsk-daemon-start.test.mjs",
     "test:node": "node --test test/no-raw-tls-client.test.mjs test/branding.test.mjs test/hygiene.test.mjs test/llm.test.mjs test/integration.test.mjs test/interaction.test.mjs test/captcha.test.mjs test/captcha.integration.test.mjs test/chrome.test.mjs test/cookies.test.mjs test/scoped-endpoint.test.mjs test/pipe.test.mjs test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs test/events.test.mjs test/agent-tabs.test.mjs test/events.integration.test.mjs test/bridge-transport.test.mjs test/bridge-host-dir.test.mjs test/skill-docs.test.mjs test/dialogs.test.mjs test/emulate.test.mjs test/frames-snapshot.test.mjs test/frames-snapshot.live-attach.test.mjs test/har.test.mjs test/human-handoff.test.mjs test/index-exports.test.mjs test/layers.test.mjs test/network-snoop.test.mjs test/routes.test.mjs test/routes.live.test.mjs test/scroll-collect.test.mjs test/trace.test.mjs test/trace.live.test.mjs test/bsk-ipc-client.test.mjs test/bsk-session.test.mjs test/bsk-snapshot.test.mjs test/bsk-external-extension.test.mjs test/bsk-browser-choice.test.mjs test/bsk-doctor.test.mjs test/bsk-daemon-start.test.mjs",
     "test:cloak-profile": "node --test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs",
-    "test:cloak-profile:bun": "bun test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs"
+    "test:cloak-profile:bun": "bun test test/cloak-profile.test.mjs test/cloak-profile.integration.test.mjs",
+    "check": "bun x tsc --noEmit -p tsconfig.json",
+    "lint": "bun x oxlint --deny-warnings src bin bridge test",
+    "lint:fix": "bun x oxlint --fix src bin bridge test",
+    "format": "bun x oxfmt --write src bin bridge test",
+    "format:check": "bun x oxfmt --check src bin bridge test",
+    "verify": "bun run check && bun run lint && bun run format:check",
+    "build:extension": "bun bridge/build-extension.ts"
   },
   "devDependencies": {
-    "acorn": "8.15.0"
+    "@types/bun": "^1.4.4",
+    "acorn": "8.15.0",
+    "oxfmt": "^0.77.0",
+    "oxlint": "^1.92.0",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "ws": "^8.18.3",
