@@ -69,7 +69,11 @@ test("rules still fire on synthetic leaks", () => {
     ["research", "extraction"].join(" "),
     "carved from a bundle",
   ];
-  RULES.forEach(([label, pattern], i) => assert.match(samples[i] as string, pattern, label));
+  RULES.forEach(([label, pattern], i) => {
+    const sample = samples[i];
+    assert.ok(typeof sample === "string", `sample ${i} is missing`);
+    assert.match(sample, pattern, label);
+  });
   for (const clean of ["user@example.com", "/home/runner/work", "the aside landmark", "https://example.com/#top"]) {
     for (const [label, pattern] of RULES) assert.doesNotMatch(clean, pattern, `${label} false positive on ${clean}`);
   }

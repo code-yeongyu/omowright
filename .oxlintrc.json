@@ -20,7 +20,13 @@
     "eslint/no-await-in-loop": "off",
     "eslint/no-underscore-dangle": "off",
     "unicorn/no-useless-spread": "off",
-    "promise/always-return": "off"
+    "promise/always-return": "off",
+    "typescript/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "never"
+      }
+    ]
   },
   "ignorePatterns": [
     "**/dist/**",
@@ -45,6 +51,38 @@
       ],
       "rules": {
         "unicorn/consistent-function-scoping": "off"
+      }
+    },
+    {
+      "files": [
+        "src/aside/session.ts"
+      ],
+      "rules": {
+        "eslint/no-control-regex": "off"
+      }
+    },
+    {
+      "files": [
+        "src/bsk/onboard.ts"
+      ],
+      "rules": {
+        "eslint/no-unmodified-loop-condition": "off"
+      }
+    },
+    {
+      "files": [
+        "test/**"
+      ],
+      "rules": {
+        "unicorn/consistent-function-scoping": "off"
+      }
+    },
+    {
+      "files": [
+        "src/chrome-profile.ts"
+      ],
+      "rules": {
+        "typescript/consistent-type-assertions": "off"
       }
     }
   ]

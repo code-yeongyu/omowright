@@ -13,7 +13,7 @@ const { symbols } = dlopen(path.win32.join(systemRoot, "System32", "ntdll.dll"),
   RtlNtStatusToDosError: { args: ["u32"], returns: "u32" },
 });
 
-function nativeError(operation, lockPath, status) {
+function nativeError(operation: string, lockPath: string, status: number) {
   const error = symbols.RtlNtStatusToDosError(status);
   return Object.assign(
     new Error(`instance lock ${operation} failed for ${lockPath} (Windows error ${error}, NTSTATUS 0x${status.toString(16)})`),
@@ -21,7 +21,7 @@ function nativeError(operation, lockPath, status) {
   );
 }
 
-export function tryAcquireWindows(lockPath) {
+export function tryAcquireWindows(lockPath: string) {
   // Bun Windows is 64-bit: UNICODE_STRING has its pointer at offset 8 and
   // OBJECT_ATTRIBUTES is 48 bytes. Translate the Win32 extended namespace to NT.
   const filename = Buffer.from(`${path.toNamespacedPath(path.resolve(lockPath)).replace(/^\\\\\?\\/, "\\??\\")}\0`, "utf16le");
@@ -47,8 +47,8 @@ export function tryAcquireWindows(lockPath) {
   const handle = handleOut.readBigUInt64LE();
   return {
     release() {
-      const status = symbols.NtClose(handle);
-      if (status >= 0x80000000) throw nativeError("NtClose", lockPath, status);
+      const closeStatus = symbols.NtClose(handle);
+      if (closeStatus >= 0x80000000) throw nativeError("NtClose", lockPath, closeStatus);
     },
   };
 }

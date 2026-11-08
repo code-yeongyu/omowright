@@ -29,7 +29,7 @@ export function queryOpenShadowAll(root, selector) {
   flush();
   groups.push(parts);
   // One compound per group matches the same nodes in every tree scope, so each scope stays a native query.
-  const simple = groups.every(parts => parts.length === 1 && !/^:scope\b/.test(parts[0].selector));
+  const simple = groups.every(group => group.length === 1 && !/^:scope\b/.test(group[0].selector));
   let rootSelector = selector;
   if (!simple && root instanceof Element) {
     const scopedSelectors = [];

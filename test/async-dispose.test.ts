@@ -10,35 +10,41 @@ import { once } from "node:events";
 import { existsSync, globSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { removeTreeSync } from "./fixtures/remove-tree.mjs";
+import { removeTreeSync } from "./fixtures/remove-tree.ts";
+import { field } from "./fixtures/read-field.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(process.env.HOME ?? "", "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
   );
-  if (candidates.length > 0) return candidates.sort().at(-1);
+  if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   if (existsSync(chrome)) return chrome;
   return null;
 }
 
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  assert.ok(binary, "live test ran without a Chromium binary");
+  return binary;
+}
 const INDEX = new URL("../src/index.js", import.meta.url).href;
 // A script that never releases its socket keeps running until this bound.
 const EXIT_BOUND_MS = 20_000;
 
-async function withBrowser(fn) {
+async function withBrowser(fn: (context: { url: string; ud: string }) => Promise<void>) {
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-dispose-"));
-  const browser = spawn(SHELL, ["--headless", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${ud}`, "about:blank"], {
+  const browser = spawn(requireBinary(SHELL), ["--headless", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${ud}`, "about:blank"], {
     stdio: ["ignore", "ignore", "pipe"],
   });
   try {
-    const wsUrl = await new Promise((resolve, reject) => {
+    const wsUrl = await new Promise<string>((resolve, reject) => {
       let buffered = "";
-      browser.stderr.on("data", chunk => {
+      browser.stderr.on("data", (chunk: Buffer) => {
         buffered += chunk;
         const match = /DevTools listening on (ws:\/\/\S+)/.exec(buffered);
-        if (match) resolve(match[1]);
+        if (match) resolve(match[1] ?? "");
       });
       browser.once("exit", code => reject(new Error(`chromium exited early (${code})`)));
     });
@@ -53,7 +59,7 @@ async function withBrowser(fn) {
 
 // Runs `body` as an ES module in a child of the current runtime and reports how
 // it ended. `null` code means it was still running at the bound and was killed.
-async function runScript(ud, name, body) {
+async function runScript(ud: string, name: string, body: string) {
   const file = path.join(ud, `${name}.mjs`);
   writeFileSync(file, `import { connect, createAgentTabs } from ${JSON.stringify(INDEX)};\n${body}\n`);
   const child = spawn(process.execPath, [file], { stdio: ["ignore", "pipe", "pipe"] });
@@ -62,8 +68,8 @@ async function runScript(ud, name, body) {
   child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
   child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
   const exited = once(child, "exit");
-  let timer;
-  const bound = new Promise(resolve => { timer = setTimeout(resolve, EXIT_BOUND_MS, "bound"); });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<"bound">(resolve => { timer = setTimeout(resolve, EXIT_BOUND_MS, "bound"); });
   const outcome = await Promise.race([exited, bound]);
   clearTimeout(timer);
   if (outcome === "bound") {
@@ -71,12 +77,12 @@ async function runScript(ud, name, body) {
     await exited;
     return { code: null, stdout, stderr };
   }
-  return { code: outcome[0], stdout, stderr };
+  return { code: field(outcome, "0"), stdout, stderr };
 }
 
-async function targetIds(url) {
+async function targetIds(url: string) {
   const response = await fetch(`${url}/json/list`);
-  return (await response.json()).map(target => target.id);
+  return (await response.json()).map((target: { id: string }) => target.id);
 }
 
 test("a script that holds connect() with await using exits on its own and leaves its agent tab and the browser up", {
@@ -90,7 +96,7 @@ test("a script that holds connect() with await using exits on its own and leaves
       console.log(JSON.stringify({ targetId: tab.targetId }));
     `);
     assert.equal(first.code, 0, `the script must exit by itself: ${first.stderr}`);
-    const { targetId } = JSON.parse(first.stdout.trim().split("\n").at(-1));
+    const { targetId } = JSON.parse(first.stdout.trim().split("\n").at(-1) ?? "");
     assert.ok((await targetIds(url)).includes(targetId), "disposal keeps the agent tab open");
 
     const second = await runScript(ud, "second", `
@@ -99,7 +105,7 @@ test("a script that holds connect() with await using exits on its own and leaves
       console.log(JSON.stringify({ url: page.url() }));
     `);
     assert.equal(second.code, 0, `a later script attaches the tab and exits: ${second.stderr}`);
-    assert.equal(JSON.parse(second.stdout.trim().split("\n").at(-1)).url, "about:blank");
+    assert.equal(JSON.parse(second.stdout.trim().split("\n").at(-1) ?? "").url, "about:blank");
   });
 });
 
@@ -138,6 +144,6 @@ test("disposing one shared connect() handle leaves the other holder connected", 
       await kept.close();
     `);
     assert.equal(result.code, 0, result.stderr);
-    assert.match(JSON.parse(result.stdout.trim().split("\n").at(-1)).product, /Chrome/);
+    assert.match(JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "").product, /Chrome/);
   });
 });

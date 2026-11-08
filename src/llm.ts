@@ -26,7 +26,7 @@ function refRanges(refs) {
   const sorted = refs.map(ref => {
     const [, prefix, number] = /^((?:f\d+)?e)(\d+)$/.exec(ref);
     return { prefix, number: Number(number) };
-  }).sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
+  }).toSorted((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
   const ranges = [];
   for (let i = 0; i < sorted.length; i++) {
     const first = sorted[i];

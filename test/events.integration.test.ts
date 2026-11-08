@@ -4,15 +4,20 @@ import { existsSync, globSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { connectPipe, createAgentTabs, createEvents } from "../src/index.js";
-import { removeTreeSync } from "./fixtures/remove-tree.mjs";
+import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function browserPath() {
   const pinned = path.join(process.env.HOME ?? "", ".cloakbrowser/chromium-145.0.7632.109.2/Chromium.app/Contents/MacOS/Chromium");
   if (existsSync(pinned)) return pinned;
   const candidates = globSync(path.join(process.env.HOME ?? "", "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"));
-  return candidates.sort().at(-1) ?? null;
+  return candidates.toSorted().at(-1) ?? null;
 }
 const BROWSER = process.env.CLOAKBROWSER_BIN ?? browserPath();
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  assert.ok(binary, "live test ran without a Chromium binary");
+  return binary;
+}
 
 test("pipe event bridge creates and closes an owned background page", { skip: !BROWSER && "no Chromium binary found", timeout: 60000 }, async () => {
   const profile = mkdtempSync(path.join(tmpdir(), "omowright-events-live-"));
@@ -20,7 +25,7 @@ test("pipe event bridge creates and closes an owned background page", { skip: !B
   let events;
   let tabs;
   try {
-    connection = await connectPipe({ browserPath: BROWSER, browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`], storageRoot: profile, commandTimeoutMs: 60_000 });
+    connection = await connectPipe({ browserPath: requireBinary(BROWSER), browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`], storageRoot: profile, commandTimeoutMs: 60_000 });
     events = createEvents(connection); tabs = createAgentTabs(connection);
     await Promise.all([events.ready, tabs.ready]);
     const opened = events.waitForEvent("tabOpened", { timeout: 10000, predicate: value => value.type === "page" });

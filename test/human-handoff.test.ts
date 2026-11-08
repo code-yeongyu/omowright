@@ -1,29 +1,49 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import type { Server } from "node:http";
 import { existsSync, globSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectPipe, createAgentTabs } from "../src/index.js";
 import { requestHuman } from "../src/human-handoff.js";
-import { removeTreeSync } from "./fixtures/remove-tree.mjs";
+import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(process.env.HOME ?? "", "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
   );
-  if (candidates.length > 0) return candidates.sort().at(-1);
+  if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   if (existsSync(chrome)) return chrome;
   return null;
 }
 
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  assert.ok(binary, "live test ran without a Chromium binary");
+  return binary;
+}
 const FIXTURE_HTML = readFileSync(fileURLToPath(new URL("./fixtures/human-ready.html", import.meta.url)), "utf8");
 
-function createFakePage({ url = "https://example.test/waiting", bringToFrontError } = {}) {
-  const page = {
+interface FakePage {
+  currentUrl: string;
+  bringToFrontCalls: number;
+  evaluateCalls: Array<{ source: string; arg: unknown }>;
+  bannerPresent: boolean;
+  bannerInjected: number;
+  bannerRemoved: number;
+  doneFlag: boolean;
+  selectors: Set<string>;
+  url(): string;
+  bringToFront(): Promise<void>;
+  evaluate(fnOrExpr: unknown, arg?: unknown): Promise<unknown>;
+}
+
+function createFakePage({ url = "https://example.test/waiting", bringToFrontError }: { url?: string; bringToFrontError?: Error } = {}) {
+  const page: FakePage = {
     currentUrl: url,
     bringToFrontCalls: 0,
     evaluateCalls: [],
@@ -39,7 +59,7 @@ function createFakePage({ url = "https://example.test/waiting", bringToFrontErro
       page.bringToFrontCalls += 1;
       if (bringToFrontError) throw bringToFrontError;
     },
-    async evaluate(fnOrExpr, arg) {
+    async evaluate(fnOrExpr: unknown, arg?: unknown) {
       const source = typeof fnOrExpr === "function" ? fnOrExpr.toString() : String(fnOrExpr);
       page.evaluateCalls.push({ source, arg });
       return dispatchFakeEvaluate(page, source, arg);
@@ -48,7 +68,7 @@ function createFakePage({ url = "https://example.test/waiting", bringToFrontErro
   return page;
 }
 
-function dispatchFakeEvaluate(page, source, arg) {
+function dispatchFakeEvaluate(page: FakePage, source: string, arg: unknown) {
   const hasAttr = source.includes("data-omowright-human");
   const hasRemove = /\.remove\s*\(/.test(source) || source.includes("removeChild");
   const hasCreate = source.includes("createElement") || source.includes("attachShadow") || source.includes("2147483647");
@@ -70,7 +90,7 @@ function dispatchFakeEvaluate(page, source, arg) {
   return undefined;
 }
 
-function assertBannerRemoved(page) {
+function assertBannerRemoved(page: FakePage) {
   assert.ok(page.bannerRemoved > 0, "banner removal evaluate call happened");
   assert.ok(
     page.evaluateCalls.some(({ source }) => source.includes("data-omowright-human") && (/\.remove\s*\(/.test(source) || source.includes("removeChild"))),
@@ -80,10 +100,10 @@ function assertBannerRemoved(page) {
 
 async function launch() {
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-human-test-"));
-  let connection;
+  let connection: Awaited<ReturnType<typeof connectPipe>>;
   try {
     connection = await connectPipe({
-      browserPath: SHELL,
+      browserPath: requireBinary(SHELL),
       browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
       storageRoot: ud,
     });
@@ -100,14 +120,15 @@ async function launch() {
   };
 }
 
-function startFixtureServer() {
+function startFixtureServer(): Promise<{ server: Server; url: string }> {
   const server = createServer((_req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(FIXTURE_HTML);
   });
   return new Promise(resolve => {
     server.listen(0, "127.0.0.1", () => {
-      resolve({ server, url: `http://127.0.0.1:${server.address().port}/` });
+      const address = server.address();
+      resolve({ server, url: `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : undefined}/` });
     });
   });
 }
@@ -147,12 +168,12 @@ test("requestHuman continues when until url regex or selector or predicate holds
   assertBannerRemoved(selectorPage);
 
   const predPage = createFakePage();
-  let seen = null;
+  let seen: unknown = null;
   const predResult = await requestHuman(predPage, {
     prompt: "go",
     pollMs: 5,
     timeoutMs: 30,
-    until: async pageArg => {
+    until: async (pageArg: unknown) => {
       seen = pageArg;
       return true;
     },
