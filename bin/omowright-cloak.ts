@@ -47,7 +47,6 @@ function isValueOption(arg: string | undefined): arg is keyof typeof VALUE_OPTIO
   return arg !== undefined && Object.hasOwn(VALUE_OPTIONS, arg);
 }
 
-
 /** `connectPipe` (src/pipe.js) attaches `newTab` to the connection it returns. */
 interface CloakResult {
   ok: true;
