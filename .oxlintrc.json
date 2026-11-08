@@ -1,12 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "typescript",
-    "unicorn",
-    "oxc",
-    "import",
-    "promise"
-  ],
+  "plugins": ["typescript", "unicorn", "oxc", "import", "promise"],
   "categories": {
     "correctness": "error",
     "suspicious": "error",
@@ -28,17 +22,10 @@
       }
     ]
   },
-  "ignorePatterns": [
-    "**/dist/**",
-    "**/node_modules/**",
-    "test/fixtures/**",
-    "src/page-bundle.js"
-  ],
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "test/fixtures/**", "src/page-bundle.js"],
   "overrides": [
     {
-      "files": [
-        "src/core.ts"
-      ],
+      "files": ["src/core.ts"],
       "rules": {
         "eslint/no-shadow": "off",
         "eslint/no-unused-expressions": "off",
@@ -46,79 +33,49 @@
       }
     },
     {
-      "files": [
-        "src/layers.ts",
-        "src/core.ts",
-        "src/text-matching.ts",
-        "src/open-shadow-query.ts"
-      ],
+      "files": ["src/layers.ts", "src/core.ts", "src/text-matching.ts", "src/open-shadow-query.ts"],
       "rules": {
         "unicorn/consistent-function-scoping": "off"
       }
     },
     {
-      "files": [
-        "src/aside/session.ts",
-        "src/aside/line-transport.ts"
-      ],
+      "files": ["src/aside/session.ts", "src/aside/line-transport.ts"],
       "rules": {
         "eslint/no-control-regex": "off"
       }
     },
     {
-      "files": [
-        "src/bsk/onboard.ts",
-        "src/launch-endpoint.ts"
-      ],
+      "files": ["src/bsk/onboard.ts", "src/launch-endpoint.ts"],
       "rules": {
         "eslint/no-unmodified-loop-condition": "off"
       }
     },
     {
-      "files": [
-        "test/**"
-      ],
+      "files": ["test/**"],
       "rules": {
         "unicorn/consistent-function-scoping": "off"
       }
     },
     {
-      "files": [
-        "src/chrome-profile.ts"
-      ],
-      "rules": {
-        "typescript/consistent-type-assertions": "off"
-      }
-    },
-    {
-      "files": [
-        "src/page-setup.ts"
-      ],
+      "files": ["src/page-setup.ts"],
       "rules": {
         "oxc/no-this-in-exported-function": "off"
       }
     },
     {
-      "files": [
-        "src/connection.ts"
-      ],
+      "files": ["src/connection.ts"],
       "rules": {
         "eslint/no-unmodified-loop-condition": "off"
       }
     },
     {
-      "files": [
-        "src/aria-hidden.ts"
-      ],
+      "files": ["src/aria-hidden.ts"],
       "rules": {
         "unicorn/consistent-function-scoping": "off"
       }
     },
     {
-      "files": [
-        "src/cloak-profile.ts",
-        "src/core.ts"
-      ],
+      "files": ["src/cloak-profile.ts", "src/core.ts"],
       "rules": {
         "eslint/preserve-caught-error": "off"
       }
