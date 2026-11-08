@@ -51,11 +51,11 @@ function chooseBrowser(browser: string | null | undefined, browsers: unknown[]):
 export async function listBrowsers(
   client: BskClient,
   { waitForBrowserMs }: { waitForBrowserMs?: number } = {},
-): Promise<unknown[]> {
+): Promise<unknown> {
   const status = await client.call("system.status", compact({ wait_for_browser_ms: waitForBrowserMs }), {
     idPrefix: "status",
   });
-  return listOrEmpty(readProperty(status, "browsers"), "system.status browsers");
+  return readProperty(status, "browsers") ?? [];
 }
 
 // session.start matches only an instance id or a unique label; a browser name such as "chrome"
@@ -105,7 +105,7 @@ export async function connectBrowserSkill({
   waitForBrowserMs = DEFAULT_WAIT_FOR_BROWSER_MS,
 }: ConnectBrowserSkillOptions = {}): Promise<BskSession> {
   const ipc = client ?? new BskIpcClient({ home, env, sockPath, autoStart, timeoutMs, bskBin });
-  const browsers = await listBrowsers(ipc, { waitForBrowserMs });
+  const browsers = listOrEmpty(await listBrowsers(ipc, { waitForBrowserMs }), "system.status browsers");
   if (browsers.length === 0) {
     throw new BskRpcError(
       "no_browser_connected",
