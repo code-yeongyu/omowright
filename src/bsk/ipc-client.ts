@@ -68,7 +68,7 @@ interface StaleRecord {
 // `render_pipe_name` derives from USERNAME and the home.
 export function defaultSocketPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
   if (process.platform !== "win32") return path.join(home, "run", "daemon.sock");
-  return `\\\\.\\pipe\\bsk-daemon-${rustStrHash(env.USERNAME ?? "default", home)}`;
+  return `\\\\.\\pipe\\bsk-daemon-${rustStrHash(env["USERNAME"] ?? "default", home)}`;
 }
 
 // Rust's DefaultHasher (SipHash-1-3, zero keys) over each value's UTF-8 bytes plus the 0xff
@@ -185,7 +185,7 @@ export class BskIpcClient {
   }: BskIpcClientOptions = {}) {
     this.#home = home ?? resolveBskHome(env);
     this.#sockPath = sockPath ?? null;
-    this.#autoStart = autoStart ?? env.BSK_AUTO_START !== "0";
+    this.#autoStart = autoStart ?? env["BSK_AUTO_START"] !== "0";
     this.#startDaemon = startDaemon ?? (() => startDaemonWithCli({ home: this.#home, env, bskBin }));
     this.#timeoutMs = timeoutMs;
     this.#env = env;

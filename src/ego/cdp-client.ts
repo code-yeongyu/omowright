@@ -116,8 +116,8 @@ export class EgoCdpClient {
       this.#ego.sendCDPMessage(JSON.stringify(message));
     } catch (error) {
       this.#take(id);
-      const errorCode = isObject(error) ? error.error_code : undefined;
-      const errorMessage = isObject(error) ? error.message : undefined;
+      const errorCode = isObject(error) ? error["error_code"] : undefined;
+      const errorMessage = isObject(error) ? error["message"] : undefined;
       return Promise.reject(
         new EgoCdpError(String(errorCode ?? "ego_send_failed"), String(errorMessage ?? String(error)), { method }),
       );
@@ -138,13 +138,13 @@ export class EgoCdpClient {
     return targetInfos.map((t: unknown) => {
       const info = isObject(t) ? t : {};
       return {
-        id: stringOr(info.targetId, ""),
-        type: stringOr(info.type, ""),
-        url: stringOr(info.url, ""),
-        title: stringOr(info.title, ""),
-        description: stringOr(info.description, undefined),
-        faviconUrl: stringOr(info.faviconUrl, undefined),
-        parentId: stringOr(info.openerId, undefined),
+        id: stringOr(info["targetId"], ""),
+        type: stringOr(info["type"], ""),
+        url: stringOr(info["url"], ""),
+        title: stringOr(info["title"], ""),
+        description: stringOr(info["description"], undefined),
+        faviconUrl: stringOr(info["faviconUrl"], undefined),
+        parentId: stringOr(info["openerId"], undefined),
       };
     });
   }
@@ -190,7 +190,7 @@ export class EgoCdpClient {
     let id: unknown;
     try {
       const parsed: unknown = JSON.parse(message);
-      id = isObject(parsed) ? parsed.id : undefined;
+      id = isObject(parsed) ? parsed["id"] : undefined;
     } catch {
       id = undefined;
     }
@@ -219,26 +219,26 @@ export class EgoCdpClient {
     }
     if (msg === null) throw new TypeError("Cannot read properties of null (reading 'id')");
     if (!isObject(msg)) return undefined;
-    if (typeof msg.id === "number") {
-      const entry = this.#take(msg.id);
+    if (typeof msg["id"] === "number") {
+      const entry = this.#take(msg["id"]);
       if (!entry) return undefined;
-      if (msg.error) {
-        const cdpError = isObject(msg.error) ? msg.error : {};
-        const error = Object.assign(Error(String(cdpError.message ?? `CDP command failed: ${entry.method}`)), {
-          code: cdpError.code,
-          data: cdpError.data,
+      if (msg["error"]) {
+        const cdpError = isObject(msg["error"]) ? msg["error"] : {};
+        const error = Object.assign(Error(String(cdpError["message"] ?? `CDP command failed: ${entry.method}`)), {
+          code: cdpError["code"],
+          data: cdpError["data"],
         });
         entry.reject(error);
       } else {
-        entry.resolve(msg.result);
+        entry.resolve(msg["result"]);
       }
       return undefined;
     }
-    const method = msg.method;
+    const method = msg["method"];
     if (typeof method !== "string") return undefined;
-    const params = msg.params;
-    const sessionId = sessionIdOf(msg.sessionId);
-    const detachedSessionId = isObject(params) ? params.sessionId : undefined;
+    const params = msg["params"];
+    const sessionId = sessionIdOf(msg["sessionId"]);
+    const detachedSessionId = isObject(params) ? params["sessionId"] : undefined;
     if (method === "Target.detachedFromTarget" && detachedSessionId) {
       this.#failWhere(
         (entry) => entry.sessionId === detachedSessionId,

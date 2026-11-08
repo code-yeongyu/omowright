@@ -1,7 +1,7 @@
 import { dlopen, ptr } from "bun:ffi";
 import path from "node:path";
 
-const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+const systemRoot = process.env["SystemRoot"] || process.env["windir"] || "C:\\Windows";
 const { symbols } = dlopen(path.win32.join(systemRoot, "System32", "ntdll.dll"), {
   // NTSTATUS is returned in the same native call, unlike GetLastError's
   // thread-local state, whose preservation across FFI/JS is not guaranteed.

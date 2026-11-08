@@ -88,14 +88,15 @@ export class AsideSession {
           parsed = { unserializable: true };
         }
         const result: JsonObject = isObject(parsed) ? parsed : {};
-        if (result.error !== undefined) throw new AsideReplError("repl_error", String(result.error), { output: logs });
-        if (result.unserializable)
+        if (result["error"] !== undefined)
+          throw new AsideReplError("repl_error", String(result["error"]), { output: logs });
+        if (result["unserializable"])
           throw new AsideReplError(
             "repl_unserializable",
             "the code returned a value with no JSON form (a function, symbol or undefined member); return plain data",
             { output },
           );
-        value = result.value;
+        value = result["value"];
         found = true;
       } else {
         logs.push(entry);
@@ -122,7 +123,7 @@ export class AsideSession {
       `if (!page) throw new Error("no current page: call open(url) first");\nconst omowSnap = await snapshot(page, ${JSON.stringify(options)});\nreturn { tree: omowSnap.tree, diff: omowSnap.diff };`,
     );
     if (find === undefined) return result;
-    const tree = isObject(result) && typeof result.tree === "string" ? result.tree : undefined;
+    const tree = isObject(result) && typeof result["tree"] === "string" ? result["tree"] : undefined;
     const found = findSnapshotLines({ tree, refs: {} }, find, context);
     return { tree: found.tree, find: found.find };
   }
@@ -173,7 +174,7 @@ export async function connectAside({
   // `aside mcp` releases its REPL session after 30 idle minutes by default, which would drop `page`
   // and every global; a piped `aside repl` kept its session for the life of the process.
   const childEnv =
-    protocol === "mcp" && env.ASIDE_MCP_REPL_IDLE_TIMEOUT_MS === undefined
+    protocol === "mcp" && env["ASIDE_MCP_REPL_IDLE_TIMEOUT_MS"] === undefined
       ? { ...env, ASIDE_MCP_REPL_IDLE_TIMEOUT_MS: "0" }
       : env;
   const child = spawn(bin, args, { env: childEnv, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });

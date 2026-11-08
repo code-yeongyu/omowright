@@ -222,7 +222,7 @@ async function identify({
 }> {
   const catalog = catalogBrowsers({ platform, home, env, exists }).map((b) => withRegistration(platform, b));
   const observed = signals ?? (await probeSignals({ platform, home, browsers: catalog.filter((b) => b.hasProfile) }));
-  const explicit = browser ?? env.OMOWRIGHT_BROWSER ?? null;
+  const explicit = browser ?? env["OMOWRIGHT_BROWSER"] ?? null;
   const { primary, ...identification } = identifyBrowser({
     catalog,
     signals: observed,

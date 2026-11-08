@@ -31,9 +31,9 @@ function isDaemonInfo(value: unknown): value is DaemonInfo {
 }
 
 export function resolveBskHome(env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.BSK_HOME;
+  const override = env["BSK_HOME"];
   if (typeof override === "string" && override.length > 0) return override;
-  const home = env.HOME && env.HOME.length > 0 ? env.HOME : homedir();
+  const home = env["HOME"] && env["HOME"].length > 0 ? env["HOME"] : homedir();
   return path.join(home, ".bsk");
 }
 
@@ -59,9 +59,9 @@ export function readDaemonInfo(home: string): DaemonInfo | null {
 }
 
 export function findBskBinary(env: NodeJS.ProcessEnv = process.env): string {
-  const home = env.HOME && env.HOME.length > 0 ? env.HOME : homedir();
+  const home = env["HOME"] && env["HOME"].length > 0 ? env["HOME"] : homedir();
   const candidates = [
-    env.BSK_BIN,
+    env["BSK_BIN"],
     path.join(home, ".local", "bin", process.platform === "win32" ? "bsk.exe" : "bsk"),
   ].filter((candidate): candidate is string => Boolean(candidate));
   for (const candidate of candidates) if (existsSync(candidate)) return candidate;

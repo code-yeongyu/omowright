@@ -63,7 +63,7 @@ const DENY_ACE_TYPES: ReadonlySet<string | undefined> = new Set(["D", "OD", "XD"
 let currentUserSid: Promise<string> | undefined;
 
 export function windowsSystemTool(name: string, env: NodeJS.ProcessEnv = process.env) {
-  return path.win32.join(env.SystemRoot || env.windir || "C:\\Windows", "System32", name);
+  return path.win32.join(env["SystemRoot"] || env["windir"] || "C:\\Windows", "System32", name);
 }
 
 async function readCurrentUserSid(run: CommandRunner) {

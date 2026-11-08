@@ -62,7 +62,7 @@ export function cliInstallCommand({
   version,
 }: { platform?: string; installDir?: string; version?: string } = {}): InstallCommand {
   const env: InstallEnv = { BSK_INSTALL_DIR: installDir };
-  if (version) env.BSK_VERSION = version;
+  if (version) env["BSK_VERSION"] = version;
   if (platform === "win32") {
     return {
       command: windowsSystemTool("WindowsPowerShell\\v1.0\\powershell.exe"),
