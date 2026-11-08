@@ -5,21 +5,24 @@
 import { createInterface } from "node:readline";
 import vm from "node:vm";
 
-const args = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const accountAt = argv.indexOf("--account");
+const account = accountAt === -1 ? null : argv[accountAt + 1];
+const args = accountAt === -1 ? argv : argv.filter((_, i) => i !== accountAt && i !== accountAt + 1);
 if (args[0] === "--version") {
   process.stdout.write("1.26.916.1741\n");
   process.exit(0);
 }
 if (args[0] === "account" && args[1] === "status") {
   const state = process.env.FAKE_ASIDE_SIGNED_OUT ? "signed out" : "signed in";
-  process.stdout.write(`* u0  someone@example.com  ${state}  profiles: Profile 0\n  provider: google\n`);
+  const rows = [`* u0  someone@example.com  ${state}  profiles: Profile 0\n  provider: google\n`, "  u1  Local Account  signed out  profiles: Profile 1\n"];
+  process.stdout.write(account === "u1" ? rows[1] : account === "u0" ? rows[0] : rows.join(""));
   process.exit(0);
 }
 if (args[0] !== "repl") {
   process.stderr.write(`fake aside: unsupported command ${args.join(" ")}\n`);
   process.exit(2);
 }
-const account = args.includes("--account") ? args[args.indexOf("--account") + 1] : "u0";
 
 const write = (text) => process.stdout.write(text);
 const PROMPT = "\x1b[32mrepl\x1b[0m \x1b[33m>\x1b[0m ";
@@ -31,6 +34,12 @@ const context = vm.createContext({
   Error,
   tabs,
   page: null,
+  // Writes in two chunks with a pause, so the reader sees the first part as its own chunk.
+  splitWrite: async (first, rest) => {
+    write(first);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    write(rest);
+  },
   openTab: async (url) => {
     const tab = { url: () => url, title: async () => `Title of ${url}` };
     tabs.push(tab);
@@ -44,7 +53,7 @@ const context = vm.createContext({
   }),
 });
 
-write(`\x1b[2maccount: ${account} (someone@example.com)\nsessionDir: ~/.aside/u/0/sessions/fake\ntype 'help' for usage, 'state' to inspect tool state, 'exit' to quit\x1b[0m\n${PROMPT}`);
+write(`\x1b[2maccount: ${account ?? "u0"} (someone@example.com)\nsessionDir: ~/.aside/u/0/sessions/fake\ntype 'help' for usage, 'state' to inspect tool state, 'exit' to quit\x1b[0m\n${PROMPT}`);
 const input = createInterface({ input: process.stdin });
 for await (const line of input) {
   if (line.trim() === "exit") break;

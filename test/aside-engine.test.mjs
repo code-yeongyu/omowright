@@ -36,6 +36,8 @@ test("a failing call rejects with AsideReplError and the session keeps working",
       return true;
     });
     assert.equal(await aside.run("return 7"), 7);
+    await assert.rejects(aside.run("return () => 1"), (error) => error instanceof AsideReplError && error.code === "repl_unserializable");
+    assert.equal(await aside.run("return 8"), 8);
   } finally {
     await aside.close();
   }
@@ -56,6 +58,20 @@ test("open and snapshot with find narrow Aside's tree to the matching lines", as
       find: { query: "pay", matches: 2 },
     });
     await assert.rejects(aside.snapshot({ context: 1 }), TypeError);
+  } finally {
+    await aside.close();
+  }
+});
+
+// Page output can contain the prompt text, and the pipe can split right after it; the call
+// must still end at its own [ok] marker, and the next call must read its own answer.
+test("output that contains the prompt text and arrives split keeps calls in step", async () => {
+  const aside = await connectAside({ asideCommand });
+  try {
+    const { value, logs } = await aside.runWithLogs('await splitWrite("tricky repl > ", "tail\\n");\nreturn 5;');
+    assert.equal(value, 5);
+    assert.deepEqual(logs, ["tricky repl > tail"]);
+    assert.equal(await aside.run("return 6"), 6);
   } finally {
     await aside.close();
   }

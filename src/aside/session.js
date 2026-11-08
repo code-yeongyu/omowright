@@ -97,7 +97,11 @@ export class AsideSession {
     let found = false;
     for (const entry of output) {
       if (entry.startsWith(tag)) {
-        value = JSON.parse(entry.slice(tag.length));
+        try {
+          value = JSON.parse(entry.slice(tag.length));
+        } catch {
+          throw new AsideReplError("repl_unserializable", "the code returned a value with no JSON form (a function, symbol or undefined member); return plain data", { output });
+        }
         found = true;
       } else {
         logs.push(entry);
@@ -138,7 +142,9 @@ export class AsideSession {
     const run = this.#queue.then(async () => {
       if (this.#closed) throw new AsideReplError("repl_closed", "aside repl session is closed");
       this.#child.stdin.write(`${line}\n`);
-      const output = await this.#waitFor((pending) => pending.endsWith(PROMPT), this.#callTimeoutMs, "repl_timeout");
+      // Page output can contain the prompt text and arrive split right after it, so a call is
+      // finished only once its last complete line is the [ok|error] marker and a prompt follows.
+      const output = await this.#waitFor((pending, lines) => pending.endsWith(PROMPT) && MARKER.test(lines.at(-1) ?? ""), this.#callTimeoutMs, "repl_timeout");
       const markerAt = output.findLastIndex((entry) => MARKER.test(entry));
       if (markerAt === -1) throw new AsideReplError("repl_protocol", "aside repl answered without an [ok|error] marker", { output });
       const body = output.slice(0, markerAt);
@@ -179,7 +185,7 @@ export class AsideSession {
 
   #check() {
     const waiter = this.#waiter;
-    if (!waiter || !waiter.isDone(plain(this.#buffer))) return;
+    if (!waiter || !waiter.isDone(plain(this.#buffer), this.#lines)) return;
     this.#waiter = null;
     clearTimeout(waiter.timer);
     this.#buffer = "";
@@ -208,7 +214,7 @@ export async function connectAside({
 } = {}) {
   let command = asideCommand;
   if (!command && autoSetup) {
-    const setup = await asideOnboard({ env, ...(home ? { home } : {}) });
+    const setup = await asideOnboard({ env, account, installOnlyWithApp: true, ...(home ? { home } : {}) });
     if (!setup.ready) throw new AsideReplError("aside_not_ready", setup.nextStep, { setup });
     command = [setup.cli.bin];
   }

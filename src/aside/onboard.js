@@ -7,7 +7,7 @@ import { findAsideBinary } from "./session.js";
 
 const INSTALL_SH = "https://releases.aside.com/install.sh";
 const APP_STEP = "Ask the user to install the Aside browser (aside.com, macOS 15+ or Windows 10 22H2+) and sign in, then re-run asideOnboard().";
-const LOGIN_STEP = "Ask the user to sign the CLI in: run `aside login` in their terminal and approve the 8-digit code in Aside > Settings > Account > Devices. Then re-run asideOnboard().";
+const loginStep = (bin, account) => `Ask the user to sign the CLI in: run \`${bin}${account ? ` --account ${account}` : ""} login\` in their terminal and approve the 8-digit code in Aside > Settings > Account > Devices. Then re-run asideOnboard().`;
 const WINDOWS_CLI_STEP = "Ask the user to install the Aside CLI from Aside > Settings > Developers, then re-run asideOnboard().";
 
 export function asideCliInstallCommand() {
@@ -58,47 +58,54 @@ export function findAsideApp({ platform = process.platform, home = homedir(), ex
   return { installed: false, path: null, version: null };
 }
 
-// `aside account status` prints the active account as `* <id>  <name>  signed in|signed out ...`.
-export function parseAccountStatus(output) {
-  const active = output.split("\n").find((line) => line.trimStart().startsWith("*"));
-  if (!active) return { signedIn: false, account: null };
-  const account = /^\s*\*\s+(\S+)/.exec(active)[1];
-  return { signedIn: /\bsigned in\b/.test(active), account };
+// `aside account status` prints one line per account, `[*] <id>  <name>  signed in|signed out ...`,
+// with `*` on the active one; `--account <id>` narrows it to that account's line.
+export function parseAccountStatus(output, account) {
+  const rows = [];
+  for (const line of output.split("\n")) {
+    const match = /^\s*(\*\s+)?(\S+)\s.*\bsigned (in|out)\b/.exec(line);
+    if (match) rows.push({ active: Boolean(match[1]), id: match[2], signedIn: match[3] === "in" });
+  }
+  const row = account ? rows.find((r) => r.id === account) : rows.find((r) => r.active);
+  return row ? { signedIn: row.signedIn, account: row.id } : { signedIn: false, account: account ?? null };
 }
 
-async function cliReport({ asideCommand, env, home }) {
+async function cliReport({ asideCommand, env, home, account }) {
   const command = asideCommand ?? [findAsideBinary({ env, home })];
   if (!command[0]) return { cli: { installed: false, bin: null, version: null }, auth: { signedIn: false, account: null } };
   const [bin, ...lead] = command;
   const version = await capture(bin, [...lead, "--version"], env);
   if (version === null) return { cli: { installed: false, bin, version: null }, auth: { signedIn: false, account: null } };
-  const status = await capture(bin, [...lead, "account", "status"], env);
-  return { cli: { installed: true, bin, version: version.trim() }, auth: status === null ? { signedIn: false, account: null } : parseAccountStatus(status) };
+  const status = await capture(bin, [...lead, ...(account ? ["--account", account] : []), "account", "status"], env);
+  return { cli: { installed: true, bin, version: version.trim() }, auth: status === null ? { signedIn: false, account: account ?? null } : parseAccountStatus(status, account) };
 }
 
 function nextStepFor({ platform, app, cli, auth }) {
   if (app.installed === false) return APP_STEP;
   if (!cli.installed) return platform === "win32" ? WINDOWS_CLI_STEP : "Install the Aside CLI (asideOnboard() runs the official installer).";
-  if (!auth.signedIn) return LOGIN_STEP;
+  if (!auth.signedIn) return loginStep(cli.bin, auth.account);
   return null;
 }
 
-export async function asideDoctor({ platform = process.platform, home = homedir(), env = process.env, exists = existsSync, asideCommand } = {}) {
+export async function asideDoctor({ platform = process.platform, home = homedir(), env = process.env, exists = existsSync, asideCommand, account } = {}) {
   const app = findAsideApp({ platform, home, exists });
-  const { cli, auth } = await cliReport({ asideCommand, env, home });
+  const { cli, auth } = await cliReport({ asideCommand, env, home, account });
   const report = { platform, app, cli, auth, ready: app.installed !== false && cli.installed && auth.signedIn };
   report.nextStep = nextStepFor(report);
   return report;
 }
 
 // asideDoctor plus every step a program can take: a missing CLI is installed with Aside's
-// official installer (macOS and Linux). Steps only a person can take come back in nextStep.
-export async function asideOnboard({ platform = process.platform, home = homedir(), env = process.env, exists = existsSync, asideCommand, installCli = installAsideCli } = {}) {
-  let report = await asideDoctor({ platform, home, env, exists, asideCommand });
+// official installer (macOS and Linux), never when the Aside app is known to be missing.
+// installOnlyWithApp (connectAside's setup) installs only when the app was actually found.
+// Steps only a person can take come back in nextStep.
+export async function asideOnboard({ platform = process.platform, home = homedir(), env = process.env, exists = existsSync, asideCommand, account, installOnlyWithApp = false, installCli = installAsideCli } = {}) {
+  let report = await asideDoctor({ platform, home, env, exists, asideCommand, account });
   let install = null;
-  if (!report.cli.installed && platform !== "win32") {
+  const appAllows = installOnlyWithApp ? report.app.installed === true : report.app.installed !== false;
+  if (!report.cli.installed && platform !== "win32" && appAllows) {
     install = await installCli({ home });
-    if (install.installed) report = await asideDoctor({ platform, home, env, exists, asideCommand: [install.asideBin] });
+    if (install.installed) report = await asideDoctor({ platform, home, env, exists, asideCommand: [install.asideBin], account });
   }
   return { ...report, install };
 }
