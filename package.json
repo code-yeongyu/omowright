@@ -1,6 +1,6 @@
 {
   "name": "omowright",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "OmOWright browser automation for standard Chromium CDP endpoints.",
   "keywords": [
     "accessibility-snapshot",
