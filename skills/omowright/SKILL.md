@@ -27,8 +27,12 @@ const { connectBrowser } = await import("omowright");
 const { engine, handle, attempts } = await connectBrowser({ allow: ["aside", "ego", "bsk"] });
 ```
 
-`attempts` lists every engine tried, with `ok` or the reason it did not
-connect (often one step only the user can take, such as `aside login`). When a
+`attempts` has one entry per engine in order: `ok`, `ms`, `verified` (the check
+that proved it attached) or the `reason` it did not, including `not tried` once
+the primary connected (often one step only the user can take, such as `aside login`).
+`crossCheck: true` also attaches the other allowed engines, returned in
+`crossCheck` and listed in `attached`. Each is a SECOND BROWSER (a BrowserSkill
+tab has no CDP endpoint), so use it only to compare results, act through `handle`. When a
 higher engine failed for a reason the user can fix, tell them that step along
 with the engine you used. **SET `allow` FOR EVERY TASK**: without `"cloak"`
 when it needs the user's sessions (the default includes it), with only
