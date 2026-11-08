@@ -3,6 +3,22 @@ import assert from "node:assert/strict";
 import * as api from "../src/index.js";
 
 const FUNCTION_EXPORTS = [
+  "connectRankedBrowser",
+  "assertEngineChoice",
+  "engineById",
+  "engineOrder",
+  "enginePlan",
+  "asideAvailable",
+  "connectAside",
+  "parseAsideRepl",
+  "runAside",
+  "asideAccount",
+  "asidePaths",
+  "detectAsideInstall",
+  "ensureAside",
+  "installAsideCli",
+  "resolveOnPath",
+  "verifyAside",
   "createNetworkSnoop",
   "collectWhileScrolling",
   "createTrace",
@@ -35,7 +51,17 @@ const FUNCTION_EXPORTS = [
   "resolveBskHome",
 ];
 
-const CLASS_EXPORTS = ["BskIpcClient", "BskRpcError", "BskSession", "SharedConnectionError"];
+const CLASS_EXPORTS = [
+  "BskIpcClient",
+  "BskRpcError",
+  "BskSession",
+  "SharedConnectionError",
+  "AsideRepl",
+  "AsideReplError",
+  "AsideUnavailable",
+  "EngineOrderViolation",
+  "NoBrowserEngine",
+];
 
 test("package entrypoint exports the new public surfaces", () => {
   for (const name of FUNCTION_EXPORTS) {
@@ -49,4 +75,7 @@ test("package entrypoint exports the new public surfaces", () => {
   }
   assert.equal(api.BROWSERSKILL_EXTENSION_IDS.chrome, "hhcmgoofomhgciiibhipgmgkgnoenaoi");
   assert.equal(typeof api.STORE_PAGE_URLS.edge, "string");
+  assert.deepEqual(api.engineOrder(), ["aside", "bsk", "cloakbrowser"]);
+  assert.equal(typeof api.BROWSER_ENGINE_ADAPTERS.aside.connect, "function");
+  assert.equal(typeof api.FALLBACK_REASONS["need-isolated-profile"].means, "string");
 });

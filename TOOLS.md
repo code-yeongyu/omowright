@@ -4,6 +4,46 @@ Drive a browser with Playwright-shaped JS. Two transports: `connectPipe`
 (launch a browser, zero TCP port) and `connect(cdpHttpUrl)` (attach to a
 running Chromium DevTools endpoint).
 
+## Which browser: the engine order
+
+`connectRankedBrowser(options?)` picks one, in the user's order (2026-11-08):
+
+| Rank | Engine | Why it is here |
+|---|---|---|
+| 0 | `aside` | the browser the user is already signed into, driven by `aside repl` |
+| 1 | `bsk` | this host's browser through BrowserSkill, when aside cannot serve the task |
+| 2 | `cloakbrowser` | an owned CloakBrowser profile, when no signed-in browser may be touched |
+
+Returns `{ engine, tier, session, probe, skipped }`; `skipped` names every engine
+above the winner with `code` `unavailable`, `connect-failed` or `no-adapter` and
+a `detail` to quote at the user. Options: `{ fallbackReason, aside, bsk,
+cloakbrowser }`, where each per-engine object is that adapter's own options.
+
+- `assertEngineChoice(engineId, { fallbackReason })` — the guard behind it.
+  Throws `EngineOrderViolation` for a lower rank with no reason, an unknown
+  reason, or a reason that does not reach that tier.
+- `FALLBACK_REASONS` — `aside-unavailable` and `need-raw-protocol` reach tier 1;
+  `need-isolated-profile` reaches tier 2. Each entry carries `means` for quoting.
+- `BROWSER_ENGINES` / `engineOrder()` / `enginePlan({ fallbackReason })` — the
+  rank itself; `enginePlan` returns the engines a task will try, in order.
+
+## Aside, tier 0
+
+- `connectAside({ bin?, host?, account?, timeoutMs? })` — verifies the CLI with
+  `aside --version`, then returns an `AsideRepl`.
+- `session.run(code)` — Playwright-style JS inside Aside Browser (`openTab(url)`
+  first: `page` starts unset). Returns `{ status, ok, ms, output, lines, code }`.
+  `aside repl` prints a trailing `[ok | Nms]` / `[error | Nms]` marker and exits
+  0 even for a failed script, so read `ok`, never the exit code.
+- `session.title(url)` — open `url` and return the printed title; throws
+  `AsideReplError` on an error marker.
+- `asideAvailable({ bin? })`, `parseAsideRepl(stdout, exitCode)`, `runAside({...})`
+  — the probe, the marker parser and the process runner.
+- `ensureAside({ ... })` — Aside installation detection (app, CLI bundle, PATH),
+  the vendor's own installer, and a real `about:blank` round trip. Platform is an
+  input: the install layout is chosen per platform, and a platform without a
+  wired installer is reported as a follow-up.
+
 ## Core loop
 
 1. Open or attach a tab: `connection.newTab(url)` / `connection.attachPage(targetId)`.

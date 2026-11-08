@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, stealth via CloakBrowser as the default owned engine with zero exposed CDP ports, and an attached engine that drives the user's own signed-in browser through BrowserSkill (connectBrowserSkill, bskSnapshot, one-click onboarding via bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The code-driven browser library with a ranked engine order (user standing order 2026-11-08): Aside first via connectRankedBrowser, the user's local browser through BrowserSkill (bsk) second, an owned CloakBrowser profile last — never the default. Drives any of them with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop, flight-recorder trace, OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, stealth and zero exposed CDP ports on the owned profile. MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
@@ -9,24 +9,48 @@ Browser automation as a code library. Install it with
 `bun add github:code-yeongyu/omowright` (or import it by the path of a local
 checkout). Bun >= 1.4 recommended, Node >= 22 supported.
 
-Two engines, one library:
+## Engine order
 
-| Engine | Use when | Entry point |
-|---|---|---|
-| **Owned** (default) | scraping, WAF/bot-scored targets, headless, anything that must not touch the user's profile | `connectPipe` / `connectCloakProfile` — no CLI, no daemon, no open CDP port |
-| **Attached** | the task needs the user's logged-in sessions, cookies, or open tabs | `connectBrowserSkill` — stock BrowserSkill daemon + extension; `references/browserskill.md` |
+Call `connectRankedBrowser()` and let it pick. The order is the user's standing
+order (2026-11-08) and lives in `src/engine-order.js`, not in this document:
 
-Never substitute one for the other silently: if the attached engine is not set
-up, run `bskOnboard()` and tell the user its single remaining step. It installs
-the extension only into the browser the user actually uses; when it returns
-`needsChoice`, ask which browser that is and pass `{ browser: "<id>" }`.
+| Rank | Engine | How you reach it | Use it when |
+|---|---|---|---|
+| 0 | **Aside** — `aside repl` | `connectRankedBrowser()` | every task starts here: it drives the browser the user is already signed into, and `requestHuman` is a person away |
+| 1 | **Local browser through BrowserSkill** | `connectRankedBrowser({ fallbackReason: "aside-unavailable" })` or `"need-raw-protocol"` | the CLI is missing or signed out here, or the task needs the CDP surface (routes, request snooping, MV3 APIs, tab borrowing) — `references/browserskill.md` |
+| 2 | **Owned CloakBrowser profile** | `connectRankedBrowser({ fallbackReason: "need-isolated-profile" })` | nobody's signed-in browser may be touched, or no real browser is reachable |
+
+```js
+const { connectRankedBrowser } = await import("omowright");
+const { engine, session, skipped } = await connectRankedBrowser();
+// engine: "aside" | "bsk" | "cloakbrowser"
+// skipped: [{ engine: "aside", code: "unavailable", detail: "aside --version exited 1" }]
+```
+
+A lower rank needs a reason from `FALLBACK_REASONS`, so
+`assertEngineChoice("cloakbrowser")` throws instead of quietly becoming the
+default, and `aside-unavailable` never reaches tier 2. When a task does need a
+specific engine, call `assertEngineChoice(id, { fallbackReason })` first and
+connect directly afterwards. The owned-engine sections below are tier 2's manual,
+not the starting point.
+
+The tier-0 integration detects the Aside installation and can install it itself:
+`ensureAside({ install: "run" })` checks `/Applications/Aside.app`, `~/.aside/cli`
+and PATH (the platform picks the layout, not the feature), runs the vendor
+installer
+(`curl -fsSL https://releases.aside.com/install.sh | bash`), then proves the CLI
+with a real `about:blank` round trip. `usable: false` means the step named in
+`steps` failed and `instruction` carries what to tell the user (usually
+`aside login` and one approval inside the app); fall to tier 1 with
+`fallbackReason: "aside-unavailable"` and quote that step, never report aside as
+available.
 
 ## Core loop (owned engine)
 
 ```js
 const { connectPipe, compactSnapshot } = await import("omowright");
 const browser = await connectPipe({
-  browserPath: "<CloakBrowser binary>",           // DEFAULT engine
+  browserPath: "<CloakBrowser binary>",           // tier 2: owned, isolated profile
   browserArgs: ["--no-first-run", `--user-data-dir=${profileDir}`],
   storageRoot: profileDir,
 });
@@ -57,12 +81,14 @@ empty tree, not an error. A search does not move the diff baseline, and `find` c
 be combined with `diff`. `maxChars` still caps the whole captured tree before the
 search runs, so leave it off when searching a large page.
 
-## Default engine: CloakBrowser
+## Owned engine: CloakBrowser
 
-Use the CloakBrowser binary by default, not a plain headless shell — most real
+When the ranked pick lands here, use the CloakBrowser binary rather than a plain
+headless shell — most real
 targets sit behind WAFs or bot scoring, and CloakBrowser's source-level
 fingerprint patches (Cloudflare Turnstile, FingerprintJS, BrowserScan) make it
-the safe default. Plain headless shell is the speed fallback for trivially open
+the safe choice inside an owned profile. Plain headless shell is the speed
+fallback for trivially open
 pages: any Chrome/Chromium or
 `~/Library/Caches/ms-playwright/chromium_headless_shell-*/.../chrome-headless-shell`.
 

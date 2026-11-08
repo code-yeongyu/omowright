@@ -53,6 +53,26 @@ reads what changed instead of the whole page again. To look for one thing,
 `page.snapshot({ find: "Checkout" })` returns only the matching lines, with
 their refs and a little context around each.
 
+## Engine order
+
+`connectRankedBrowser()` is the one entry point that picks a browser, and the
+order is the user's standing order (2026-11-08):
+
+1. **Aside** — `aside repl`, driving the browser the user is already signed into.
+2. **Local browser through BrowserSkill** — the task needs the CDP surface, or the aside CLI is not usable here.
+3. **Owned CloakBrowser profile** — no signed-in browser may be touched.
+
+```js
+import { connectRankedBrowser } from "omowright";
+const { engine, session, skipped } = await connectRankedBrowser();
+```
+
+A lower rank needs a declared reason from `FALLBACK_REASONS`, and
+`assertEngineChoice()` throws without one, so no call site can quietly start at
+CloakBrowser. The rank lives in `src/engine-order.js`; `connectPipe`,
+`connectCloakProfile` and `connectBrowserSkill` stay public for callers that
+already named their reason.
+
 ## Snapshot size
 
 Token counts per page (o200k_base, from the `gpt-tokenizer` devDependency),

@@ -1,4 +1,36 @@
 export { connect, BrowserConnection, TabRepository } from "./connection.js";
+export {
+  BROWSER_ENGINES,
+  EngineOrderViolation,
+  FALLBACK_REASONS,
+  NoBrowserEngine,
+  assertEngineChoice,
+  engineById,
+  engineOrder,
+  enginePlan,
+} from "./engine-order.js";
+export { BROWSER_ENGINE_ADAPTERS, connectRankedBrowser } from "./connect-ranked.js";
+export {
+  ASIDE_REPL_TIMEOUT_MS,
+  AsideRepl,
+  AsideReplError,
+  AsideUnavailable,
+  asideAvailable,
+  connectAside,
+  parseAsideRepl,
+  runAside,
+} from "./aside-repl.js";
+export {
+  ASIDE_INSTALL_COMMAND,
+  ASIDE_INSTALL_URL,
+  asideAccount,
+  asidePaths,
+  detectAsideInstall,
+  ensureAside,
+  installAsideCli,
+  resolveOnPath,
+  verifyAside,
+} from "./aside-install.js";
 export { OMOWRIGHT_PAGE_CDP_METHODS } from "./cdp-methods.js";
 export {
   CdpCommandTimeoutError,
