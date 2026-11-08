@@ -125,36 +125,38 @@ function missingInstallInstruction({ detected, platform }) {
 
 export async function ensureAside({
   install = "never",
-  platform = process.platform,
-  paths = asidePaths({ platform }),
+  platform,
+  paths,
   exists = existsSync,
   envPath,
   runProcess = runAside,
   timeoutMs = 30_000,
   installTimeoutMs = 300_000,
 } = {}) {
+  const resolvedPlatform = platform ?? paths?.platform ?? process.platform;
+  const resolvedPaths = paths ?? asidePaths({ platform: resolvedPlatform });
   const steps = [];
-  const detected = detectAsideInstall({ paths, exists, ...(envPath === undefined ? {} : { envPath }) });
+  const detected = detectAsideInstall({ paths: resolvedPaths, exists, ...(envPath === undefined ? {} : { envPath }) });
   const installed = detected.executable !== null;
   steps.push({ step: "detect", ok: installed, detail: detected.state, where: detected.where });
 
   let current = detected;
-  if (!current.executable && install === "run" && INSTALLER_PLATFORMS.has(platform)) {
-    const installer = await installAsideCli({ paths, execute: true, timeoutMs: installTimeoutMs, runProcess });
+  if (!current.executable && install === "run" && INSTALLER_PLATFORMS.has(resolvedPlatform)) {
+    const installer = await installAsideCli({ paths: resolvedPaths, execute: true, timeoutMs: installTimeoutMs, runProcess });
     steps.push({ step: "install", ok: installer.ok, detail: installer.ok ? "vendor installer finished" : installer.output });
-    if (installer.ok) current = detectAsideInstall({ paths, exists, ...(envPath === undefined ? {} : { envPath }) });
+    if (installer.ok) current = detectAsideInstall({ paths: resolvedPaths, exists, ...(envPath === undefined ? {} : { envPath }) });
   } else if (!current.executable) {
     const offered = install === "offer" ? ASIDE_INSTALL_COMMAND : "install was not permitted";
-    steps.push({ step: "install", ok: false, detail: INSTALLER_PLATFORMS.has(platform) ? offered : "no installer wired up for this platform" });
+    steps.push({ step: "install", ok: false, detail: INSTALLER_PLATFORMS.has(resolvedPlatform) ? offered : "no installer wired up for this platform" });
   }
 
   if (!current.executable) {
     return {
       usable: false,
       state: current.state,
-      platform,
+      platform: resolvedPlatform,
       steps,
-      instruction: missingInstallInstruction({ detected: current, platform }),
+      instruction: missingInstallInstruction({ detected: current, platform: resolvedPlatform }),
     };
   }
 
