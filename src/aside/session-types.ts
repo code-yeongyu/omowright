@@ -10,7 +10,12 @@ export interface AsideReadable {
 
 // The part of a spawned `aside repl` child the session uses.
 export interface AsideChildProcess {
-  readonly stdin: { write(data: string): unknown; end(data: string): unknown };
+  readonly stdin: {
+    write(data: string): unknown;
+    end(data: string): unknown;
+    /** Present on a real child stream; a write that races the child's exit raises EPIPE here. */
+    on?(event: "error", listener: (error: NodeJS.ErrnoException) => void): unknown;
+  };
   readonly stdout: AsideReadable;
   readonly stderr?: AsideReadable | null;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;

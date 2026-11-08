@@ -86,6 +86,12 @@ export class AsideSession {
     child.stdout.on("data", (chunk) => this.#onData(chunk));
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk) => this.#onData(chunk));
+    // A write that races the child's death raises EPIPE on stdin. The exit listener above already
+    // settles the waiting call with repl_closed, so the stream error is the same event one layer
+    // down; without a listener Node treats it as an uncaught exception and takes the host down.
+    child.stdin.on?.("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EPIPE") this.#settle(new AsideReplError("repl_closed", `aside repl stdin failed: ${error.message}`, { output: this.#lines.splice(0) }));
+    });
   }
 
   async ready(timeoutMs = DEFAULT_START_TIMEOUT_MS) {
