@@ -1,10 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
-import {
-  compactSnapshot,
-  connectCloakProfile,
-  resolveCloakProfile,
-} from "../src/index.js";
+import { compactSnapshot, connectCloakProfile, resolveCloakProfile } from "../src/index.ts";
+import type { BrowserConnection } from "../src/index.ts";
 import os from "node:os";
 import path from "node:path";
 
@@ -28,8 +25,52 @@ Environment:
   CLOAKBROWSER_BIN        CloakBrowser binary path override
 `;
 
-function parseArgs(argv) {
-  const options = { url: "about:blank", once: false, snapshot: false };
+interface CliOptions {
+  help?: undefined;
+  url: string;
+  once: boolean;
+  snapshot: boolean;
+  profile?: string;
+  seed?: string;
+  browser?: string;
+}
+
+type ParsedArgs = CliOptions | { help: true };
+
+const VALUE_OPTIONS = {
+  "--profile": "profile",
+  "--seed": "seed",
+  "--browser": "browser",
+  "--url": "url",
+} as const;
+
+function isValueOption(arg: string | undefined): arg is keyof typeof VALUE_OPTIONS {
+  return arg !== undefined && Object.hasOwn(VALUE_OPTIONS, arg);
+}
+
+interface CloakPage {
+  url(): Promise<string>;
+  title(): Promise<string>;
+  snapshot(options: { interactive: boolean }): Promise<unknown>;
+}
+
+/** `connectPipe` (src/pipe.js) attaches `newTab` to the connection it returns. */
+type CloakConnection = BrowserConnection & {
+  newTab(url?: string): Promise<CloakPage>;
+};
+
+interface CloakResult {
+  ok: true;
+  url: string;
+  title: string;
+  profileDir: string;
+  fingerprintSeed: number;
+  metadataPath: string;
+  snapshot?: string;
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const options: CliOptions = { url: "about:blank", once: false, snapshot: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help") return { help: true };
@@ -41,13 +82,13 @@ function parseArgs(argv) {
       options.snapshot = true;
       continue;
     }
-    if (["--profile", "--seed", "--browser", "--url"].includes(arg)) {
+    if (isValueOption(arg)) {
       const value = argv[++index];
       if (!value) throw new Error(`${arg} requires a value`);
-      options[arg.slice(2)] = value;
+      options[VALUE_OPTIONS[arg]] = value;
       continue;
     }
-    throw new Error(`unknown option: ${arg}`);
+    throw new Error(`unknown option: ${String(arg)}`);
   }
   return options;
 }
@@ -59,17 +100,13 @@ if (options.help) {
 }
 
 const profileDir = path.resolve(
-  options.profile ??
-    process.env.CLOAK_PROFILE_DIR ??
-    path.join(os.homedir(), ".local", "share", "omowright-cloak"),
+  options.profile ?? process.env.CLOAK_PROFILE_DIR ?? path.join(os.homedir(), ".local", "share", "omowright-cloak"),
 );
-const profile = await resolveCloakProfile({
-  profileDir,
-  fingerprintSeed: options.seed,
-});
-let browser;
+const profileRequest = { profileDir, fingerprintSeed: options.seed };
+const profile = await resolveCloakProfile(profileRequest);
+let browser: CloakConnection | undefined;
 let shuttingDown = false;
-async function shutdown(code = 0) {
+async function shutdown(code = 0): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   await browser?.close();
@@ -80,13 +117,13 @@ process.once("SIGINT", () => void shutdown(130));
 process.once("SIGTERM", () => void shutdown(143));
 
 try {
-  browser = await connectCloakProfile({
+  browser = (await connectCloakProfile({
     profileDir,
     fingerprintSeed: profile.fingerprintSeed,
     browserPath: options.browser,
-  });
+  })) as CloakConnection;
   const page = await browser.newTab(options.url);
-  const result = {
+  const result: CloakResult = {
     ok: true,
     url: await page.url(),
     title: await page.title(),
@@ -95,9 +132,7 @@ try {
     metadataPath: profile.metadataPath,
   };
   if (options.snapshot) {
-    result.snapshot = compactSnapshot(
-      await page.snapshot({ interactive: true }),
-    );
+    result.snapshot = compactSnapshot(await page.snapshot({ interactive: true }));
   }
   console.log(JSON.stringify(result, null, 2));
   if (!options.once) {
