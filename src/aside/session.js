@@ -21,12 +21,9 @@ const MARKER = /^\[(ok|error) \| \d+ms\]$/;
 // Aside colours its banner, prompt and markers even on a pipe.
 const ANSI = /\x1B\[[0-9;?]*[ -/]*[@-~]/g;
 const plain = (text) => text.replace(ANSI, "");
-// A call's own [ok] comes right after its result line; page logs can print a marker of their own.
-const finished = (lines, tag) => {
-  const last = lines.at(-1) ?? "";
-  if (!MARKER.test(last)) return false;
-  return !tag || last.startsWith("[error") || (lines.at(-2) ?? "").startsWith(tag);
-};
+// Every call ends with its own result line and then [ok] (errors are caught into the result
+// line); page logs can print markers and prompts of their own, so the result line decides.
+const finished = (lines, tag) => MARKER.test(lines.at(-1) ?? "") && (lines.at(-2) ?? "").startsWith(tag);
 
 export class AsideReplError extends Error {
   constructor(code, message, { output = [], setup } = {}) {
@@ -96,18 +93,22 @@ export class AsideSession {
     // One line per call: Aside evaluates each stdin line on its own, so the source travels
     // as a JSON string literal and a direct eval runs it in the REPL's scope (page, tabs, snapshot).
     const body = `(async () => {\n${code}\n})()`;
-    const line = `console.log(${JSON.stringify(tag)} + JSON.stringify((await eval(${JSON.stringify(body)})) ?? null))`;
+    const line = `try { const omowValue = await eval(${JSON.stringify(body)}); const omowJson = JSON.stringify(omowValue ?? null); console.log(${JSON.stringify(tag)} + (omowJson === undefined ? '{"unserializable":true}' : '{"value":' + omowJson + '}')); } catch (omowError) { console.log(${JSON.stringify(tag)} + JSON.stringify({ error: String(omowError?.stack ?? omowError) })); }`;
     const output = await this.#call(line, tag);
     const logs = [];
     let value;
     let found = false;
     for (const entry of output) {
       if (entry.startsWith(tag)) {
+        let result;
         try {
-          value = JSON.parse(entry.slice(tag.length));
+          result = JSON.parse(entry.slice(tag.length));
         } catch {
-          throw new AsideReplError("repl_unserializable", "the code returned a value with no JSON form (a function, symbol or undefined member); return plain data", { output });
+          result = { unserializable: true };
         }
+        if (result.error !== undefined) throw new AsideReplError("repl_error", result.error, { output: logs });
+        if (result.unserializable) throw new AsideReplError("repl_unserializable", "the code returned a value with no JSON form (a function, symbol or undefined member); return plain data", { output });
+        value = result.value;
         found = true;
       } else {
         logs.push(entry);

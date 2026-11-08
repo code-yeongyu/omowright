@@ -76,6 +76,10 @@ test("connectEgo drives a page through Ego's CDP bindings and leaves the browser
     assert.equal(browser.engine, "ego");
     assert.deepEqual(browser.taskSpace, { taskId: "checkout", id: 7, name: "checkout" });
     assert.equal(ego.selected, 7);
+    // A second connect in the same runtime must not switch the task space under the first one.
+    await assert.rejects(connectEgo({ ego, taskName: "second" }), (error) => error.code === "ego_busy");
+    assert.equal(ego.selected, 7);
+    assert.equal(ego.spaces.length, 1);
     const page = await browser.newTab();
     await page.setContent('<h1>Store</h1><button onclick="this.textContent=\'paid\'">Pay now</button>');
     await page.getByRole("button", { name: "Pay now" }).click();

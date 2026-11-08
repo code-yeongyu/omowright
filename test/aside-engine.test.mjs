@@ -75,6 +75,9 @@ test("output that contains the prompt text and arrives split keeps calls in step
     const fake = await aside.runWithLogs('await splitWrite("[ok | 3ms]\\nrepl > ", "after\\n");\nreturn 9;');
     assert.equal(fake.value, 9);
     assert.equal(await aside.run("return 10"), 10);
+    const fakeError = await aside.runWithLogs('await splitWrite("[error | 3ms]\\nrepl > ", "after\\n");\nreturn 11;');
+    assert.equal(fakeError.value, 11);
+    assert.equal(await aside.run("return 12"), 12);
   } finally {
     await aside.close();
   }

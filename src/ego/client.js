@@ -214,6 +214,10 @@ async function selectTaskSpace(ego, { taskSpace, taskName, profileId }) {
 
 export async function connectEgo({ ego = globalThis.ego, taskSpace, taskName, profileId, storageRoot, commandTimeoutMs, logId, dialogPolicy } = {}) {
   const client = new EgoCdpClient({ ego, commandTimeoutMs, logId, dialogPolicy });
+  // Selecting a task space switches it for every client in this runtime, so refuse before that.
+  if (ego.onCDPMessage || ego.onSendCDPMessageError) {
+    throw new EgoCdpError("ego_busy", "another client already holds Ego's CDP callbacks in this runtime; close it first");
+  }
   const space = await selectTaskSpace(ego, { taskSpace, taskName, profileId });
   await client.ensureConnected();
   const connection = new BrowserConnection(client, { storageRoot });

@@ -17,38 +17,35 @@ this order and returns the first that connects:
 | Order | Engine | Handle | Read |
 |---|---|---|---|
 | 1 | **Aside**: the user's Aside browser, signed in | `AsideSession` (`run`, `open`, `snapshot`) | `references/aside.md` |
-| 2 | **Ego Lite**: an agent task space in the user's Ego browser (only inside `ego-browser nodejs`) | `BrowserConnection` (full Page API) | this file |
+| 2 | **Ego Lite**: an agent task space in the user's Ego browser (only inside `ego-browser nodejs`) | `BrowserConnection` (full Page API) | `references/ego.md` |
 | 3 | **BrowserSkill**: the user's own Chrome/Edge/Brave via extension | `BskSession` | `references/browserskill.md` |
 | 4 | **CloakBrowser**: owned stealth browser, no user profile | `BrowserConnection` | `references/stealth.md` |
 
 ```js
 const { connectBrowser } = await import("omowright");
-const { engine, handle, attempts } = await connectBrowser();
+// the task needs the user's sessions: CloakBrowser may not stand in
+const { engine, handle, attempts } = await connectBrowser({ allow: ["aside", "ego", "bsk"] });
 ```
 
 `attempts` lists every engine tried, with `ok` or the reason it did not
 connect (often one step only the user can take, such as `aside login`). When a
 higher engine failed for a reason the user can fix, tell them that step along
-with the engine you used. Pass `allow` to forbid engines (leave out `"cloak"`
-when the task needs the user's sessions; leave out the user's browsers for
-scraping or WAF targets) and `prefer` to try one first; per-engine options go
+with the engine you used. **SET `allow` FOR EVERY TASK**: without `"cloak"`
+when it needs the user's sessions (the default includes it), with only
+`["cloak"]` for scraping or WAF targets. `prefer` tries one engine first; per-engine options go
 under its name (`{ cloak: { profileDir } }`). The handle type follows
 `engine`, so branch on it.
 
 ## Core loop (Page API: Ego Lite and CloakBrowser)
 
 ```js
-const { connectPipe, compactSnapshot } = await import("omowright");
-const browser = await connectPipe({
-  browserPath: "<CloakBrowser binary>",
-  browserArgs: ["--no-first-run", `--user-data-dir=${profileDir}`],
-  storageRoot: profileDir,
-});
+const { connectBrowser, compactSnapshot } = await import("omowright");
+const { engine, handle: browser } = await connectBrowser({ allow: ["ego", "cloak"] });
 const page = await browser.newTab("https://example.com");
 const tree = compactSnapshot(await page.snapshot());  // ALWAYS compact before reading
 await page.locator("e1").click();                     // refs come from the snapshot
 const changes = compactSnapshot(await page.snapshot({ diff: true }));
-await browser.close();                                // then rm -rf the profile dir
+await browser.close();                                // Ego: the user's browser stays open
 ```
 
 Snapshot once, act on refs, then re-snapshot with `{ diff: true }` after each batch
