@@ -117,7 +117,9 @@ jobs:
             echo "| Runner | ${{ runner.os }} |"
             echo "| Browser | ${{ steps.browser.outputs.bin }} |"
             echo "| bun test pass / fail | $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ pass$') / $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ fail$') |"
-            echo "| node test pass / fail | $(count "$RUNNER_TEMP/node-test.log" '^# pass ') / $(count "$RUNNER_TEMP/node-test.log" '^# fail ') |"
+            # Node 22 prints TAP (`# pass`), Node 24 prints the spec reporter (`ℹ pass`); the row
+            # must read it either way, or a red run looks like a row with no numbers.
+            echo "| node test pass / fail | $(count "$RUNNER_TEMP/node-test.log" '^(#|ℹ) pass ') / $(count "$RUNNER_TEMP/node-test.log" '^(#|ℹ) fail ') |"
             echo "| Ref | ${{ github.ref_name }} |"
             echo "| Commit | ${{ github.sha }} |"
           } >> "$GITHUB_STEP_SUMMARY"
