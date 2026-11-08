@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import {
   ASIDE_INSTALL_COMMAND,
   asidePaths,
@@ -9,7 +10,11 @@ import {
   verifyAside,
 } from "../src/aside-install.js";
 
-const PATHS = asidePaths({ home: "/tmp/omowright-home", appPath: "/Applications/Aside.app", platform: "darwin" });
+const PATHS = asidePaths({
+  home: path.join("/tmp", "omowright-home"),
+  appPath: path.join("/Applications", "Aside.app"),
+  platform: "darwin",
+});
 
 const OK_OUTPUT = 'Example Domain\n\u001B[2m[ok | 2317ms]\u001B[0m';
 const SIGNED_OUT_OUTPUT = 'You are not signed in.\n\u001B[31m[error | 12ms]\u001B[0m';
@@ -30,13 +35,13 @@ function fakeRun({ repl = OK_OUTPUT, account = ACCOUNT_SIGNED_IN, installCode = 
 const existsFrom = (present) => (candidate) => present.has(candidate);
 
 test("the install layout follows the platform, while detection itself does not", () => {
-  const darwin = asidePaths({ home: "/h", platform: "darwin" });
-  assert.equal(darwin.cliApp, "/h/.aside/cli/Aside CLI.app");
+  const darwin = asidePaths({ home: path.join("/h"), platform: "darwin" });
+  assert.equal(darwin.cliApp, path.join("/h", ".aside", "cli", "Aside CLI.app"));
   assert.equal(darwin.appPath, "/Applications/Aside.app");
 
   const linux = asidePaths({ home: "/h", platform: "linux" });
   assert.equal(linux.cliApp, null);
-  assert.equal(linux.cliExecutable, "/h/.aside/cli/aside");
+  assert.equal(linux.cliExecutable, path.join("/h", ".aside", "cli", "aside"));
 
   const windows = asidePaths({ home: "/h", platform: "win32" });
   assert.equal(windows.commandPath, null);
@@ -61,13 +66,14 @@ test("detection names the states of the installation, not of the platform", () =
 });
 
 test("an aside on PATH is an installation wherever the layout is unknown", () => {
+  const asideOnPath = path.join("/opt", "bin", "aside");
   const found = detectAsideInstall({
     paths: asidePaths({ home: "/h", platform: "win32" }),
-    envPath: "/opt/bin",
-    exists: existsFrom(new Set(["/opt/bin/aside"])),
+    envPath: path.join("/opt", "bin"),
+    exists: existsFrom(new Set([asideOnPath])),
   });
   assert.equal(found.state, "cli-only");
-  assert.equal(found.executable, "/opt/bin/aside");
+  assert.equal(found.executable, asideOnPath);
   assert.equal(found.where, "path");
 });
 

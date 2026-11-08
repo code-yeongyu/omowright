@@ -21,6 +21,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const CONNECTORS = new Set(["connectBrowserSkill", "connectCloakProfile"]);
 const WALKER = "src/connect-ranked.js";
+const ASIDE_LINK = path.join(".local", "bin", "aside");
 
 test("the ranked order is aside, then the local browser through bsk, then CloakBrowser", () => {
   assert.deepEqual(engineOrder(), ["aside", "bsk", "cloakbrowser"]);
@@ -137,7 +138,7 @@ test("the rank-0 probe reports the installation state before it reports the rank
 
   const signedOut = await BROWSER_ENGINE_ADAPTERS.aside.probe({
     envPath: "",
-    exists: (candidate) => candidate.endsWith("/.local/bin/aside"),
+    exists: (candidate) => candidate.endsWith(ASIDE_LINK),
     runProcess: async () => ({ code: 0, signal: null, timedOut: false, stdout: "not signed in\n[error | 9ms]", stderr: "" }),
   });
   assert.equal(signedOut.available, false);
@@ -145,11 +146,11 @@ test("the rank-0 probe reports the installation state before it reports the rank
 
   const usable = await BROWSER_ENGINE_ADAPTERS.aside.probe({
     envPath: "",
-    exists: (candidate) => candidate.endsWith("/.local/bin/aside"),
+    exists: (candidate) => candidate.endsWith(ASIDE_LINK),
     runProcess: async () => ({ code: 0, signal: null, timedOut: false, stdout: "Example Domain\n[ok | 2317ms]", stderr: "" }),
   });
   assert.equal(usable.available, true);
-  assert.ok(usable.bin.endsWith("/.local/bin/aside"));
+  assert.ok(usable.bin.endsWith(ASIDE_LINK));
   assert.equal(usable.ms, 2317);
 });
 
