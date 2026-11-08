@@ -49,7 +49,7 @@ export function validateSnapshotOptions(options) {
   }
 }
 
-function findLines(snapshot, find, context = 2) {
+export function findSnapshotLines(snapshot, find, context = 2) {
   // Matching is per line: g and y would carry lastIndex between lines or pin a match to
   // column 0, so drop them on a private copy and leave the caller's RegExp untouched.
   const pattern = find instanceof RegExp ? new RegExp(find.source, find.flags.replace(/[gy]/g, "")) : null;
@@ -80,7 +80,7 @@ function findLines(snapshot, find, context = 2) {
 export function snapshotResult(frameManager, options, snapshot) {
   const { diff, find, context, ...scope } = options;
   // A search is a partial read: leave the diff baseline at the last full or diff read.
-  if (find !== undefined) return findLines(snapshot, find, context);
+  if (find !== undefined) return findSnapshotLines(snapshot, find, context);
   const document = frameManager.getFrame(frameManager.mainFrameId);
   const contexts = JSON.stringify(frameManager.collectDescendantFrames(frameManager.mainFrameId)
     .map(({ frameId }) => [frameId, frameManager.getFrame(frameId)?.isolatedContextId]));

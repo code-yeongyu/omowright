@@ -28,7 +28,7 @@ export function cliInstallCommand({ platform = process.platform, installDir, ver
   return { command: "sh", args: ["-c", `curl -fsSL ${INSTALL_SH} | sh`], env };
 }
 
-function runDefault(command, args, env) {
+export function runDefault(command, args, env) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "", stderr = "";
@@ -39,7 +39,7 @@ function runDefault(command, args, env) {
   });
 }
 
-function snapshotRcFiles(home) {
+export function snapshotRcFiles(home) {
   const snapshot = new Map();
   for (const name of RC_FILES) {
     const file = path.join(home, name);
@@ -48,7 +48,7 @@ function snapshotRcFiles(home) {
   return snapshot;
 }
 
-function restoreRcFiles(snapshot) {
+export function restoreRcFiles(snapshot) {
   const restored = [];
   for (const [file, before] of snapshot) {
     const after = existsSync(file) ? readFileSync(file) : null;
