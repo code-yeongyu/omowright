@@ -1,16 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import {
-  chmodSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import * as omowright from "../src/index.js";
+import * as omowright from "../src/index.ts";
 
 test("resolveCloakProfile creates and reuses a fixed fingerprint seed", async () => {
   const profileDir = mkdtempSync(path.join(tmpdir(), "omowright-cloak-profile-"));
@@ -70,11 +63,12 @@ test("buildCloakBrowserArgs rejects every identity override form", () => {
     ["--user-data-dir", "/tmp/other-profile"],
   ]) {
     assert.throws(
-      () => omowright.buildCloakBrowserArgs({
-        profileDir: "/tmp/profile",
-        fingerprintSeed: 31415,
-        extraArgs,
-      }),
+      () =>
+        omowright.buildCloakBrowserArgs({
+          profileDir: "/tmp/profile",
+          fingerprintSeed: 31415,
+          extraArgs,
+        }),
       /override fixed profile identity/i,
     );
   }

@@ -1,43 +1,80 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRoutes } from "../src/routes.js";
+import { createRoutes } from "../src/routes.ts";
+import type { CdpEventMeta, CdpEventPayload, CdpResult, CdpSendOptions } from "../src/cdp-protocol.ts";
+
+type Listener = { handle(...args: unknown[]): unknown }["handle"];
+
+interface SentParams {
+  requestId?: string;
+  responseCode?: number;
+  body?: string;
+  errorReason?: string;
+  responseHeaders?: { name: string; value: string }[];
+  patterns?: unknown;
+}
+
+interface SentCall {
+  method: string;
+  params: SentParams | undefined;
+  sessionId: string | undefined;
+  options: CdpSendOptions | undefined;
+}
+
+interface PausedExtra {
+  requestId?: string;
+  resourceType?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  postData?: string;
+}
 
 class FakeEmitter {
-  #listeners = new Map();
-  on(name, listener) {
+  #listeners = new Map<string, Set<Listener>>();
+  on(name: string, listener: Listener) {
     const set = this.#listeners.get(name) ?? new Set();
     set.add(listener);
     this.#listeners.set(name, set);
     return () => set.delete(listener);
   }
-  emit(name, ...args) {
-    for (const listener of [...this.#listeners.get(name) ?? []]) listener(...args);
+  emit(name: string, ...args: unknown[]) {
+    for (const listener of Array.from(this.#listeners.get(name) ?? [])) listener(...args);
   }
 }
 
 class FakeCdp {
+  calls: SentCall[];
+  events: FakeEmitter;
   constructor() {
     this.calls = [];
     this.events = new FakeEmitter();
   }
-  async send(method, params, sessionId, options) {
+  send<M extends string>(
+    method: M,
+    params?: object,
+    sessionId?: string,
+    options?: CdpSendOptions,
+  ): Promise<CdpResult<M>>;
+  async send(method: string, params?: SentParams, sessionId?: string, options?: CdpSendOptions): Promise<unknown> {
     this.calls.push({ method, params, sessionId, options });
     return {};
   }
-  on(method, listener) {
+  on<E extends string>(method: E, listener: (payload: CdpEventPayload<E>, meta: CdpEventMeta) => unknown) {
     return this.events.on(method, listener);
   }
-  emit(method, params, meta = {}) {
+  emit(method: string, params: unknown, meta: CdpEventMeta = {}) {
     this.events.emit(method, params, meta);
   }
 }
+
+type FakePage = ReturnType<typeof fakePage>;
 
 function fakePage(sessionId = "sess-1") {
   const cdp = new FakeCdp();
   return { cdp, resolveSessionId: async () => sessionId };
 }
 
-function paused(url, extra = {}) {
+function paused(url: string, extra: PausedExtra = {}) {
   return {
     requestId: extra.requestId ?? "req-1",
     resourceType: extra.resourceType ?? "XHR",
@@ -50,9 +87,14 @@ function paused(url, extra = {}) {
   };
 }
 
-function callsOf(page, method) {
-  return page.cdp.calls.filter(call => call.method === method);
+function callsOf(page: FakePage, method: string) {
+  return page.cdp.calls.filter((call) => call.method === method);
 }
+
+const silent = () => {};
+const boom = () => {
+  throw new Error("handler boom");
+};
 
 async function flush() {
   await Promise.resolve();
@@ -71,14 +113,14 @@ test("route() sends Fetch.enable once; dispose sends Fetch.disable", async () =>
 
   const enables = callsOf(page, "Fetch.enable");
   assert.equal(enables.length, 1);
-  assert.deepEqual(enables[0].params, { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
-  assert.equal(enables[0].sessionId, "sess-1");
+  assert.deepEqual(enables[0]?.params, { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+  assert.equal(enables[0]?.sessionId, "sess-1");
   assert.equal(routes.enabled, true);
 
   await routes.dispose();
   const disables = callsOf(page, "Fetch.disable");
   assert.equal(disables.length, 1);
-  assert.equal(disables[0].sessionId, "sess-1");
+  assert.equal(disables[0]?.sessionId, "sess-1");
   assert.equal(routes.enabled, false);
 
   await routes.dispose();
@@ -88,28 +130,32 @@ test("route() sends Fetch.enable once; dispose sends Fetch.disable", async () =>
 test("matching glob fulfill sends Fetch.fulfillRequest with base64 body and content-type", async () => {
   const page = fakePage();
   const routes = createRoutes(page);
-  const seen = [];
-  await routes.route("*.png", route => {
+  const seen: { url: string; method: string; resourceType: string }[] = [];
+  await routes.route("*.png", (route) => {
     seen.push(route.request);
     return route.fulfill({ contentType: "text/plain", body: "hello" });
   });
 
-  page.cdp.emit("Fetch.requestPaused", paused("https://cdn.example/photo.png", { resourceType: "Image" }), { sessionId: "sess-1" });
+  page.cdp.emit("Fetch.requestPaused", paused("https://cdn.example/photo.png", { resourceType: "Image" }), {
+    sessionId: "sess-1",
+  });
   await flush();
 
   assert.equal(seen.length, 1);
-  assert.equal(seen[0].url, "https://cdn.example/photo.png");
-  assert.equal(seen[0].method, "GET");
-  assert.equal(seen[0].resourceType, "Image");
+  assert.equal(seen[0]?.url, "https://cdn.example/photo.png");
+  assert.equal(seen[0]?.method, "GET");
+  assert.equal(seen[0]?.resourceType, "Image");
 
   const fulfill = callsOf(page, "Fetch.fulfillRequest");
   assert.equal(fulfill.length, 1);
-  assert.equal(fulfill[0].sessionId, "sess-1");
-  assert.equal(fulfill[0].params.requestId, "req-1");
-  assert.equal(fulfill[0].params.responseCode, 200);
-  assert.equal(fulfill[0].params.body, Buffer.from("hello").toString("base64"));
+  assert.equal(fulfill[0]?.sessionId, "sess-1");
+  assert.equal(fulfill[0]?.params?.requestId, "req-1");
+  assert.equal(fulfill[0]?.params?.responseCode, 200);
+  assert.equal(fulfill[0]?.params?.body, Buffer.from("hello").toString("base64"));
   assert.ok(
-    fulfill[0].params.responseHeaders.some(header => header.name.toLowerCase() === "content-type" && header.value === "text/plain"),
+    fulfill[0]?.params?.responseHeaders?.some(
+      (header) => header.name.toLowerCase() === "content-type" && header.value === "text/plain",
+    ),
     "content-type header is present",
   );
 
@@ -120,29 +166,35 @@ test("abort sends Fetch.failRequest; unmatched continue; other sessionId ignored
   const page = fakePage();
   const routes = createRoutes(page);
   let handled = 0;
-  await routes.route("*/blocked", route => {
+  await routes.route("*/blocked", (route) => {
     handled += 1;
     return route.abort();
   });
 
-  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/blocked", { requestId: "abort-1" }), { sessionId: "sess-1" });
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/blocked", { requestId: "abort-1" }), {
+    sessionId: "sess-1",
+  });
   await flush();
   const fail = callsOf(page, "Fetch.failRequest");
   assert.equal(handled, 1);
   assert.equal(fail.length, 1);
-  assert.equal(fail[0].params.requestId, "abort-1");
-  assert.equal(fail[0].params.errorReason, "Failed");
-  assert.equal(fail[0].sessionId, "sess-1");
+  assert.equal(fail[0]?.params?.requestId, "abort-1");
+  assert.equal(fail[0]?.params?.errorReason, "Failed");
+  assert.equal(fail[0]?.sessionId, "sess-1");
 
-  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/other", { requestId: "cont-1" }), { sessionId: "sess-1" });
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/other", { requestId: "cont-1" }), {
+    sessionId: "sess-1",
+  });
   await flush();
   const cont = callsOf(page, "Fetch.continueRequest");
   assert.equal(cont.length, 1);
-  assert.equal(cont[0].params.requestId, "cont-1");
-  assert.equal(cont[0].sessionId, "sess-1");
+  assert.equal(cont[0]?.params?.requestId, "cont-1");
+  assert.equal(cont[0]?.sessionId, "sess-1");
 
   const before = page.cdp.calls.length;
-  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/blocked", { requestId: "other-sess" }), { sessionId: "sess-other" });
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/blocked", { requestId: "other-sess" }), {
+    sessionId: "sess-other",
+  });
   await flush();
   assert.equal(page.cdp.calls.length, before);
   assert.equal(handled, 1);
@@ -153,38 +205,51 @@ test("abort sends Fetch.failRequest; unmatched continue; other sessionId ignored
 test("RegExp, substring, and predicate matches; first handler wins; requestId acted once", async () => {
   const page = fakePage();
   const routes = createRoutes(page);
-  const hits = [];
-  await routes.route(/api\/v1/, route => {
+  const hits: string[] = [];
+  await routes.route(/api\/v1/, (route) => {
     hits.push("regex");
     return route.fulfill({ body: "regex" });
   });
-  await routes.route("example.test/item", route => {
+  await routes.route("example.test/item", (route) => {
     hits.push("substr");
     return route.fulfill({ body: "substr" });
   });
-  await routes.route(({ method, resourceType }) => method === "POST" && resourceType === "Fetch", route => {
-    hits.push("pred");
-    return route.fulfill({ body: "pred" });
-  });
-  await routes.route("*", route => {
+  await routes.route(
+    ({ method, resourceType }) => method === "POST" && resourceType === "Fetch",
+    (route) => {
+      hits.push("pred");
+      return route.fulfill({ body: "pred" });
+    },
+  );
+  await routes.route("*", (route) => {
     hits.push("star");
     return route.continue();
   });
 
-  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/api/v1/x", { requestId: "r-regex" }), { sessionId: "sess-1" });
-  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/item/42", { requestId: "r-sub" }), { sessionId: "sess-1" });
-  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/submit", { requestId: "r-pred", method: "POST", resourceType: "Fetch" }), { sessionId: "sess-1" });
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/api/v1/x", { requestId: "r-regex" }), {
+    sessionId: "sess-1",
+  });
+  page.cdp.emit("Fetch.requestPaused", paused("https://example.test/item/42", { requestId: "r-sub" }), {
+    sessionId: "sess-1",
+  });
+  page.cdp.emit(
+    "Fetch.requestPaused",
+    paused("https://example.test/submit", { requestId: "r-pred", method: "POST", resourceType: "Fetch" }),
+    { sessionId: "sess-1" },
+  );
   await flush();
 
   assert.deepEqual(hits, ["regex", "substr", "pred"]);
-  const bodies = callsOf(page, "Fetch.fulfillRequest").map(call => Buffer.from(call.params.body, "base64").toString());
+  const bodies = callsOf(page, "Fetch.fulfillRequest").map((call) =>
+    Buffer.from(call.params?.body ?? "", "base64").toString(),
+  );
   assert.deepEqual(bodies, ["regex", "substr", "pred"]);
   assert.equal(callsOf(page, "Fetch.continueRequest").length, 0);
 
   const fulfillCount = callsOf(page, "Fetch.fulfillRequest").length;
   const page2 = fakePage();
   const routes2 = createRoutes(page2);
-  await routes2.route("*", route => {
+  await routes2.route("*", (route) => {
     route.fulfill({ body: "a" });
     route.abort();
     route.continue();
@@ -203,26 +268,32 @@ test("RegExp, substring, and predicate matches; first handler wins; requestId ac
 test("handler that throws or settles without an action continues once per request and warns once per handler", async () => {
   const page = fakePage();
   const routes = createRoutes(page);
-  const warnings = [];
+  const warnings: unknown[][] = [];
   const original = console.warn;
-  console.warn = (...args) => warnings.push(args);
+  console.warn = (...args: unknown[]) => warnings.push(args);
   try {
-    const silent = () => {};
-    const boom = () => { throw new Error("handler boom"); };
     await routes.route("*/silent", silent);
     await routes.route("*/boom", boom);
 
-    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/silent", { requestId: "s1" }), { sessionId: "sess-1" });
-    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/silent", { requestId: "s2" }), { sessionId: "sess-1" });
-    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/boom", { requestId: "b1" }), { sessionId: "sess-1" });
-    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/boom", { requestId: "b2" }), { sessionId: "sess-1" });
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/silent", { requestId: "s1" }), {
+      sessionId: "sess-1",
+    });
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/silent", { requestId: "s2" }), {
+      sessionId: "sess-1",
+    });
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/boom", { requestId: "b1" }), {
+      sessionId: "sess-1",
+    });
+    page.cdp.emit("Fetch.requestPaused", paused("https://example.test/boom", { requestId: "b2" }), {
+      sessionId: "sess-1",
+    });
     await flush();
   } finally {
     console.warn = original;
   }
 
-  const cont = callsOf(page, "Fetch.continueRequest").map(call => call.params.requestId);
-  assert.deepEqual(cont.sort(), ["b1", "b2", "s1", "s2"]);
+  const cont = callsOf(page, "Fetch.continueRequest").map((call) => call.params?.requestId);
+  assert.deepEqual(cont.toSorted(), ["b1", "b2", "s1", "s2"]);
   assert.equal(warnings.length, 2);
 
   await routes.dispose();
@@ -231,21 +302,24 @@ test("handler that throws or settles without an action continues once per reques
 test("unroute removes a match and disables Fetch when no routes remain", async () => {
   const page = fakePage();
   const routes = createRoutes(page);
-  await routes.route("*.png", route => route.abort());
-  await routes.route("/keep", route => route.continue());
+  await routes.route("*.png", (route) => route.abort());
+  await routes.route("/keep", (route) => route.continue());
   assert.equal(routes.enabled, true);
 
   await routes.unroute("*.png");
   page.cdp.emit("Fetch.requestPaused", paused("https://x.test/a.png", { requestId: "png" }), { sessionId: "sess-1" });
   await flush();
   assert.equal(callsOf(page, "Fetch.failRequest").length, 0);
-  assert.equal(callsOf(page, "Fetch.continueRequest").some(call => call.params.requestId === "png"), true);
+  assert.equal(
+    callsOf(page, "Fetch.continueRequest").some((call) => call.params?.requestId === "png"),
+    true,
+  );
 
   await routes.unroute("/keep");
   assert.equal(routes.enabled, false);
   assert.equal(callsOf(page, "Fetch.disable").length, 1);
 
-  await routes.route("*", route => route.abort());
+  await routes.route("*", (route) => route.abort());
   assert.equal(routes.enabled, true);
   await routes.unroute();
   assert.equal(routes.enabled, false);

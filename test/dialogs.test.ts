@@ -3,16 +3,21 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, globSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PipeCdpClient, connectPipe } from "../src/pipe.js";
-import { BrowserConnection } from "../src/connection.js";
-import { resolveDialogAction } from "../src/dialog-policy.js";
-import { createAgentTabs } from "../src/agent-tabs.js";
+import { PipeCdpClient, connectPipe } from "../src/pipe.ts";
+import { BrowserConnection } from "../src/connection.ts";
+import { resolveDialogAction } from "../src/dialog-policy.ts";
+import type { DialogInfo } from "../src/dialog-policy.ts";
+import { createAgentTabs } from "../src/agent-tabs.ts";
+import type { CdpResult, CdpSendOptions } from "../src/cdp-protocol.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      process.env.HOME ?? "",
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
-  if (candidates.length > 0) return candidates.sort().at(-1);
+  if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   if (existsSync(chrome)) return chrome;
   return null;
@@ -20,17 +25,39 @@ function findHeadlessShell() {
 
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
 
-function captureClient(options = {}) {
-  const client = new PipeCdpClient({ browserPath: process.execPath, ...options });
-  const sent = [];
-  client.send = async (method, params, sessionId) => {
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  assert.ok(binary, "live test ran without a Chromium binary");
+  return binary;
+}
+
+type SentCommand = { method: string; params?: unknown; sessionId?: unknown };
+type DialogMessage = ReturnType<typeof dialogOpening>;
+
+// A recording fake transport: every command resolves with an empty CDP result.
+// The overload is the generic CdpSend contract; the implementation is what the fake really returns.
+function recordingSend(sent: SentCommand[]) {
+  function send<M extends string>(
+    method: M,
+    params?: object,
+    sessionId?: string,
+    options?: CdpSendOptions,
+  ): Promise<CdpResult<M>>;
+  async function send(method: string, params?: object, sessionId?: string): Promise<unknown> {
     sent.push({ method, params, sessionId });
     return {};
-  };
+  }
+  return send;
+}
+
+function captureClient(options: Partial<ConstructorParameters<typeof PipeCdpClient>[0]> = {}) {
+  const client = new PipeCdpClient({ browserPath: process.execPath, ...options });
+  const sent: SentCommand[] = [];
+  client.send = recordingSend(sent);
   return { client, sent };
 }
 
-function dialogOpening(params = {}, sessionId = "sess-1") {
+function dialogOpening(params: Record<string, unknown> = {}, sessionId = "sess-1") {
   return {
     method: "Page.javascriptDialogOpening",
     sessionId,
@@ -44,13 +71,18 @@ function dialogOpening(params = {}, sessionId = "sess-1") {
   };
 }
 
-async function handledParams(client, sent, msg = dialogOpening()) {
+function declineEveryDialog() {
+  return false;
+}
+
+async function handledParams(client: PipeCdpClient, sent: SentCommand[], msg: DialogMessage = dialogOpening()) {
   sent.length = 0;
-  await client._handleTransportMessage(msg);
+  // The transport entry point is the unit under test; it has no public alias.
+  await client["_handleTransportMessage"](msg);
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].method, "Page.handleJavaScriptDialog");
-  assert.equal(sent[0].sessionId, msg.sessionId);
-  return sent[0].params;
+  assert.equal(sent[0]?.method, "Page.handleJavaScriptDialog");
+  assert.equal(sent[0]?.sessionId, msg.sessionId);
+  return sent[0]?.params;
 }
 
 test("resolveDialogAction maps policies and falls back when the function throws or rejects", async () => {
@@ -60,18 +92,22 @@ test("resolveDialogAction maps policies and falls back when the function throws 
     promptText: "hello",
   });
 
-  const seen = [];
-  const policy = (dialog) => {
+  const seen: unknown[] = [];
+  const policy = (dialog: DialogInfo) => {
     seen.push(dialog);
     if (dialog.type === "confirm") return false;
     return { accept: true, promptText: "typed" };
   };
+  assert.deepEqual(await resolveDialogAction(policy, { type: "confirm", message: "x", url: "https://a.test/" }), {
+    accept: false,
+  });
   assert.deepEqual(
-    await resolveDialogAction(policy, { type: "confirm", message: "x", url: "https://a.test/" }),
-    { accept: false },
-  );
-  assert.deepEqual(
-    await resolveDialogAction(policy, { type: "prompt", message: "q", defaultPrompt: "dflt", url: "https://example.test/" }),
+    await resolveDialogAction(policy, {
+      type: "prompt",
+      message: "q",
+      defaultPrompt: "dflt",
+      url: "https://example.test/",
+    }),
     { accept: true, promptText: "typed" },
   );
   assert.deepEqual(seen, [
@@ -79,8 +115,18 @@ test("resolveDialogAction maps policies and falls back when the function throws 
     { type: "prompt", message: "q", defaultPrompt: "dflt", url: "https://example.test/" },
   ]);
 
-  assert.deepEqual(await resolveDialogAction(() => { throw new Error("policy boom"); }), { accept: true });
-  assert.deepEqual(await resolveDialogAction(async () => { throw new Error("policy reject"); }), { accept: true });
+  assert.deepEqual(
+    await resolveDialogAction(() => {
+      throw new Error("policy boom");
+    }),
+    { accept: true },
+  );
+  assert.deepEqual(
+    await resolveDialogAction(async () => {
+      throw new Error("policy reject");
+    }),
+    { accept: true },
+  );
 });
 
 test("PipeCdpClient default dialogPolicy auto-accepts", async () => {
@@ -101,7 +147,7 @@ test("object dialogPolicy can dismiss and supply promptText", async () => {
     promptText: "hello",
   });
 
-  const decline = () => false;
+  const decline = declineEveryDialog;
   client.setDialogPolicy(decline);
   assert.equal(client.dialogPolicy, decline);
   assert.deepEqual(await handledParams(client, sent), { accept: false });
@@ -113,47 +159,51 @@ test("BrowserConnection.setDialogPolicy delegates or rejects by transport", () =
   connection.setDialogPolicy({ accept: false, promptText: "nope" });
   assert.deepEqual(client.dialogPolicy, { accept: false, promptText: "nope" });
 
+  // A transport without the optional setDialogPolicy on purpose: its absence is the boundary under test.
   const unsupported = new BrowserConnection({
     ensureConnected: async () => {},
-    send: async () => ({}),
+    send: recordingSend([]),
     on: () => () => {},
     close: async () => {},
     discoverTargets: async () => [],
   });
-  assert.throws(
-    () => unsupported.setDialogPolicy({ accept: false }),
-    { message: "dialog policy is not supported by this transport" },
-  );
-});
-
-test("live dialogPolicy dismisses confirm, fills prompt, and still emits dialog", {
-  skip: !SHELL && "no chromium binary found",
-  timeout: 60_000,
-}, async () => {
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-dialogs-"));
-  const connection = await connectPipe({
-    browserPath: SHELL,
-    browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-    storageRoot: ud,
-    dialogPolicy: { accept: false },
+  assert.throws(() => unsupported.setDialogPolicy({ accept: false }), {
+    message: "dialog policy is not supported by this transport",
   });
-  try {
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-
-    const confirmDialog = page.waitForEvent("dialog", { timeout: 5000 });
-    const confirmed = page.evaluate(() => confirm("x"));
-    assert.equal((await confirmDialog).type, "confirm");
-    assert.equal((await confirmDialog).message, "x");
-    assert.equal(await confirmed, false);
-
-    connection.setDialogPolicy({ accept: true, promptText: "hello" });
-
-    const promptDialog = page.waitForEvent("dialog", { timeout: 5000 });
-    const prompted = page.evaluate(() => prompt("q"));
-    assert.equal((await promptDialog).type, "prompt");
-    assert.equal(await prompted, "hello");
-  } finally {
-    await connection.close();
-    rmSync(ud, { recursive: true, force: true });
-  }
 });
+
+test(
+  "live dialogPolicy dismisses confirm, fills prompt, and still emits dialog",
+  {
+    skip: !SHELL && "no chromium binary found",
+    timeout: 60_000,
+  },
+  async () => {
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-dialogs-"));
+    const connection = await connectPipe({
+      browserPath: requireBinary(SHELL),
+      browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+      storageRoot: ud,
+      dialogPolicy: { accept: false },
+    });
+    try {
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+
+      const confirmDialog = page.waitForEvent("dialog", { timeout: 5000 });
+      const confirmed = page.evaluate(() => confirm("x"));
+      assert.equal((await confirmDialog).type, "confirm");
+      assert.equal((await confirmDialog).message, "x");
+      assert.equal(await confirmed, false);
+
+      connection.setDialogPolicy({ accept: true, promptText: "hello" });
+
+      const promptDialog = page.waitForEvent("dialog", { timeout: 5000 });
+      const prompted = page.evaluate(() => prompt("q"));
+      assert.equal((await promptDialog).type, "prompt");
+      assert.equal(await prompted, "hello");
+    } finally {
+      await connection.close();
+      rmSync(ud, { recursive: true, force: true });
+    }
+  },
+);

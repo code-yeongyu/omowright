@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactSnapshot, snapshotTokens, toolSchemas } from "../src/llm.js";
+import { compactSnapshot, snapshotTokens, toolSchemas } from "../src/llm.ts";
 
 const GITHUB_LIKE = JSON.stringify({
   tree: '- heading "Example Domain" [level=1]\n- text: "sample"\n- paragraph:\n  - link "Learn more" [ref=e1]',
@@ -9,12 +9,15 @@ const GITHUB_LIKE = JSON.stringify({
 
 test("compactSnapshot returns the raw tree from a JSON string", () => {
   const tree = compactSnapshot(GITHUB_LIKE);
-  assert.equal(tree, '- heading "Example Domain" [level=1]\n- text: "sample"\n- paragraph:\n  - link "Learn more" [ref=e1]');
+  assert.equal(
+    tree,
+    '- heading "Example Domain" [level=1]\n- text: "sample"\n- paragraph:\n  - link "Learn more" [ref=e1]',
+  );
 });
 
 test("compactSnapshot accepts an already-parsed object", () => {
   const tree = compactSnapshot(JSON.parse(GITHUB_LIKE));
-  assert.ok(tree.includes('[ref=e1]'));
+  assert.ok(tree.includes("[ref=e1]"));
   assert.ok(!tree.includes("nthAmongSameSignature"));
 });
 
@@ -45,15 +48,32 @@ test("toolSchemas are complete and lean", () => {
     assert.equal(typeof schema.parameters, "object");
     assert.equal(schema.parameters.type, "object", `${schema.name} parameters.type`);
   }
-  const names = toolSchemas.map(s => s.name);
+  const names = new Set(toolSchemas.map((s) => s.name));
   for (const required of [
-    "page.snapshot", "page.locator", "page.goto", "compactSnapshot",
-    "createNetworkSnoop", "snoop.waitFor", "snoop.popJson", "snoop.summary",
-    "collectWhileScrolling", "createTrace", "trace.step", "trace.stop",
-    "reconcileFrames", "snapshotWithFrames", "connectPipe.dialogPolicy",
-    "requestHuman", "describeLayers", "snapshotWithLayers", "emulate",
-    "createRoutes", "route.continue", "route.fulfill", "route.abort",
+    "page.snapshot",
+    "page.locator",
+    "page.goto",
+    "compactSnapshot",
+    "createNetworkSnoop",
+    "snoop.waitFor",
+    "snoop.popJson",
+    "snoop.summary",
+    "collectWhileScrolling",
+    "createTrace",
+    "trace.step",
+    "trace.stop",
+    "reconcileFrames",
+    "snapshotWithFrames",
+    "connectPipe.dialogPolicy",
+    "requestHuman",
+    "describeLayers",
+    "snapshotWithLayers",
+    "emulate",
+    "createRoutes",
+    "route.continue",
+    "route.fulfill",
+    "route.abort",
   ]) {
-    assert.ok(names.includes(required), `missing schema: ${required}`);
+    assert.ok(names.has(required), `missing schema: ${required}`);
   }
 });

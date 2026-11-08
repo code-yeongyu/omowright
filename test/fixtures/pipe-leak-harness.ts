@@ -3,12 +3,13 @@
 // proves the transport leaked the browser's stdio to its parent (the TUI tty
 // in production).
 import { fileURLToPath } from "node:url";
-import { PipeCdpClient } from "../../src/pipe.js";
+import { PipeCdpClient } from "../../src/pipe.ts";
 
-const fixture = fileURLToPath(new URL("./fake-pipe-browser.mjs", import.meta.url));
+const fixture = fileURLToPath(new URL("./fake-pipe-browser.ts", import.meta.url));
+const browserArgs: string[] = [fixture];
 
-const client = new PipeCdpClient({ browserPath: process.execPath, browserArgs: [fixture] });
+const client = new PipeCdpClient({ browserPath: process.execPath, browserArgs });
 await client.ensureConnected();
-const { product } = await client.send("Browser.getVersion");
-process.stdout.write(`HARNESS_OK ${product}\n`);
+const version: { product: string } = await client.send("Browser.getVersion");
+process.stdout.write(`HARNESS_OK ${version.product}\n`);
 await client.close();

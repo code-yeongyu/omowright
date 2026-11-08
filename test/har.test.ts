@@ -1,12 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toHar } from "../src/har.js";
+import { toHar, type HarSourceEntry } from "../src/har.ts";
 
 const JSON_BODY = '{"ok":true}';
 const PNG_BASE64 = Buffer.from("\x89PNG\r\n\x1a\n", "binary").toString("base64");
 
-function entry(overrides = {}) {
-  return {
+// Fixtures mirror real network-snoop rows, including the snoop-only fields toHar does not read.
+interface SnoopRow extends HarSourceEntry {
+  requestId: string;
+  resourceType: string;
+  bodySkipped: boolean;
+}
+
+function entry(overrides: HarSourceEntry = {}): HarSourceEntry {
+  const row: SnoopRow = {
     requestId: "r1",
     url: "https://x.test/api/items?page=2&q=hello%20world",
     method: "GET",
@@ -27,6 +34,7 @@ function entry(overrides = {}) {
     finishedAt: 1_700_000_000_250,
     ...overrides,
   };
+  return row;
 }
 
 test("toHar builds a HAR 1.2 log with creator and pages", () => {
@@ -47,6 +55,7 @@ test("toHar builds a HAR 1.2 log with creator and pages", () => {
 
 test("toHar maps a request onto the HAR request shape", () => {
   const [har] = toHar([entry()]).log.entries;
+  assert.ok(har);
   assert.equal(har.startedDateTime, new Date(1_700_000_000_000).toISOString());
   assert.equal(har.time, 250);
   assert.equal(har.request.method, "GET");
@@ -70,6 +79,7 @@ test("toHar maps a request onto the HAR request shape", () => {
 
 test("toHar maps a response onto the HAR response shape", () => {
   const [har] = toHar([entry()]).log.entries;
+  assert.ok(har);
   assert.equal(har.response.status, 200);
   assert.equal(har.response.statusText, "OK");
   assert.equal(har.response.httpVersion, "HTTP/1.1");
@@ -81,25 +91,31 @@ test("toHar maps a response onto the HAR response shape", () => {
   assert.equal(har.response.content.size, 11);
   assert.equal(har.response.content.mimeType, "application/json");
   assert.equal(har.response.content.text, JSON_BODY);
+  assert.ok(typeof har.response.content.text === "string");
   assert.deepEqual(JSON.parse(har.response.content.text), { ok: true });
   assert.equal(har.response.content.encoding, undefined);
   assert.equal(har.response.redirectURL, "");
   assert.equal(har.response.headersSize, -1);
   assert.equal(har.response.bodySize, 11);
-  assert.equal(har._errorText, undefined);
+  // _errorText is the HAR spec's custom-field spelling, read through destructuring.
+  const { _errorText: errorText } = har;
+  assert.equal(errorText, undefined);
 });
 
 test("toHar flags base64 bodies and carries redirect locations", () => {
-  const [har] = toHar([entry({
-    url: "https://x.test/pixel.png",
-    mimeType: "image/png",
-    responseHeaders: { "content-type": "image/png", location: "https://x.test/moved.png" },
-    status: 302,
-    statusText: "Found",
-    body: PNG_BASE64,
-    base64Encoded: true,
-    encodedDataLength: 8,
-  })]).log.entries;
+  const [har] = toHar([
+    entry({
+      url: "https://x.test/pixel.png",
+      mimeType: "image/png",
+      responseHeaders: { "content-type": "image/png", location: "https://x.test/moved.png" },
+      status: 302,
+      statusText: "Found",
+      body: PNG_BASE64,
+      base64Encoded: true,
+      encodedDataLength: 8,
+    }),
+  ]).log.entries;
+  assert.ok(har);
   assert.equal(har.response.content.encoding, "base64");
   assert.equal(har.response.content.text, PNG_BASE64);
   assert.equal(har.response.content.mimeType, "image/png");
@@ -108,11 +124,14 @@ test("toHar flags base64 bodies and carries redirect locations", () => {
 });
 
 test("toHar writes postData with the request content type", () => {
-  const [har] = toHar([entry({
-    method: "POST",
-    postData: '{"q":1}',
-    requestHeaders: { "content-type": "application/json; charset=utf-8" },
-  })]).log.entries;
+  const [har] = toHar([
+    entry({
+      method: "POST",
+      postData: '{"q":1}',
+      requestHeaders: { "content-type": "application/json; charset=utf-8" },
+    }),
+  ]).log.entries;
+  assert.ok(har);
   assert.equal(har.request.bodySize, 7);
   assert.deepEqual(har.request.postData, {
     mimeType: "application/json; charset=utf-8",
@@ -121,31 +140,32 @@ test("toHar writes postData with the request content type", () => {
 });
 
 test("toHar gives failed entries status 0 and _errorText", () => {
-  const [har] = toHar([entry({
-    status: null,
-    statusText: null,
-    mimeType: null,
-    responseHeaders: null,
-    body: null,
-    failed: true,
-    errorText: "net::ERR_ABORTED",
-    encodedDataLength: 0,
-    finishedAt: 1_700_000_000_000,
-  })]).log.entries;
+  const [har] = toHar([
+    entry({
+      status: null,
+      statusText: null,
+      mimeType: null,
+      responseHeaders: null,
+      body: null,
+      failed: true,
+      errorText: "net::ERR_ABORTED",
+      encodedDataLength: 0,
+      finishedAt: 1_700_000_000_000,
+    }),
+  ]).log.entries;
+  assert.ok(har);
   assert.equal(har.response.status, 0);
   assert.equal(har.response.statusText, "");
   assert.deepEqual(har.response.headers, []);
   assert.equal(har.response.content.size, 0);
   assert.equal(har.response.content.text, undefined);
-  assert.equal(har._errorText, "net::ERR_ABORTED");
+  const { _errorText: errorText } = har;
+  assert.equal(errorText, "net::ERR_ABORTED");
   assert.equal(har.time, 0);
 });
 
 test("toHar never emits negative times for unfinished or clock-skewed entries", () => {
-  const entries = toHar([
-    entry({ finishedAt: null }),
-    entry({ finishedAt: 1_699_999_999_000 }),
-  ]).log.entries;
+  const entries = toHar([entry({ finishedAt: null }), entry({ finishedAt: 1_699_999_999_000 })]).log.entries;
   assert.equal(entries.length, 2);
   for (const har of entries) {
     assert.equal(har.time, 0);

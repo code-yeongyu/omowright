@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 
 import { compactSnapshot, connectCloakProfile, resolveCloakProfile } from "../src/index.ts";
-import type { BrowserConnection } from "../src/index.ts";
 import os from "node:os";
 import path from "node:path";
 
@@ -48,17 +47,8 @@ function isValueOption(arg: string | undefined): arg is keyof typeof VALUE_OPTIO
   return arg !== undefined && Object.hasOwn(VALUE_OPTIONS, arg);
 }
 
-interface CloakPage {
-  url(): Promise<string>;
-  title(): Promise<string>;
-  snapshot(options: { interactive: boolean }): Promise<unknown>;
-}
 
 /** `connectPipe` (src/pipe.js) attaches `newTab` to the connection it returns. */
-type CloakConnection = BrowserConnection & {
-  newTab(url?: string): Promise<CloakPage>;
-};
-
 interface CloakResult {
   ok: true;
   url: string;
@@ -104,7 +94,7 @@ const profileDir = path.resolve(
 );
 const profileRequest = { profileDir, fingerprintSeed: options.seed };
 const profile = await resolveCloakProfile(profileRequest);
-let browser: CloakConnection | undefined;
+let browser: Awaited<ReturnType<typeof connectCloakProfile>> | undefined;
 let shuttingDown = false;
 async function shutdown(code = 0): Promise<void> {
   if (shuttingDown) return;
@@ -117,11 +107,11 @@ process.once("SIGINT", () => void shutdown(130));
 process.once("SIGTERM", () => void shutdown(143));
 
 try {
-  browser = (await connectCloakProfile({
+  browser = await connectCloakProfile({
     profileDir,
     fingerprintSeed: profile.fingerprintSeed,
     browserPath: options.browser,
-  })) as CloakConnection;
+  });
   const page = await browser.newTab(options.url);
   const result: CloakResult = {
     ok: true,

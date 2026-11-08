@@ -14,29 +14,42 @@ async function listDocs() {
   }
   for (const d of await readdir(path.join(repoRoot, "presets"))) {
     const p = path.join(repoRoot, "presets", d, "SKILL.md");
-    try { await stat(p); docs.push(p); } catch {}
+    try {
+      await stat(p);
+      docs.push(p);
+    } catch {}
   }
   return docs;
 }
 
-function frontmatter(text) {
+function captured(match: RegExpMatchArray): string {
+  const value = match[1];
+  if (value === undefined) throw new TypeError(`pattern matched ${match[0]} without its capture group`);
+  return value;
+}
+
+function frontmatter(text: string) {
   const m = text.match(/^---\n([\s\S]*?)\n---/);
   assert.ok(m, "missing YAML frontmatter");
-  const name = m[1].match(/^name:\s*(.+)$/m)?.[1]?.trim();
-  const description = m[1].match(/^description:\s*(.+)$/m)?.[1]?.trim();
+  const block = captured(m);
+  const name = block.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  const description = block.match(/^description:\s*(.+)$/m)?.[1]?.trim();
   return { name, description };
 }
 
 // Paths a reader is expected to open: package-root files, home-relative install
 // paths, and doc-relative `references/x.md` / `presets/x/SKILL.md` links.
-function referencedPaths(text, docPath) {
-  const out = new Set();
+function referencedPaths(text: string, docPath: string) {
+  const out = new Set<string>();
   const docDir = path.dirname(docPath);
-  for (const m of text.matchAll(/`((?:TOOLS|README)\.md|docs\/[A-Za-z0-9_-]+\.md)`/g)) out.add(path.join(repoRoot, m[1]));
-  for (const m of text.matchAll(/~\/\.agents\/skills\/omowright\/([A-Za-z0-9_./-]+\.md)/g)) out.add(path.join(repoRoot, "skills", "omowright", m[1]));
-  for (const m of text.matchAll(/`(references\/[A-Za-z0-9_-]+\.md)`/g)) out.add(path.join(docDir, m[1]));
-  for (const m of text.matchAll(/`(presets\/[A-Za-z0-9_-]+\/SKILL\.md)`/g)) out.add(path.join(repoRoot, m[1]));
-  for (const m of text.matchAll(/`(skills\/omowright\/references\/[A-Za-z0-9_-]+\.md)`/g)) out.add(path.join(repoRoot, m[1]));
+  for (const m of text.matchAll(/`((?:TOOLS|README)\.md|docs\/[A-Za-z0-9_-]+\.md)`/g))
+    out.add(path.join(repoRoot, captured(m)));
+  for (const m of text.matchAll(/~\/\.agents\/skills\/omowright\/([A-Za-z0-9_./-]+\.md)/g))
+    out.add(path.join(repoRoot, "skills", "omowright", captured(m)));
+  for (const m of text.matchAll(/`(references\/[A-Za-z0-9_-]+\.md)`/g)) out.add(path.join(docDir, captured(m)));
+  for (const m of text.matchAll(/`(presets\/[A-Za-z0-9_-]+\/SKILL\.md)`/g)) out.add(path.join(repoRoot, captured(m)));
+  for (const m of text.matchAll(/`(skills\/omowright\/references\/[A-Za-z0-9_-]+\.md)`/g))
+    out.add(path.join(repoRoot, captured(m)));
   return [...out].map((p) => p.replace(/[.,;:)]+$/, ""));
 }
 
@@ -62,7 +75,13 @@ for (const doc of docs) {
       const candidates = [p, p.replace(/\/\.\.\.\//, "/")];
       if (p.includes("/.../")) continue; // elided glob examples, not links
       let ok = false;
-      for (const c of candidates) { try { await stat(c); ok = true; break; } catch {} }
+      for (const c of candidates) {
+        try {
+          await stat(c);
+          ok = true;
+          break;
+        } catch {}
+      }
       if (!ok) missing.push(p);
     }
     assert.deepEqual(missing, [], `dangling references in ${rel}`);

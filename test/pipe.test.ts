@@ -2,17 +2,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { PipeCdpClient } from "../src/pipe.js";
+import { PipeCdpClient } from "../src/pipe.ts";
 
-const fixture = fileURLToPath(new URL("./fixtures/fake-pipe-browser.mjs", import.meta.url));
-const harness = fileURLToPath(new URL("./fixtures/pipe-leak-harness.mjs", import.meta.url));
+const fixture = fileURLToPath(new URL("./fixtures/fake-pipe-browser.ts", import.meta.url));
+const harness = fileURLToPath(new URL("./fixtures/pipe-leak-harness.ts", import.meta.url));
 
-const ALLOCATOR_LINE =
-  "Trying to load the allocator multiple times. This is *not* supported.";
+const ALLOCATOR_LINE = "Trying to load the allocator multiple times. This is *not* supported.";
 
 test("pipe target creation rejects the global-registry symbol", async () => {
   const client = new PipeCdpClient({ browserPath: process.execPath });
-  await assert.rejects(client.send("Target.createTarget", { url: "about:blank" }, undefined, { capability: Symbol.for("omowright.targetCreationCapability") }), /reserved/);
+  await assert.rejects(
+    client.send("Target.createTarget", { url: "about:blank" }, undefined, {
+      capability: Symbol.for("omowright.targetCreationCapability"),
+    }),
+    /reserved/,
+  );
 });
 
 test("pipe transport does not leak browser stdout/stderr to the parent tty", async () => {
@@ -20,10 +24,14 @@ test("pipe transport does not leak browser stdout/stderr to the parent tty", asy
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (c) => { stdout += c; });
+  child.stdout.on("data", (c) => {
+    stdout += c;
+  });
   child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (c) => { stderr += c; });
-  const code = await new Promise((resolve) => child.on("close", resolve));
+  child.stderr.on("data", (c) => {
+    stderr += c;
+  });
+  const code = await new Promise<number | null>((resolve) => child.on("close", resolve));
 
   assert.equal(code, 0, `harness failed:\n${stderr}`);
   assert.match(stdout, /HARNESS_OK FakeChrome\/1\.0/);
@@ -39,9 +47,10 @@ test("readiness failure surfaces the drained browser stdio tail", { timeout: 15_
     readinessTimeoutMs: 1500,
   });
   try {
-    await assert.rejects(client.ensureConnected(), (err) => {
-      assert.match(err.message, /did not become ready over the CDP pipe/);
-      assert.match(err.message, /BOOM diagnostics 123/);
+    await assert.rejects(client.ensureConnected(), (err: unknown) => {
+      const { message } = err as Error;
+      assert.match(message, /did not become ready over the CDP pipe/);
+      assert.match(message, /BOOM diagnostics 123/);
       return true;
     });
   } finally {
