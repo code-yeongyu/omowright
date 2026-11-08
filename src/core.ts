@@ -140,7 +140,7 @@ if (!Promise.withResolvers) {
 
 function unsetResolver(): void {}
 
-interface EmitteryEvent<D> {
+export interface EmitteryEvent<D> {
   data: D;
   eventName: string;
 }
@@ -2538,7 +2538,7 @@ export interface SnapshotOptions {
   showHidden?: boolean;
   [option: string]: unknown;
 }
-interface SnapshotRef {
+export interface SnapshotRef {
   tagName: string;
   [field: string]: unknown;
 }
@@ -2584,7 +2584,7 @@ export interface LocatorFilterOptions {
   hasNotText?: string | RegExp;
   visible?: boolean;
 }
-interface LocatorComposition {
+export interface LocatorComposition {
   source: Locator;
   index?: number;
   child?: Locator;
@@ -2593,7 +2593,7 @@ interface LocatorComposition {
   or?: Locator;
 }
 type NthIndex = number | "last";
-interface RoleQuery {
+export interface RoleQuery {
   role: string;
   nth: NthIndex;
   regexSource?: string;
@@ -5927,7 +5927,7 @@ interface VideoCompletion {
   error?: unknown;
   path?: string;
 }
-interface ActiveRecording {
+export interface ActiveRecording {
   completion: Promise<VideoCompletion>;
   format: string;
   outputPath: string;
