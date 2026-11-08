@@ -120,6 +120,26 @@ test("externalExtensionEntry uses the HKCU registry on Windows and a system dir 
   assert.equal(linux.humanStep.includes("Enable"), false, "Linux installs without an enable prompt");
 });
 
+// Public API error contract (#274): a catalog row missing the directory its platform needs throws path.join's own
+// argument error. The expected values are what the JavaScript source at e02c2d232a (the parent of #263) threw on
+// bun; the port replaced them with a code-less TypeError.
+test("externalExtensionEntry rejects a browser without its platform directory with ERR_INVALID_ARG_TYPE", () => {
+  for (const [platform, browser] of [
+    ["linux", { id: "chrome", store: "chrome" }],
+    ["darwin", { id: "brave", store: "chrome" }],
+  ] satisfies [string, ExtensionBrowser][]) {
+    assert.throws(
+      () => externalExtensionEntry({ platform, browser }),
+      {
+        name: "TypeError",
+        code: "ERR_INVALID_ARG_TYPE",
+        message: 'The "paths[0]" property must be of type string, got undefined',
+      },
+      platform,
+    );
+  }
+});
+
 test("registerExternalExtension writes the entry once, is idempotent, and unregister removes it", async () => {
   const home = scratchHome();
   try {
