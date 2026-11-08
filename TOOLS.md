@@ -37,6 +37,9 @@ cloakbrowser }`, where each per-engine object is that adapter's own options.
   0 even for a failed script, so read `ok`, never the exit code.
 - `session.title(url)` — open `url` and return the printed title; throws
   `AsideReplError` on an error marker.
+- The rank-0 availability probe runs a real `about:blank` round trip, which opens
+  one tab in the user's browser. Pass `connectRankedBrowser({ aside: { verify: false } })`
+  when a tab is unwanted and a version+account check is enough.
 - `asideAvailable({ bin? })`, `parseAsideRepl(stdout, exitCode)`, `runAside({...})`
   — the probe, the marker parser and the process runner.
 - `ensureAside({ ... })` — Aside installation detection (app, CLI bundle, PATH),
