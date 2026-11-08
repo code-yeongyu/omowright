@@ -2,11 +2,17 @@
 
 ## Tests
 
-- Full suite: `bun run test`. CI and local both run that one runner now; the TypeScript sources are executed by bun directly, so the retired `node --test` script has no replacement and none is needed.
+- Full suite: `bun run test`. `bun run test:node` runs the same files under real Node (Node >= 24: three child scripts use `await using`), which is the runtime consumers import the packed package from, and CI runs both. It goes through `scripts/node-test.ts`, which resolves `SHELL_BIN` (environment first, then Playwright's cache) and refuses to start without one: nine live tests skip when it is unset, and a gate whose test set depends on an ambient variable cannot compare two heads. A child script spawned by a test must name the `.ts` source it imports: Node resolves the specifier literally, so `../src/index.js` fails with ERR_MODULE_NOT_FOUND.
 - Focused: `bun test test/<file>.test.ts`.
 - `test` runs the whole suite in one bun process; `test:cloak-profile` runs the two CloakBrowser profile files, which need `CLOAKBROWSER_BIN`.
 - Live tests need a Chromium headless shell: set `SHELL_BIN` (and `CLOAKBROWSER_BIN` for the event-bridge test), or install one into Playwright's cache.
 - `test/hygiene.test.ts` fails on any tracked file that contains an absolute home path, a personal address or a private host. Write paths as `~/...` or relative, and never paste real hosts or addresses into docs, fixtures or tests.
+
+## Build and publish
+
+- `bun run build` writes `dist/` and swaps it in only when every step passed: the bundle plus its lazy chunks, `page-bundle.js` (read at runtime beside the module), `bin/omowright-cloak.js` and the declarations. `package.json` `exports` and `bin` point at `dist/`, and `prepack` runs the build, so a tarball packed without it ships nothing importable.
+- The bundle is split because the Windows lock backend imports `bun:ffi`; a single-file bundle hoists that to the entry and Node cannot resolve it, so the chunk must stay lazy.
+- Declarations come from `typescript-5` (`node_modules/typescript-5/lib/tsc.js`) via `tsconfig.build.json`. TypeScript 7 stays the type gate; it cannot emit them here (TS4094 on the anonymous class `createOmOPageClass` returns).
 
 ## Test authoring gate
 
