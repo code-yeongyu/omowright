@@ -44,7 +44,7 @@ interface WithPageOptions {
 // rejects on timeout with a named error that carries the function source.
 
 function findHeadlessShell() {
-  const home = process.env.HOME ?? "";
+  const home = process.env["HOME"] ?? "";
   const candidates = globSync(
     path.join(
       home,
@@ -57,7 +57,7 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 const LIVE = { skip: !SHELL && "no chromium binary found", timeout: 60000 };
 
 // Contract (#191): deadlines are gone when their wait settles, including

@@ -18,23 +18,23 @@ import { appendFileSync, createReadStream, createWriteStream } from "node:fs";
 import { Socket } from "node:net";
 import type { Readable } from "node:stream";
 
-const mode = process.env.FAKE_BROWSER_MODE ?? "ready";
-const signalLog = process.env.FAKE_SIGNAL_LOG;
+const mode = process.env["FAKE_BROWSER_MODE"] ?? "ready";
+const signalLog = process.env["FAKE_SIGNAL_LOG"];
 const record = (event: string) => {
   if (signalLog) appendFileSync(signalLog, `${event} ${Date.now()}\n`);
 };
 if (mode === "exit-early") {
   record("START");
   let text = "FATAL: fake browser cannot start\n";
-  for (let frame = 0; frame < Number(process.env.FAKE_STDERR_FRAMES ?? 1); frame++)
+  for (let frame = 0; frame < Number(process.env["FAKE_STDERR_FRAMES"] ?? 1); frame++)
     text += `#${frame} fake browser frame\n`;
   await new Promise((resolve) => process.stderr.write(text, resolve));
   process.exit(1);
 }
-if (process.env.FAKE_ON_TERM) {
+if (process.env["FAKE_ON_TERM"]) {
   process.on("SIGTERM", () => {
     record("TERM");
-    if (process.env.FAKE_ON_TERM === "exit") process.exit(0);
+    if (process.env["FAKE_ON_TERM"] === "exit") process.exit(0);
   });
 }
 
@@ -70,7 +70,7 @@ if (mode === "mute-cdp") {
       if (msg.method === "Browser.close") {
         record("CLOSE");
         output.write(JSON.stringify({ id: msg.id, result: {} }) + "\0", () => {
-          if (process.env.FAKE_ON_CLOSE !== "ignore") process.exit(0);
+          if (process.env["FAKE_ON_CLOSE"] !== "ignore") process.exit(0);
         });
         continue;
       }
@@ -80,7 +80,7 @@ if (mode === "mute-cdp") {
   });
   input.on("end", () => {
     record("EOF");
-    if (process.env.FAKE_ON_EOF === "ignore") setInterval(() => {}, 60_000);
+    if (process.env["FAKE_ON_EOF"] === "ignore") setInterval(() => {}, 60_000);
     else process.exit(0);
   });
 }

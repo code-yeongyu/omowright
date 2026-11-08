@@ -11,7 +11,7 @@ import { field } from "./fixtures/read-field.ts";
 import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function findHeadlessShell() {
-  const home = process.env.HOME ?? "";
+  const home = process.env["HOME"] ?? "";
   const candidates = globSync(
     path.join(
       home,
@@ -24,7 +24,7 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 const FIXTURE = pathToFileURL(fileURLToPath(new URL("./fixtures/bsk-snapshot-page.html", import.meta.url))).href;
 
 test("buildSnapshotExpression embeds the page bundle under a shadowed globalThis and returns a plain object", () => {

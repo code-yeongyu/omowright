@@ -24,7 +24,7 @@ interface TraceLine {
 function findHeadlessShell() {
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
@@ -34,7 +34,7 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 test(

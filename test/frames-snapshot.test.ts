@@ -93,8 +93,8 @@ test("fresh navigation keeps the OOPIF child stitched and clickable", live, asyn
     assert.match(snapshot.tree, /- iframe \[ref=e\d+\]:/, snapshot.tree);
     assert.ok(snapshot.tree.includes(`button "Inside" [ref=f1e1]`), snapshot.tree);
     assert.ok(snapshot.refs, "the snapshot carries refs");
-    assert.equal(snapshot.refs.f1e1?.name, "Inside");
-    assert.equal(snapshot.refs.f1e1?.tagName, "BUTTON");
+    assert.equal(snapshot.refs["f1e1"]?.["name"], "Inside");
+    assert.equal(snapshot.refs["f1e1"]?.tagName, "BUTTON");
     assert.equal(field(snapshot, "missingFrames"), undefined);
 
     assert.equal(await clickUntilChildObserves(page, "f1e1", child.frameId, "data-clicked"), "1");

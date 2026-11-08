@@ -91,7 +91,7 @@ test(
       });
       assert.deepEqual(calls, ["bash -c curl -fsSL https://releases.aside.com/install.sh | bash"]);
       assert.equal(report.install?.installed, true);
-      assert.deepEqual(report.install?.restoredRcFiles, [path.join(home, ".zshrc")]);
+      assert.deepEqual(report.install?.["restoredRcFiles"], [path.join(home, ".zshrc")]);
       assert.equal(readFileSync(path.join(home, ".zshrc"), "utf8"), "export KEEP=1\n");
       assert.equal(report.cli.installed, true);
       assert.equal(report.ready, true);

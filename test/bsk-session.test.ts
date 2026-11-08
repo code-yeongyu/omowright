@@ -87,7 +87,7 @@ test("every session method sends the daemon's tool method with session_id inject
   await session.select("e6", ["a", "b"]);
   assert.deepEqual(lastCall(client).params, { session_id: "abcd", ref: "e6", values: ["a", "b"] });
   await session.select("e6", "only");
-  assert.deepEqual(lastCall(client).params.values, ["only"]);
+  assert.deepEqual(lastCall(client).params["values"], ["only"]);
   await session.focus("e7");
   assert.equal(lastCall(client).method, "tool.focus");
   await session.blur("e7");
@@ -275,10 +275,13 @@ test("connectBrowserSkill sends a browser name as the instance id of the one con
   const startWith = async (browser: string) => {
     const client = stubClient({
       "system.status": { browsers },
-      "session.start": (params: StubParams) => ({ session_id: "s", browser_instance_id: params.browser_instance_id }),
+      "session.start": (params: StubParams) => ({
+        session_id: "s",
+        browser_instance_id: params["browser_instance_id"],
+      }),
     });
     await connectBrowserSkill({ client, browser });
-    return client.calls.find((c) => c.method === "session.start")?.params.browser_instance_id;
+    return client.calls.find((c) => c.method === "session.start")?.params["browser_instance_id"];
   };
   assert.equal(await startWith("chrome"), "05394bb7");
   assert.equal(await startWith("05394bb7"), "05394bb7");
@@ -315,7 +318,10 @@ test("connectBrowserSkill never starts a session on the tab-grouping BrowserSkil
   const start = (browsers: object[], browser: string | undefined) => {
     const client = stubClient({
       "system.status": { browsers },
-      "session.start": (params: StubParams) => ({ session_id: "s", browser_instance_id: params.browser_instance_id }),
+      "session.start": (params: StubParams) => ({
+        session_id: "s",
+        browser_instance_id: params["browser_instance_id"],
+      }),
     });
     return { client, started: connectBrowserSkill({ client, browser }) };
   };
@@ -338,7 +344,7 @@ test("connectBrowserSkill never starts a session on the tab-grouping BrowserSkil
   const { client, started } = start([old, current], undefined);
   await started;
   assert.equal(
-    client.calls.find((c) => c.method === "session.start")?.params.browser_instance_id,
+    client.calls.find((c) => c.method === "session.start")?.params["browser_instance_id"],
     "new1",
     "with no browser named, the up-to-date extension is chosen",
   );

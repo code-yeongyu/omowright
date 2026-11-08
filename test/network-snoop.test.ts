@@ -88,7 +88,7 @@ class FakeCdp {
   async reply(method: string, params?: CdpParams, sessionId?: string): Promise<unknown> {
     this.calls.push({ method, params, sessionId });
     if (method === "Network.getResponseBody")
-      return this.bodies.get(params?.requestId) ?? { body: "", base64Encoded: false };
+      return this.bodies.get(params?.["requestId"]) ?? { body: "", base64Encoded: false };
     return {};
   }
   async discoverTargets() {
@@ -496,7 +496,7 @@ test("response body decoding survives automatic wait listener removal", async ()
 test(
   "page waits and events observe local HTTP traffic with readable bodies",
   {
-    skip: !process.env.SHELL_BIN && "set SHELL_BIN to a Chromium headless shell",
+    skip: !process.env["SHELL_BIN"] && "set SHELL_BIN to a Chromium headless shell",
     timeout: 60_000,
   },
   async () => {
@@ -517,7 +517,7 @@ test(
     let browser;
     try {
       browser = await connectPipe({
-        browserPath: process.env.SHELL_BIN,
+        browserPath: process.env["SHELL_BIN"],
         browserArgs: ["--headless", `--user-data-dir=${dir}`],
         storageRoot: dir,
       });
@@ -657,7 +657,7 @@ test("history steps settle on a frame-tree reply requested after the cross-docum
 test(
   "navigation methods resolve with the main-frame document response",
   {
-    skip: !process.env.SHELL_BIN && "set SHELL_BIN to a Chromium headless shell",
+    skip: !process.env["SHELL_BIN"] && "set SHELL_BIN to a Chromium headless shell",
     timeout: 60_000,
   },
   async () => {
@@ -679,7 +679,7 @@ test(
     let browser;
     try {
       browser = await connectPipe({
-        browserPath: process.env.SHELL_BIN,
+        browserPath: process.env["SHELL_BIN"],
         browserArgs: ["--headless", `--user-data-dir=${dir}`],
         storageRoot: dir,
       });
