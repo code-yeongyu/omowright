@@ -25,17 +25,17 @@ authorization.
 
 ## Support matrix
 
-| API | Bridge behavior |
-|---|---|
-| bookmarks.create/move/remove | Supported only when negotiated |
-| history.deleteUrl/deleteRange | Supported only when negotiated |
-| tabGroups.update | Supported only when negotiated |
-| debugger.attach/detach | Supported only when negotiated, numeric tab IDs only |
-| notifications, tabGroups, tabs, windows events | Forwarded without replay |
-| bookmarks.update/removeTree | Unsupported |
-| history.addUrl | Unsupported |
-| downloads.pause/resume/cancel/erase | Unsupported |
-| standalone reads and downloads.download | Existing CDP/profile behavior |
+| API                                            | Bridge behavior                                      |
+| ---------------------------------------------- | ---------------------------------------------------- |
+| bookmarks.create/move/remove                   | Supported only when negotiated                       |
+| history.deleteUrl/deleteRange                  | Supported only when negotiated                       |
+| tabGroups.update                               | Supported only when negotiated                       |
+| debugger.attach/detach                         | Supported only when negotiated, numeric tab IDs only |
+| notifications, tabGroups, tabs, windows events | Forwarded without replay                             |
+| bookmarks.update/removeTree                    | Unsupported                                          |
+| history.addUrl                                 | Unsupported                                          |
+| downloads.pause/resume/cancel/erase            | Unsupported                                          |
+| standalone reads and downloads.download        | Existing CDP/profile behavior                        |
 
 **NEVER RETRY A MUTATION AFTER DISCONNECT — COMPLETION IS INDETERMINATE.**
 Subscribe to events before triggering actions. CloakBrowser native-host

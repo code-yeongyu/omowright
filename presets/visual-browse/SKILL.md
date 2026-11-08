@@ -14,13 +14,13 @@ to reach.
 **TWO IDENTICAL FAILURES ON THE SAME TARGET MEAN CLIMB, NOT RETRY.** The failure
 itself selects the next rung — never pause to ask which one.
 
-| Rung | Use | Advance when |
-|---|---|---|
-| 1. `page.snapshot()` + `page.locator(ref)` | Everything with a usable ref | Ref is absent, stale, obscured, or the click lands on the wrong node twice |
-| 2. `createCua(page)` coordinates | Canvas, extension popups, custom controls, drag surfaces | The click misses, or the screenshot and the coordinates disagree |
-| 3. Pin the viewport, then retry rung 2 | Coordinate drift: window resized, DPI scaled, or the tab was created at a different size | Coordinates land correctly but the widget still refuses input |
-| 4. `createCaptcha(page)` | A challenge widget is what blocks progress | The widget is solved but the flow still stalls |
-| 5. Environment diagnosis | Browser-level failure (entitlements, extension service worker, FIDO) | Logs name a cause outside the page |
+| Rung                                       | Use                                                                                      | Advance when                                                               |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 1. `page.snapshot()` + `page.locator(ref)` | Everything with a usable ref                                                             | Ref is absent, stale, obscured, or the click lands on the wrong node twice |
+| 2. `createCua(page)` coordinates           | Canvas, extension popups, custom controls, drag surfaces                                 | The click misses, or the screenshot and the coordinates disagree           |
+| 3. Pin the viewport, then retry rung 2     | Coordinate drift: window resized, DPI scaled, or the tab was created at a different size | Coordinates land correctly but the widget still refuses input              |
+| 4. `createCaptcha(page)`                   | A challenge widget is what blocks progress                                               | The widget is solved but the flow still stalls                             |
+| 5. Environment diagnosis                   | Browser-level failure (entitlements, extension service worker, FIDO)                     | Logs name a cause outside the page                                         |
 
 **RUNG 5 ENDS IN A WRITTEN DIAGNOSIS, NEVER A CODE CHANGE.** When the browser log
 names the cause (service-worker failure, missing entitlement, FIDO unavailable),
@@ -37,11 +37,15 @@ repeats the miss. Pin both to one box:
 
 ```js
 await page._sendToTarget("Emulation.setDeviceMetricsOverride", {
-  width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
-  screenWidth: 1440, screenHeight: 900,
+  width: 1440,
+  height: 900,
+  deviceScaleFactor: 1,
+  mobile: false,
+  screenWidth: 1440,
+  screenHeight: 900,
   viewport: { x: 0, y: 0, width: 1440, height: 900, scale: 1 },
 });
-const size = await page.refreshViewportSize();   // -> { width: 1440, height: 900 }
+const size = await page.refreshViewportSize(); // -> { width: 1440, height: 900 }
 ```
 
 Pin every page you act on, including tabs you did not open, then take a fresh

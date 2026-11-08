@@ -410,14 +410,14 @@ readiness is content-probe based).
 A policy is either an object or a function:
 
 ```js
-const browser = await connectPipe({ browserPath, browserArgs, storageRoot,
-  dialogPolicy: { accept: false } });              // confirm() -> false, prompt() -> null
+const browser = await connectPipe({ browserPath, browserArgs, storageRoot, dialogPolicy: { accept: false } }); // confirm() -> false, prompt() -> null
 browser.setDialogPolicy({ accept: true, promptText: "agent@example.com" }); // prompt() -> the text
-browser.setDialogPolicy(dialog => {               // { type, message, defaultPrompt, url }
+browser.setDialogPolicy((dialog) => {
+  // { type, message, defaultPrompt, url }
   if (dialog.type === "beforeunload") return true;
   return { accept: !/delete/i.test(dialog.message), promptText: dialog.defaultPrompt };
 });
-browser.cdp.dialogPolicy;                         // read the current policy (client getter)
+browser.cdp.dialogPolicy; // read the current policy (client getter)
 ```
 
 - `{ accept: false }` dismisses: `confirm()` returns `false`, `prompt()` returns
@@ -437,13 +437,13 @@ browser.cdp.dialogPolicy;                         // read the current policy (cl
   `page.waitForEvent('dialog')`) leaves the dialog to the policy:
 
   ```js
-  page.on("dialog", dialog =>
-    dialog.type() === "prompt" ? dialog.accept("agent@example.com") : dialog.dismiss());
+  page.on("dialog", (dialog) => (dialog.type() === "prompt" ? dialog.accept("agent@example.com") : dialog.dismiss()));
   ```
 
   Answer inside the listener or in a promise it returns: the policy waits for
   that promise. A dialog is answered once: a second `accept()` / `dismiss()`,
   or one after the policy answered, rejects.
+
 - CDP listeners of `Page.javascriptDialogOpening` get the same `Dialog` as
   `meta.dialog`. On a shared connection the policy is the connection's and a
   listener belongs to the handle that added it: it answers until that handle

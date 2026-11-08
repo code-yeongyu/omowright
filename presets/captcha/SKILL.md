@@ -45,9 +45,7 @@ await captcha.click(bounds, {
 });
 const result = await captcha.waitFor({
   // Replace with your application's authoritative acceptance condition.
-  until: page => page.evaluate(
-    `document.querySelector("#application-status")?.dataset.accepted === "true"`
-  ),
+  until: (page) => page.evaluate(`document.querySelector("#application-status")?.dataset.accepted === "true"`),
   timeoutMs: 10000,
   pollMs: 100,
 });

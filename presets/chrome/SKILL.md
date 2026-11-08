@@ -12,8 +12,8 @@ CDP and the browser's own profile files — no extension required.
 import { createChromeApi } from "omowright";
 
 const chrome = createChromeApi(connection, {
-  profilePath: "/path/to/user-data-dir",  // enables bookmarks/history/topSites/downloads.search
-  downloadDir: "/path/to/downloads",      // optional, defaults to a temp dir
+  profilePath: "/path/to/user-data-dir", // enables bookmarks/history/topSites/downloads.search
+  downloadDir: "/path/to/downloads", // optional, defaults to a temp dir
 });
 ```
 

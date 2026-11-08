@@ -14,12 +14,12 @@ checkout). Bun >= 1.4 recommended, Node >= 22 supported.
 **START EVERY BROWSER TASK WITH `connectBrowser()`.** It tries the engines in
 this order and returns the first that connects:
 
-| Order | Engine | Handle | Read |
-|---|---|---|---|
-| 1 | **Aside**: the user's Aside browser, signed in | `AsideSession` (`run`, `open`, `snapshot`) | `references/aside.md` |
-| 2 | **Ego Lite**: an agent task space in the user's Ego browser (only inside `ego-browser nodejs`) | `BrowserConnection` (full Page API) | `references/ego.md` |
-| 3 | **BrowserSkill**: the user's own Chrome/Edge/Brave via extension | `BskSession` | `references/browserskill.md` |
-| 4 | **CloakBrowser**: owned stealth browser, no user profile | `BrowserConnection` | `references/stealth.md` |
+| Order | Engine                                                                                         | Handle                                     | Read                         |
+| ----- | ---------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------- |
+| 1     | **Aside**: the user's Aside browser, signed in                                                 | `AsideSession` (`run`, `open`, `snapshot`) | `references/aside.md`        |
+| 2     | **Ego Lite**: an agent task space in the user's Ego browser (only inside `ego-browser nodejs`) | `BrowserConnection` (full Page API)        | `references/ego.md`          |
+| 3     | **BrowserSkill**: the user's own Chrome/Edge/Brave via extension                               | `BskSession`                               | `references/browserskill.md` |
+| 4     | **CloakBrowser**: owned stealth browser, no user profile                                       | `BrowserConnection`                        | `references/stealth.md`      |
 
 ```js
 const { connectBrowser } = await import("omowright");
@@ -42,10 +42,10 @@ under its name (`{ cloak: { profileDir } }`). The handle type follows
 const { connectBrowser, compactSnapshot } = await import("omowright");
 const { engine, handle: browser } = await connectBrowser({ allow: ["ego", "cloak"] });
 const page = await browser.newTab("https://example.com");
-const tree = compactSnapshot(await page.snapshot());  // ALWAYS compact before reading
-await page.locator("e1").click();                     // refs come from the snapshot
+const tree = compactSnapshot(await page.snapshot()); // ALWAYS compact before reading
+await page.locator("e1").click(); // refs come from the snapshot
 const changes = compactSnapshot(await page.snapshot({ diff: true }));
-await browser.close();                                // Ego: the user's browser stays open
+await browser.close(); // Ego: the user's browser stays open
 ```
 
 Snapshot once, act on refs, then re-snapshot with `{ diff: true }` after each batch
@@ -93,14 +93,14 @@ HANGS during early init — attach with `connect()` instead. Full pattern:
 
 A blocked page is a rung to climb, not a reason to stop and report.
 
-| Rung | Use | Advance when |
-|---|---|---|
-| 1. `snapshot()` + `locator(ref)` | Anything with a usable ref | Ref absent, stale, obscured, or the click hits the wrong node twice |
-| 1b. `snapshotWithLayers` / `describeLayers` | A blocking overlay explains two identical misses; dismiss it first | `@layers none`, or the overlay is gone and the click still misses |
-| 2. `createCua(page)` coordinates | Canvas, extension popups, custom controls | Click misses, or screenshot and coordinates disagree |
-| 3. Pin the viewport, retry rung 2 | Coordinate drift after a resize, DPI scale, or foreign tab | Coordinates land right but the widget still refuses input |
-| 4. `createCaptcha(page)` | A challenge widget is the blocker | Widget solved, flow still stalls |
-| 5. Read the browser log | Browser-level failure | The log names a cause outside the page |
+| Rung                                        | Use                                                                | Advance when                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| 1. `snapshot()` + `locator(ref)`            | Anything with a usable ref                                         | Ref absent, stale, obscured, or the click hits the wrong node twice |
+| 1b. `snapshotWithLayers` / `describeLayers` | A blocking overlay explains two identical misses; dismiss it first | `@layers none`, or the overlay is gone and the click still misses   |
+| 2. `createCua(page)` coordinates            | Canvas, extension popups, custom controls                          | Click misses, or screenshot and coordinates disagree                |
+| 3. Pin the viewport, retry rung 2           | Coordinate drift after a resize, DPI scale, or foreign tab         | Coordinates land right but the widget still refuses input           |
+| 4. `createCaptcha(page)`                    | A challenge widget is the blocker                                  | Widget solved, flow still stalls                                    |
+| 5. Read the browser log                     | Browser-level failure                                              | The log names a cause outside the page                              |
 
 **TWO IDENTICAL FAILURES SELECT THE NEXT RUNG — A THIRD IDENTICAL ATTEMPT IS A
 DEFECT.** Verify after every action batch: `snapshot({ diff: true })` for DOM state,
@@ -119,11 +119,15 @@ disagree, every coordinate is off by a constant and retrying repeats the miss:
 
 ```js
 await page._sendToTarget("Emulation.setDeviceMetricsOverride", {
-  width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
-  screenWidth: 1440, screenHeight: 900,
+  width: 1440,
+  height: 900,
+  deviceScaleFactor: 1,
+  mobile: false,
+  screenWidth: 1440,
+  screenHeight: 900,
   viewport: { x: 0, y: 0, width: 1440, height: 900, scale: 1 },
 });
-await page.refreshViewportSize();   // -> { width: 1440, height: 900 }
+await page.refreshViewportSize(); // -> { width: 1440, height: 900 }
 ```
 
 Pin every page you act on, including tabs you did not open, then take a fresh
@@ -131,19 +135,19 @@ screenshot — coordinates read off an unpinned screenshot are stale.
 
 ## Route by task
 
-| Task | Read |
-|---|---|
-| The user's Aside browser: REPL session, setup, failure codes | `references/aside.md` |
-| The user's own signed-in browser and tabs, BrowserSkill sessions, trace-free `bskSnapshot`, one-click extension onboarding | `references/browserskill.md` |
-| Visual browsing, coordinate UI, viewport pinning, extension popups | `presets/visual-browse/SKILL.md` — consider delegating, below |
-| CAPTCHA (checkbox, slider, text OCR, image grid) | `presets/captcha/SKILL.md` — consider delegating, below |
-| WAF/Cloudflare/bot-detection pages, CloakBrowser, cookie rules | `references/stealth.md` |
-| First use, page API, snapshot options, locator rules | `references/quickstart.md`; dialogs and readiness in `TOOLS.md` |
-| Driving a browser inside `eval` cells, kernel persistence, parallel lanes | `references/eval-kernel.md` |
-| Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3) | `presets/chrome/SKILL.md` |
-| API JSON instead of DOM scraping, wait for a request, infinite scroll, QA flight trace (jsonl/HAR), request routes | `presets/network/SKILL.md` |
-| Cross-origin iframes and shadow DOM, overlays that swallow clicks, login/OTP handoff to a human, device emulation | `references/frames-layers-human.md` |
-| Reading an item from the 1Password web vault (tab-scoped session, sign-in check, secret handling) | `references/1password.md` |
+| Task                                                                                                                       | Read                                                            |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| The user's Aside browser: REPL session, setup, failure codes                                                               | `references/aside.md`                                           |
+| The user's own signed-in browser and tabs, BrowserSkill sessions, trace-free `bskSnapshot`, one-click extension onboarding | `references/browserskill.md`                                    |
+| Visual browsing, coordinate UI, viewport pinning, extension popups                                                         | `presets/visual-browse/SKILL.md` — consider delegating, below   |
+| CAPTCHA (checkbox, slider, text OCR, image grid)                                                                           | `presets/captcha/SKILL.md` — consider delegating, below         |
+| WAF/Cloudflare/bot-detection pages, CloakBrowser, cookie rules                                                             | `references/stealth.md`                                         |
+| First use, page API, snapshot options, locator rules                                                                       | `references/quickstart.md`; dialogs and readiness in `TOOLS.md` |
+| Driving a browser inside `eval` cells, kernel persistence, parallel lanes                                                  | `references/eval-kernel.md`                                     |
+| Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3)                                                             | `presets/chrome/SKILL.md`                                       |
+| API JSON instead of DOM scraping, wait for a request, infinite scroll, QA flight trace (jsonl/HAR), request routes         | `presets/network/SKILL.md`                                      |
+| Cross-origin iframes and shadow DOM, overlays that swallow clicks, login/OTP handoff to a human, device emulation          | `references/frames-layers-human.md`                             |
+| Reading an item from the 1Password web vault (tab-scoped session, sign-in check, secret handling)                          | `references/1password.md`                                       |
 
 Preset and `TOOLS.md` paths are relative to the package root.
 

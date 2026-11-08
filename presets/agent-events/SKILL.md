@@ -30,7 +30,7 @@ event. Waits are bounded; predicates may be async:
 ```js
 const opened = events.waitForEvent("popupOpened", {
   timeout: 30_000,
-  predicate: tab => tab.openerTargetId === mainTargetId,
+  predicate: (tab) => tab.openerTargetId === mainTargetId,
 });
 await mainPage.evaluate("window.open('https://example.com')");
 const popup = await opened;
