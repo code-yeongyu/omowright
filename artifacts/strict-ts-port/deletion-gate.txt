@@ -1,0 +1,2 @@
+OK       bin/omowright-cloak.mjs -> bin/omowright-cloak.ts
+ARTIFACT bridge/extension/background.js stays as a built/packaged asset

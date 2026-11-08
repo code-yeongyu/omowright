@@ -43,10 +43,10 @@ on a machine you trust and only when the instance is meant to be shared.
 ```js
 const { connectNamed, listInstances } = await import("omowright");
 const browser = await connectNamed("cloak-main", {
-  browserPath,   // required only when a launch is needed (connectCloakProfile resolves it)
+  browserPath, // required only when a launch is needed (connectCloakProfile resolves it)
   browserArgs,
-  profileDir,    // recorded with the instance; used for endpoint discovery
-  registryRoot,  // defaults to ~/.local/share/omowright/instances
+  profileDir, // recorded with the instance; used for endpoint discovery
+  registryRoot, // defaults to ~/.local/share/omowright/instances
 });
 const page = await browser.newTab("https://target.com");
 await listInstances();
@@ -75,7 +75,7 @@ curl -s -m 2 http://127.0.0.1:9242/json/version   # Browser info -> an instance 
 const browser = await connect("http://127.0.0.1:9242");
 const page = await browser.newTab("https://target.com");
 // ... work ...
-await page.close();                               // close only YOUR tab
+await page.close(); // close only YOUR tab
 ```
 
 ## Launch
@@ -84,7 +84,7 @@ await page.close();                               // close only YOUR tab
 const { connectCloakProfile } = await import("omowright");
 const browser = await connectCloakProfile({
   profileDir: `${process.env.HOME}/.local/share/omowright-cloak`,
-  fingerprintSeed: 63498,   // first use pins it; later runs reuse it and reject a mismatch
+  fingerprintSeed: 63498, // first use pins it; later runs reuse it and reject a mismatch
 });
 ```
 
@@ -116,8 +116,8 @@ extract them to JSON and inject with the package helper:
 ```js
 import { injectCookies } from "omowright";
 const cookies = JSON.parse(await fs.promises.readFile(cookieFile, "utf8"));
-await injectCookies(page, cookies);   // sanitize + Network.setCookies
-await page.goto(url);                 // cookies apply on navigation
+await injectCookies(page, cookies); // sanitize + Network.setCookies
+await page.goto(url); // cookies apply on navigation
 ```
 
 `injectCookies` drops `expires <= 0`, forces `secure` + root path + url-scoping

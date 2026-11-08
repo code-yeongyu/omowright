@@ -10,8 +10,7 @@ costs nothing and pages can't see it. All four tools come from the package
 entrypoint:
 
 ```js
-const { createNetworkSnoop, collectWhileScrolling, createTrace, createRoutes } =
-  await import("omowright");
+const { createNetworkSnoop, collectWhileScrolling, createTrace, createRoutes } = await import("omowright");
 ```
 
 ## Snoop before you scrape
@@ -23,8 +22,8 @@ truncated labels. Snapshot to find and click; snoop to read.
 ```js
 const snoop = createNetworkSnoop(page, { match: { url: /\/api\//, mimeType: "json" } }); // strings match as substrings
 await page.goto("https://example.com/search?q=widgets");
-const results = snoop.popJson();          // parsed bodies, buffer drained
-console.log(snoop.summary({ max: 20 }));  // "GET 200 application/json 8123B https://..."
+const results = snoop.popJson(); // parsed bodies, buffer drained
+console.log(snoop.summary({ max: 20 })); // "GET 200 application/json 8123B https://..."
 snoop.dispose();
 ```
 
@@ -40,7 +39,7 @@ you need instead:
 ```js
 const saved = snoop.waitFor({ url: "/api/cart", method: "POST" }, { timeoutMs: 10000 });
 await page.locator("e7").click();
-const entry = await saved;                 // { status, body, ... }
+const entry = await saved; // { status, body, ... }
 if (entry.status !== 200) throw new Error(`cart save failed: ${entry.status} ${entry.statusText}`);
 ```
 
@@ -58,13 +57,13 @@ const items = [];
 const gen = collectWhileScrolling(page, snoop, {
   minItems: 200,
   maxScrolls: 15,
-  extract: json => json.items ?? [],
-  scroll: "wheel",       // "end" jumps to the bottom instead
+  extract: (json) => json.items ?? [],
+  scroll: "wheel", // "end" jumps to the bottom instead
   settleMs: 800,
 });
 let step;
 while (!(step = await gen.next()).done) items.push(step.value);
-step.value;   // { rounds, total, stoppedBecause }
+step.value; // { rounds, total, stoppedBecause }
 ```
 
 `for await (const item of gen)` works too when you don't need the return
@@ -85,7 +84,7 @@ await trace.step("apply coupon", async () => {
   await page.locator("e4").click();
 });
 trace.mark("expected total", { total: "90.00" });
-const summary = await trace.stop();      // { steps, events, network, startedAt, endedAt, url }
+const summary = await trace.stop(); // { steps, events, network, startedAt, endedAt, url }
 ```
 
 What lands in `dir`:
@@ -110,11 +109,14 @@ failure. The recorder rides the existing network and console paths.
 const routes = createRoutes(page);
 await routes.route("*/analytics/*", ({ abort }) => abort("BlockedByClient"));
 await routes.route(/\/api\/flags$/, ({ fulfill }) =>
-  fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ beta: true }) }));
-await routes.route(({ method }) => method === "POST", ({ request, continue: go }) =>
-  go({ headers: { ...request.headers, "x-test-run": "1" } }));
+  fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ beta: true }) }),
+);
+await routes.route(
+  ({ method }) => method === "POST",
+  ({ request, continue: go }) => go({ headers: { ...request.headers, "x-test-run": "1" } }),
+);
 // ... drive the page ...
-await routes.dispose();                    // Fetch.disable
+await routes.dispose(); // Fetch.disable
 ```
 
 Glob strings use `*` and `?`; a string without either is a substring match. A

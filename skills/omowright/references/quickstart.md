@@ -68,9 +68,9 @@ await page.close();
 ## Snapshot discipline
 
 ```js
-const snap = await page.snapshot();            // { tree, refs } or JSON string
-const tree = compactSnapshot(snap);            // raw tree, ~57% smaller
-await page.snapshot({ interactive: true });    // controls, headings, landmarks and state feedback
+const snap = await page.snapshot(); // { tree, refs } or JSON string
+const tree = compactSnapshot(snap); // raw tree, ~57% smaller
+await page.snapshot({ interactive: true }); // controls, headings, landmarks and state feedback
 await page.snapshot({ maxDepth: 20, maxChars: 4000, selector: "main" });
 ```
 

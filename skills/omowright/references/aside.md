@@ -17,13 +17,13 @@ uses `aside mcp` when `aside mcp --help` lists a `repl` tool, else the piped
 
 ```js
 const { connectAside } = await import("omowright");
-const aside = await connectAside();                 // runs asideOnboard() first
-await aside.open("https://example.com/");           // new tab, becomes `page`
+const aside = await connectAside(); // runs asideOnboard() first
+await aside.open("https://example.com/"); // new tab, becomes `page`
 const { tree } = await aside.snapshot({ find: "checkout" });
 await aside.run('await page.locator("e3").click();');
 const title = await aside.run("return await page.title();");
-await aside.run("await closeTab(page);");           // close tabs you opened
-await aside.close();                                // ALWAYS, in finally
+await aside.run("await closeTab(page);"); // close tabs you opened
+await aside.close(); // ALWAYS, in finally
 ```
 
 `run(code)` executes Playwright-style JavaScript in Aside's REPL scope (`page`,

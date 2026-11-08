@@ -1,0 +1,95 @@
+# Behaviour comparison: exported surface, per module
+
+Generated against origin/main. Suite line at generation: no suite run captured yet
+
+Modules compared: **87**. Ported: **87**. Modules that lost at least one export: **0**.
+
+| module | ported | exports before | exports after | lost |
+|---|---|---|---|---|
+| src/agent-tabs.js | yes | 3 | 3 | - |
+| src/aria-hidden.js | yes | 1 | 1 | - |
+| src/aside/cli-contract.js | yes | 2 | 2 | - |
+| src/aside/errors.js | yes | 1 | 1 | - |
+| src/aside/line-transport.js | yes | 1 | 1 | - |
+| src/aside/mcp-transport.js | yes | 1 | 1 | - |
+| src/aside/onboard.js | yes | 6 | 6 | - |
+| src/aside/session.js | yes | 4 | 4 | - |
+| src/bridge-schemas.js | yes | 14 | 16 | - |
+| src/bridge-transport.js | yes | 19 | 19 | - |
+| src/browser-context.js | yes | 1 | 1 | - |
+| src/browser-process.js | yes | 7 | 7 | - |
+| src/bsk/browser-signals.js | yes | 4 | 4 | - |
+| src/bsk/browsers.js | yes | 8 | 8 | - |
+| src/bsk/connect.js | yes | 4 | 4 | - |
+| src/bsk/daemon-info.js | yes | 6 | 6 | - |
+| src/bsk/external-extension.js | yes | 9 | 9 | - |
+| src/bsk/identify-browser.js | yes | 2 | 2 | - |
+| src/bsk/install-cli.js | yes | 6 | 6 | - |
+| src/bsk/ipc-client.js | yes | 5 | 5 | - |
+| src/bsk/onboard.js | yes | 2 | 2 | - |
+| src/bsk/screenshot.js | yes | 1 | 1 | - |
+| src/bsk/session.js | yes | 1 | 1 | - |
+| src/bsk/snapshot.js | yes | 2 | 2 | - |
+| src/bsk/targets.js | yes | 3 | 3 | - |
+| src/captcha-wait.js | yes | 1 | 1 | - |
+| src/captcha.js | yes | 2 | 2 | - |
+| src/cdp-errors.js | yes | 4 | 4 | - |
+| src/cdp-methods.js | yes | 1 | 1 | - |
+| src/chrome-profile.js | yes | 2 | 3 | - |
+| src/chrome.js | yes | 1 | 1 | - |
+| src/cloak-profile.js | yes | 4 | 4 | - |
+| src/connection.js | yes | 4 | 4 | - |
+| src/console-events.js | yes | 1 | 1 | - |
+| src/cookies.js | yes | 3 | 3 | - |
+| src/core.js | yes | 16 | 16 | - |
+| src/cua.js | yes | 1 | 1 | - |
+| src/dialog-policy.js | yes | 4 | 5 | - |
+| src/ego/client.js | yes | 3 | 3 | - |
+| src/emulate.js | yes | 2 | 2 | - |
+| src/engines.js | yes | 3 | 3 | - |
+| src/events.js | yes | 2 | 2 | - |
+| src/frames-snapshot.js | yes | 2 | 2 | - |
+| src/har.js | yes | 1 | 1 | - |
+| src/human-handoff.js | yes | 1 | 1 | - |
+| src/index.js | yes | 116 | 116 | - |
+| src/injected.js | yes | 1 | 1 | - |
+| src/instance-lock.js | yes | 3 | 3 | - |
+| src/instances.js | yes | 3 | 3 | - |
+| src/internal-capability.js | yes | 1 | 1 | - |
+| src/launch-endpoint.js | yes | 3 | 3 | - |
+| src/layers.js | yes | 3 | 3 | - |
+| src/llm.js | yes | 3 | 3 | - |
+| src/lock-backend-win32.js | yes | 1 | 1 | - |
+| src/lock-backend.js | yes | 2 | 2 | - |
+| src/native-host-win32.js | yes | 6 | 6 | - |
+| src/network-events.js | yes | 8 | 8 | - |
+| src/network-snoop.js | yes | 1 | 1 | - |
+| src/nul-frames.js | yes | 1 | 1 | - |
+| src/open-shadow-query.js | yes | 1 | 1 | - |
+| src/owner-only.js | yes | 3 | 3 | - |
+| src/page-events.js | yes | 4 | 4 | - |
+| src/page-routes.js | yes | 3 | 3 | - |
+| src/page-setup.js | yes | 7 | 7 | - |
+| src/pipe.js | yes | 6 | 6 | - |
+| src/process-start-time.js | yes | 2 | 2 | - |
+| src/routes.js | yes | 1 | 1 | - |
+| src/running-browser.js | yes | 4 | 4 | - |
+| src/serial-emitter.js | yes | 1 | 1 | - |
+| src/shared-connections.js | yes | 3 | 3 | - |
+| src/snapshot-diff.js | yes | 3 | 3 | - |
+| src/text-matching.js | yes | 1 | 1 | - |
+| src/trace.js | yes | 1 | 1 | - |
+| src/url-match.js | yes | 1 | 1 | - |
+| src/viewport.js | yes | 3 | 3 | - |
+| test/fixtures/browser-lifecycle.mjs | yes | 9 | 9 | - |
+| test/fixtures/bsk-stub-client.mjs | yes | 2 | 2 | - |
+| test/fixtures/captcha-quality-qa.mjs | yes | 1 | 1 | - |
+| test/fixtures/fake-bsk-daemon.mjs | yes | 1 | 1 | - |
+| test/fixtures/oopif-harness.mjs | yes | 12 | 12 | - |
+| test/fixtures/owner-only.mjs | yes | 1 | 1 | - |
+| test/fixtures/remove-tree.mjs | yes | 1 | 1 | - |
+| test/fixtures/snoop-server.mjs | yes | 1 | 1 | - |
+| test/fixtures/trace-server.mjs | yes | 1 | 1 | - |
+| test/no-raw-tls-client.test.mjs | yes | 4 | 4 | - |
+| test/source-scope.mjs | yes | 1 | 1 | - |
+| test/tls-client-detector.mjs | yes | 3 | 3 | - |

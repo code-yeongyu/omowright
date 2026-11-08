@@ -59,8 +59,7 @@ overrides fail closed.
 ## Launch and reuse one profile
 
 ```js
-import { connectPipe, compactSnapshot } from
-  "omowright";
+import { connectPipe, compactSnapshot } from "omowright";
 import fs from "node:fs";
 
 const profile = "/path/to/private/browser-profile";
@@ -106,8 +105,7 @@ flags. `connectCloakProfile()` does both and is the preferred programmatic
 entry point:
 
 ```js
-import { connectCloakProfile } from
-  "omowright";
+import { connectCloakProfile } from "omowright";
 
 const browser = await connectCloakProfile({
   profileDir: "/path/to/private/browser-profile",
@@ -135,8 +133,7 @@ depend on device-bound application state rather than cookies alone.
 explicitly provides an authorized export:
 
 ```js
-import { injectCookies } from
-  "omowright";
+import { injectCookies } from "omowright";
 
 await injectCookies(page, authorizedCookies);
 ```
