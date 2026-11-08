@@ -376,7 +376,7 @@ export async function bskOnboard({
   }
   const deadline = Date.now() + waitTotalMs;
   while (!needsChoice && browsersConnected.length === 0 && daemon.running && Date.now() < deadline) {
-    browsersConnected = listOrEmpty(await listBrowsers(ipc, { waitForBrowserMs }), "system.status browsers");
+    browsersConnected = await listBrowsers(ipc, { waitForBrowserMs });
     if (waitForBrowserMs === 0) break;
   }
   daemon = { ...daemon, browsers: browsersConnected };

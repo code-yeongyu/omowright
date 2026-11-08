@@ -4,10 +4,18 @@ import { test } from "node:test";
 import { listBrowsers } from "../src/bsk/connect.ts";
 import { bskDoctor } from "../src/bsk/onboard.ts";
 
-test("listBrowsers preserves non-null status values until a consumer parses them", async () => {
-  for (const browsers of [null, undefined, [], { unavailable: true }, "starting", 0]) {
+test("listBrowsers returns lists and defaults nullish status fields to an empty list", async () => {
+  for (const browsers of [null, undefined, [], [{ browser_name: "test" }]]) {
     const client = { call: async () => ({ browsers }) };
-    assert.deepEqual(await listBrowsers(client), browsers ?? []);
+    const result: unknown[] = await listBrowsers(client);
+    assert.deepEqual(result, browsers ?? []);
+  }
+});
+
+test("listBrowsers rejects malformed lists at its public array boundary", async () => {
+  for (const browsers of [{ unavailable: true }, "starting", 0]) {
+    const client = { call: async () => ({ browsers }) };
+    await assert.rejects(listBrowsers(client), TypeError);
   }
 });
 
