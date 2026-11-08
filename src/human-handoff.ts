@@ -1,11 +1,45 @@
-function injectHumanBanner(prompt) {
+declare global {
+  interface Window {
+    __omowrightHumanDone?: boolean;
+  }
+}
+
+export type HumanOutcome = "continued" | "cancelled" | "timed_out";
+
+export interface HumanPage {
+  evaluate<R>(pageFunction: () => R): Promise<R>;
+  evaluate<A, R>(pageFunction: (arg: A) => R, arg: A): Promise<R>;
+  bringToFront(): Promise<unknown>;
+  url(): string;
+}
+
+export type HumanUntil<P extends HumanPage> =
+  | ((page: P) => unknown)
+  | { url: unknown }
+  | { selector?: unknown }
+  | null
+  | undefined;
+
+export interface RequestHumanOptions<P extends HumanPage> {
+  prompt?: unknown;
+  until?: HumanUntil<P>;
+  timeoutMs?: number;
+  pollMs?: number;
+  signal?: AbortSignal;
+}
+
+function injectHumanBanner(prompt: unknown) {
   if (document.querySelector('[data-omowright-human="1"]')) return true;
   const host = document.createElement("div");
   host.setAttribute("data-omowright-human", "1");
-  host.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;display:block;visibility:visible;opacity:1;pointer-events:auto;";
+  host.style.cssText =
+    "position:fixed;top:0;left:0;right:0;z-index:2147483647;display:block;visibility:visible;opacity:1;pointer-events:auto;";
   const root = host.attachShadow({ mode: "open" });
   const bar = document.createElement("div");
-  bar.setAttribute("style", "display:flex;align-items:center;gap:12px;padding:10px 16px;background:#111;color:#fff;font:14px/1.4 system-ui,sans-serif;");
+  bar.setAttribute(
+    "style",
+    "display:flex;align-items:center;gap:12px;padding:10px 16px;background:#111;color:#fff;font:14px/1.4 system-ui,sans-serif;",
+  );
   const message = document.createElement("span");
   message.textContent = prompt == null ? "" : String(prompt);
   const button = document.createElement("button");
@@ -27,12 +61,12 @@ function humanDoneFlag() {
   return window.__omowrightHumanDone === true;
 }
 
-function querySelectorExists(selector) {
+function querySelectorExists(selector: string) {
   return document.querySelector(selector) !== null;
 }
 
 function removeHumanBanner() {
-  document.querySelectorAll('[data-omowright-human="1"]').forEach(node => node.remove());
+  document.querySelectorAll('[data-omowright-human="1"]').forEach((node) => node.remove());
   try {
     delete window.__omowrightHumanDone;
   } catch {
@@ -40,8 +74,8 @@ function removeHumanBanner() {
   }
 }
 
-function sleep(ms, signal) {
-  return new Promise(resolve => {
+function sleep(ms: number, signal: AbortSignal | undefined) {
+  return new Promise<void>((resolve) => {
     if (signal?.aborted) {
       resolve();
       return;
@@ -58,7 +92,7 @@ function sleep(ms, signal) {
   });
 }
 
-async function ensureBanner(page, prompt) {
+async function ensureBanner(page: HumanPage, prompt: unknown) {
   try {
     if (await page.evaluate(humanBannerPresent)) return;
     await page.evaluate(injectHumanBanner, prompt ?? "");
@@ -67,17 +101,17 @@ async function ensureBanner(page, prompt) {
   }
 }
 
-async function matchesUntil(page, until) {
+async function matchesUntil<P extends HumanPage>(page: P, until: HumanUntil<P>) {
   if (until == null) return false;
   if (typeof until === "function") return Boolean(await until(page));
   if (typeof until === "object") {
     if (Object.prototype.hasOwnProperty.call(until, "url")) {
       const current = page.url();
-      const expected = until.url;
+      const expected = "url" in until ? until.url : undefined;
       if (expected instanceof RegExp) return expected.test(current);
       return String(current).includes(String(expected));
     }
-    if (typeof until.selector === "string") {
+    if ("selector" in until && typeof until.selector === "string") {
       try {
         return Boolean(await page.evaluate(querySelectorExists, until.selector));
       } catch {
@@ -88,17 +122,20 @@ async function matchesUntil(page, until) {
   return false;
 }
 
-async function isDone(page) {
+async function isDone(page: HumanPage) {
   try {
-    return await page.evaluate(humanDoneFlag) === true;
+    return (await page.evaluate(humanDoneFlag)) === true;
   } catch {
     return false;
   }
 }
 
-export async function requestHuman(page, { prompt, until, timeoutMs = 300000, pollMs = 500, signal } = {}) {
+export async function requestHuman<P extends HumanPage>(
+  page: P,
+  { prompt, until, timeoutMs = 300000, pollMs = 500, signal }: RequestHumanOptions<P> = {},
+) {
   const started = Date.now();
-  const finish = (outcome, reason) => ({ outcome, elapsedMs: Date.now() - started, reason });
+  const finish = (outcome: HumanOutcome, reason: string) => ({ outcome, elapsedMs: Date.now() - started, reason });
 
   try {
     await page.bringToFront().catch(() => {});

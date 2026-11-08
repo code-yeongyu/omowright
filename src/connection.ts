@@ -1,25 +1,47 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
-import {
-  CdpClient,
-  FrameManager,
-  OmOPage,
-  SessionManager,
-} from "./core.js";
+import { CdpClient, FrameManager, OmOPage, SessionManager } from "./core.ts";
+import type { CdpClientOptions } from "./core.ts";
+import type { CdpTransport } from "./cdp-protocol.ts";
+
+type Page = InstanceType<typeof OmOPage>;
+
+interface PageEntry {
+  frames: FrameManager;
+  page: Page | null;
+}
+
+interface AttachedPageEntry {
+  frames: FrameManager;
+  page: Page;
+}
+
+export interface BrowserConnectionOptions {
+  storageRoot?: string;
+}
+
+export interface ConnectOptions extends BrowserConnectionOptions {
+  client?: CdpClientOptions;
+}
 
 export class TabRepository {
-  #client;
-  constructor(client) { this.#client = client; }
-  async listTargets() { return this.#client.discoverTargets(); }
+  #client: CdpTransport;
+  constructor(client: CdpTransport) {
+    this.#client = client;
+  }
+  async listTargets() {
+    return this.#client.discoverTargets();
+  }
 }
 
 export class BrowserConnection {
-  #client;
-  #sessions;
-  #pages = new Map();
-  #storageRoot;
+  #client: CdpTransport;
+  #sessions: SessionManager;
+  #pages = new Map<string, AttachedPageEntry>();
+  #storageRoot: string;
+  tabs: TabRepository;
 
-  constructor(client, options = {}) {
+  constructor(client: CdpTransport, options: BrowserConnectionOptions = {}) {
     this.#client = client;
     this.#sessions = new SessionManager(client);
     this.tabs = new TabRepository(client);
@@ -31,47 +53,53 @@ export class BrowserConnection {
     return this;
   }
 
-  get cdp() { return this.#client; }
+  get cdp() {
+    return this.#client;
+  }
 
-  setDialogPolicy(policy) {
+  setDialogPolicy(policy: unknown) {
     if (typeof this.#client.setDialogPolicy !== "function") {
       throw new Error("dialog policy is not supported by this transport");
     }
     this.#client.setDialogPolicy(policy);
   }
 
-  async listTargets() { return this.tabs.listTargets(); }
+  async listTargets() {
+    return this.tabs.listTargets();
+  }
 
-  async attachPage(targetId) {
-    if (this.#pages.has(targetId)) return this.#pages.get(targetId).page;
+  async attachPage(targetId: string): Promise<Page> {
+    const attached = this.#pages.get(targetId);
+    if (attached) return attached.page;
     const sessionId = await this.#sessions.resolvePageSession(targetId);
     const frames = new FrameManager(this.#client, targetId, sessionId);
     await frames.initialize();
 
-    const entry = { frames, page: null };
+    const entry: PageEntry = { frames, page: null };
     const host = this.#createPageHost(targetId, entry);
     const page = new OmOPage(this.#client, frames, targetId, sessionId, host);
-    entry.page = page;
-    this.#pages.set(targetId, entry);
+    this.#pages.set(targetId, Object.assign(entry, { page }));
     return page;
   }
 
-  #createPageHost(targetId, entry) {
+  #createPageHost(targetId: string, entry: PageEntry) {
     return {
       daemonSession: { accountId: 0, id: "standalone" },
       extensionBridgeRoute: {},
       page: null,
-      resolvePageSession: (id, preferred) => this.#sessions.resolvePageSession(id, preferred),
-      resolvePath: value => path.resolve(this.#storageRoot, value),
-      ensurePath: async value => {
+      resolvePageSession: (id: string, preferred?: string) => this.#sessions.resolvePageSession(id, preferred),
+      resolvePath: (value: string) => path.resolve(this.#storageRoot, value),
+      ensurePath: async (value: string) => {
         const resolved = path.resolve(this.#storageRoot, value);
         await mkdir(path.dirname(resolved), { recursive: true });
         return resolved;
       },
-      registerReadableDownload: value => value,
+      registerReadableDownload: <T>(value: T) => value,
       isReadableDownload: () => false,
-      openPopupTab: async () => { throw Error("Popup tab control requires the extension bridge"); },
-      closeTab: async (_page, options = {}) => {
+      openPopupTab: async () => {
+        throw Error("Popup tab control requires the extension bridge");
+      },
+      closeTab: async (_page: unknown, options: { runBeforeUnload?: boolean } = {}) => {
         if (options.runBeforeUnload) {
           await this.#client.send("Page.close", undefined, await this.#sessions.resolvePageSession(targetId));
         } else {
@@ -85,7 +113,8 @@ export class BrowserConnection {
   }
 
   async close() {
-    for (const [targetId, entry] of [...this.#pages]) {
+    // Snapshot first: entries are deleted, and closeTab may run, while each dispose is awaited.
+    for (const [targetId, entry] of Array.from(this.#pages)) {
       await entry.page.dispose().catch(() => {});
       await entry.frames.dispose().catch(() => {});
       this.#pages.delete(targetId);
@@ -95,7 +124,7 @@ export class BrowserConnection {
   }
 }
 
-export async function connect(cdpHttpUrl, options = {}) {
+export async function connect(cdpHttpUrl: string, options: ConnectOptions = {}) {
   if (typeof cdpHttpUrl !== "string" || cdpHttpUrl.length === 0) {
     throw new TypeError("connect(cdpHttpUrl) requires a Chromium CDP HTTP URL");
   }

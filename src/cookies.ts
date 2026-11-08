@@ -1,7 +1,34 @@
-export function sanitizeCookies(cookies) {
-  const byKey = new Map();
+export interface RawCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  expires?: number;
+  sameSite?: string;
+}
+
+export interface CdpCookieParam {
+  name: string;
+  value: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  url?: string;
+  domain?: string;
+  expires?: number;
+  sameSite?: string;
+}
+
+export interface CookieTargetPage {
+  _sendToTarget(method: string, params: Record<string, unknown>): Promise<unknown>;
+}
+
+export function sanitizeCookies(cookies: Iterable<RawCookie>) {
+  const byKey = new Map<string, CdpCookieParam>();
   for (const cookie of cookies) {
-    const out = {
+    const out: CdpCookieParam = {
       name: cookie.name,
       value: cookie.value,
       path: cookie.path || "/",
@@ -24,6 +51,6 @@ export function sanitizeCookies(cookies) {
   return [...byKey.values()];
 }
 
-export async function injectCookies(page, cookies) {
+export async function injectCookies(page: CookieTargetPage, cookies: Iterable<RawCookie>) {
   await page._sendToTarget("Network.setCookies", { cookies: sanitizeCookies(cookies) });
 }

@@ -1,13 +1,46 @@
 /**
- * Scroll-driven collection over a network snoop (see ./network-snoop.js).
+ * Scroll-driven collection over a network snoop (see ./network-snoop.ts).
  */
-async function viewportOf(page) {
-  return page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+export interface ScrollPage {
+  viewportSize(): { width: number; height: number } | null | undefined;
+  evaluate<T>(pageFunction: () => T): Promise<T>;
+  mouse: {
+    move(x: number, y: number): Promise<unknown>;
+    wheel(deltaX: number, deltaY: number): Promise<unknown>;
+  };
 }
 
-async function scrollOnce(page, mode) {
+export interface JsonSnoop {
+  popJson(): Iterable<unknown>;
+}
+
+export type ScrollMode = "wheel" | "end";
+
+export interface CollectWhileScrollingOptions {
+  minItems?: number;
+  maxScrolls?: number;
+  extract?: (json: unknown) => Iterable<unknown>;
+  scroll?: ScrollMode;
+  settleMs?: number;
+}
+
+export interface CollectWhileScrollingResult {
+  rounds: number;
+  total: number;
+  stoppedBecause: "minItems" | "maxScrolls" | "noGrowth";
+}
+
+async function viewportOf(page: ScrollPage) {
+  return page.viewportSize() ?? (await page.evaluate(() => ({ width: innerWidth, height: innerHeight })));
+}
+
+async function scrollOnce(page: ScrollPage, mode: ScrollMode) {
   if (mode === "end") {
-    await page.evaluate(() => scrollTo(0, document.scrollingElement.scrollHeight));
+    await page.evaluate(() => {
+      const element = document.scrollingElement;
+      if (!element) throw new TypeError("Cannot read properties of null (reading 'scrollHeight')");
+      scrollTo(0, element.scrollHeight);
+    });
     return;
   }
   const viewport = await viewportOf(page);
@@ -20,11 +53,15 @@ async function scrollOnce(page, mode) {
  *
  * Yields every extracted item and returns { rounds, total, stoppedBecause } when it stops.
  */
-export async function* collectWhileScrolling(page, snoop, options = {}) {
+export async function* collectWhileScrolling(
+  page: ScrollPage,
+  snoop: JsonSnoop,
+  options: CollectWhileScrollingOptions = {},
+): AsyncGenerator<unknown, CollectWhileScrollingResult, undefined> {
   const {
     minItems = Infinity,
     maxScrolls = 10,
-    extract = json => (Array.isArray(json) ? json : []),
+    extract = (json: unknown): Iterable<unknown> => (Array.isArray(json) ? json : []),
     scroll = "wheel",
     settleMs = 800,
   } = options;
@@ -32,9 +69,9 @@ export async function* collectWhileScrolling(page, snoop, options = {}) {
 
   let rounds = 0;
   let total = 0;
-  let lastHeight = null;
+  let lastHeight: number | null = null;
   let unchanged = 0;
-  let stoppedBecause = "maxScrolls";
+  let stoppedBecause: CollectWhileScrollingResult["stoppedBecause"] = "maxScrolls";
 
   for (;;) {
     for (const json of snoop.popJson()) {
@@ -52,7 +89,11 @@ export async function* collectWhileScrolling(page, snoop, options = {}) {
       break;
     }
 
-    const height = await page.evaluate(() => document.scrollingElement.scrollHeight);
+    const height = await page.evaluate(() => {
+      const element = document.scrollingElement;
+      if (!element) throw new TypeError("Cannot read properties of null (reading 'scrollHeight')");
+      return element.scrollHeight;
+    });
     if (lastHeight !== null && height === lastHeight) {
       unchanged += 1;
       if (unchanged >= 2) {
@@ -66,7 +107,7 @@ export async function* collectWhileScrolling(page, snoop, options = {}) {
 
     await scrollOnce(page, scroll);
     rounds += 1;
-    await new Promise(resolve => setTimeout(resolve, settleMs));
+    await new Promise((resolve) => setTimeout(resolve, settleMs));
   }
 
   return { rounds, total, stoppedBecause };

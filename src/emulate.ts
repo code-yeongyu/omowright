@@ -1,3 +1,20 @@
+export interface DevicePreset {
+  width: number;
+  height: number;
+  deviceScaleFactor: number;
+  mobile: boolean;
+  hasTouch: boolean;
+  userAgent: string | undefined;
+  platform: string | undefined;
+}
+
+export interface EmulatePage {
+  resolveSessionId(): Promise<string | undefined>;
+  cdp: { send(method: string, params: Record<string, unknown>, sessionId?: string): Promise<unknown> };
+  evaluate<T>(pageFunction: () => T): Promise<T>;
+  refreshViewportSize?: () => Promise<unknown>;
+}
+
 // Device presets for emulation
 export const DEVICE_PRESETS = Object.freeze({
   "iphone-14": {
@@ -6,7 +23,8 @@ export const DEVICE_PRESETS = Object.freeze({
     deviceScaleFactor: 3,
     mobile: true,
     hasTouch: true,
-    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1",
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1",
     platform: "iPhone",
   },
   "pixel-7": {
@@ -15,7 +33,8 @@ export const DEVICE_PRESETS = Object.freeze({
     deviceScaleFactor: 2.625,
     mobile: true,
     hasTouch: true,
-    userAgent: "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36",
+    userAgent:
+      "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Mobile Safari/537.36",
     platform: "Linux armv8l",
   },
   "ipad-air": {
@@ -24,7 +43,8 @@ export const DEVICE_PRESETS = Object.freeze({
     deviceScaleFactor: 2,
     mobile: true,
     hasTouch: true,
-    userAgent: "Mozilla/5.0 (iPad; CPU OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1",
+    userAgent:
+      "Mozilla/5.0 (iPad; CPU OS 16_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1",
     platform: "MacIntel",
   },
   "desktop-1440": {
@@ -36,10 +56,11 @@ export const DEVICE_PRESETS = Object.freeze({
     userAgent: undefined,
     platform: undefined,
   },
-});
+} satisfies Record<string, DevicePreset>);
+const presetsByName: Readonly<Record<string, DevicePreset | undefined>> = DEVICE_PRESETS;
 
 // WeakMap to store original UA per page
-const originalUAs = new WeakMap();
+const originalUAs = new WeakMap<EmulatePage, string>();
 
 /**
  * Emulate a device on the given page.
@@ -47,17 +68,18 @@ const originalUAs = new WeakMap();
  * @param {string|object|null} presetNameOrObject - Preset name, object, or null to restore
  * @returns {object} The resolved preset object
  */
-export async function emulate(page, presetNameOrObject) {
+export async function emulate(page: EmulatePage, presetNameOrObject: string | DevicePreset | null) {
   // Resolve preset
-  let preset;
+  let preset: DevicePreset | null;
   if (presetNameOrObject === null) {
     // Restore mode: resolve to a clear object
     preset = null;
   } else if (typeof presetNameOrObject === "string") {
-    if (!DEVICE_PRESETS[presetNameOrObject]) {
+    const named = presetsByName[presetNameOrObject];
+    if (!named) {
       throw new Error(`unknown device preset: ${presetNameOrObject}`);
     }
-    preset = DEVICE_PRESETS[presetNameOrObject];
+    preset = named;
   } else {
     preset = presetNameOrObject;
   }
@@ -68,7 +90,7 @@ export async function emulate(page, presetNameOrObject) {
     // Restore mode: clear metrics and restore original UA
     await page.cdp.send("Emulation.clearDeviceMetricsOverride", {}, sessionId);
     await page.cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false }, sessionId);
-    
+
     const originalUA = originalUAs.get(page);
     if (originalUA) {
       await page.cdp.send("Emulation.setUserAgentOverride", { userAgent: originalUA }, sessionId);
@@ -92,7 +114,7 @@ export async function emulate(page, presetNameOrObject) {
         screenWidth: preset.width,
         screenHeight: preset.height,
       },
-      sessionId
+      sessionId,
     );
 
     // Set touch emulation
@@ -102,7 +124,7 @@ export async function emulate(page, presetNameOrObject) {
         enabled: preset.hasTouch,
         maxTouchPoints: preset.hasTouch ? 5 : 1,
       },
-      sessionId
+      sessionId,
     );
 
     // Set user agent if defined
@@ -113,7 +135,7 @@ export async function emulate(page, presetNameOrObject) {
           userAgent: preset.userAgent,
           platform: preset.platform,
         },
-        sessionId
+        sessionId,
       );
     }
   }

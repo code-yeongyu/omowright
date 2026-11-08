@@ -6,7 +6,62 @@
  * patterns tightly.
  */
 
-function globToRegExp(glob) {
+import type { CdpEventMeta, CdpEventPayload, CdpTransport } from "./cdp-protocol.ts";
+
+export interface RoutesPage {
+  readonly cdp: Pick<CdpTransport, "on" | "send">;
+  resolveSessionId(): string | Promise<string>;
+}
+
+export interface RouteRequest {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  postData: string | undefined;
+  resourceType: string;
+}
+
+export type RouteRequestInfo = Pick<RouteRequest, "url" | "method" | "resourceType" | "headers">;
+export type RouteMatch = string | RegExp | ((request: RouteRequestInfo) => unknown);
+
+/** Header input accepted by continue/fulfill: CDP-style entries or a plain name -> value record. */
+export type RouteHeaders = ReadonlyArray<{ name: unknown; value?: unknown }> | Readonly<Record<string, unknown>>;
+export type RouteBody = string | Uint8Array | null | undefined;
+
+export interface RouteContinueOverrides {
+  url?: string;
+  method?: string;
+  headers?: RouteHeaders;
+  postData?: RouteBody;
+}
+
+export interface RouteFulfillOptions {
+  status?: number;
+  headers?: RouteHeaders;
+  contentType?: string | null;
+  body?: RouteBody;
+}
+
+export interface Route {
+  request: RouteRequest;
+  continue(overrides?: RouteContinueOverrides): Promise<unknown>;
+  fulfill(options?: RouteFulfillOptions): Promise<unknown>;
+  abort(errorReason?: string): Promise<unknown>;
+}
+
+export type RouteHandler = (route: Route) => unknown;
+
+interface HeaderEntry {
+  name: string;
+  value: string;
+}
+
+interface RouteEntry {
+  match: RouteMatch;
+  handler: RouteHandler;
+}
+
+function globToRegExp(glob: string) {
   let source = "";
   for (const char of glob) {
     if (char === "*") source += ".*";
@@ -17,18 +72,20 @@ function globToRegExp(glob) {
   return new RegExp(`^${source}$`);
 }
 
-function hasGlobChars(value) {
+function hasGlobChars(value: string) {
   return value.includes("*") || value.includes("?");
 }
 
-function matches(match, request) {
+function matches(match: RouteMatch, request: RouteRequest) {
   if (typeof match === "function") {
-    return Boolean(match({
-      url: request.url,
-      method: request.method,
-      resourceType: request.resourceType,
-      headers: request.headers,
-    }));
+    return Boolean(
+      match({
+        url: request.url,
+        method: request.method,
+        resourceType: request.resourceType,
+        headers: request.headers,
+      }),
+    );
   }
   if (match instanceof RegExp) return match.test(request.url);
   if (typeof match === "string") {
@@ -38,29 +95,36 @@ function matches(match, request) {
   return false;
 }
 
-function sameMatch(left, right) {
+function sameMatch(left: RouteMatch, right: RouteMatch) {
   if (left === right) return true;
-  if (left instanceof RegExp && right instanceof RegExp) return left.source === right.source && left.flags === right.flags;
+  if (left instanceof RegExp && right instanceof RegExp)
+    return left.source === right.source && left.flags === right.flags;
   return false;
 }
 
-function toHeaderEntries(headers) {
+function isHeaderEntryList(headers: RouteHeaders): headers is ReadonlyArray<{ name: unknown; value?: unknown }> {
+  return Array.isArray(headers);
+}
+
+function toHeaderEntries(headers: RouteHeaders | undefined): HeaderEntry[] {
   if (!headers) return [];
-  if (Array.isArray(headers)) {
-    return headers.map(header => ({ name: String(header.name), value: String(header.value ?? "") }));
+  if (isHeaderEntryList(headers)) {
+    return headers.map((header) => ({ name: String(header.name), value: String(header.value ?? "") }));
   }
   return Object.entries(headers).map(([name, value]) => ({ name, value: String(value ?? "") }));
 }
 
-function encodeBody(body) {
+function encodeBody(body: RouteBody) {
   if (body == null) return "";
   if (Buffer.isBuffer(body)) return body.toString("base64");
   if (body instanceof Uint8Array) return Buffer.from(body).toString("base64");
   return Buffer.from(String(body)).toString("base64");
 }
 
-function buildContinue(requestId, { url, method, headers, postData } = {}) {
-  const params = { requestId };
+function buildContinue(requestId: string, { url, method, headers, postData }: RouteContinueOverrides = {}) {
+  const params: { requestId: string; url?: string; method?: string; headers?: HeaderEntry[]; postData?: string } = {
+    requestId,
+  };
   if (url !== undefined) params.url = url;
   if (method !== undefined) params.method = method;
   if (headers !== undefined) params.headers = toHeaderEntries(headers);
@@ -68,10 +132,13 @@ function buildContinue(requestId, { url, method, headers, postData } = {}) {
   return params;
 }
 
-function buildFulfill(requestId, { status = 200, headers = {}, contentType, body = "" } = {}) {
+function buildFulfill(
+  requestId: string,
+  { status = 200, headers = {}, contentType, body = "" }: RouteFulfillOptions = {},
+) {
   const responseHeaders = toHeaderEntries(headers);
   if (contentType != null && String(contentType).length > 0) {
-    const hasType = responseHeaders.some(header => header.name.toLowerCase() === "content-type");
+    const hasType = responseHeaders.some((header) => header.name.toLowerCase() === "content-type");
     if (!hasType) responseHeaders.push({ name: "content-type", value: String(contentType) });
   }
   return {
@@ -82,18 +149,18 @@ function buildFulfill(requestId, { status = 200, headers = {}, contentType, body
   };
 }
 
-export function createRoutes(page) {
+export function createRoutes(page: RoutesPage) {
   if (!page?.cdp) throw new TypeError("createRoutes requires a page with cdp");
 
-  const entries = [];
-  const warned = new WeakSet();
-  const settledIds = new Set();
+  const entries: RouteEntry[] = [];
+  const warned = new WeakSet<RouteHandler>();
+  const settledIds = new Set<string>();
   let enabled = false;
-  let sessionId;
-  let unsubscribe = null;
-  let enablePromise = null;
+  let sessionId: string | undefined;
+  let unsubscribe: (() => void) | null = null;
+  let enablePromise: Promise<void> | null = null;
 
-  function warnOnce(handler, error) {
+  function warnOnce(handler: RouteHandler, error?: unknown) {
     if (typeof handler === "function") {
       if (warned.has(handler)) return;
       warned.add(handler);
@@ -102,19 +169,19 @@ export function createRoutes(page) {
     else console.warn("[routes] route handler did not settle the request; continuing");
   }
 
-  function findHandler(request) {
+  function findHandler(request: RouteRequest) {
     for (const entry of entries) {
       if (matches(entry.match, request)) return entry.handler;
     }
     return undefined;
   }
 
-  async function handlePaused(params, meta) {
+  async function handlePaused(params: CdpEventPayload<"Fetch.requestPaused">, meta: CdpEventMeta) {
     if (!sessionId || meta?.sessionId !== sessionId) return;
     const requestId = params?.requestId;
     if (!requestId || settledIds.has(requestId)) return;
 
-    const request = {
+    const request: RouteRequest = {
       url: params.request?.url ?? "",
       method: params.request?.method ?? "GET",
       headers: params.request?.headers ?? {},
@@ -123,14 +190,17 @@ export function createRoutes(page) {
     };
 
     let settled = false;
-    const settle = (method, cdpParams) => {
+    const settle = (
+      method: "Fetch.continueRequest" | "Fetch.fulfillRequest" | "Fetch.failRequest",
+      cdpParams: object,
+    ): Promise<unknown> => {
       if (settled) return Promise.resolve();
       settled = true;
       settledIds.add(requestId);
       return page.cdp.send(method, cdpParams, sessionId);
     };
 
-    const route = {
+    const control: Route = {
       request,
       continue(overrides = {}) {
         return settle("Fetch.continueRequest", buildContinue(requestId, overrides));
@@ -150,7 +220,7 @@ export function createRoutes(page) {
     }
 
     try {
-      await handler(route);
+      await handler(control);
     } catch (error) {
       warnOnce(handler, error);
     }
@@ -160,8 +230,8 @@ export function createRoutes(page) {
     }
   }
 
-  function onPaused(params, meta) {
-    void handlePaused(params, meta).catch(error => {
+  function onPaused(params: CdpEventPayload<"Fetch.requestPaused">, meta: CdpEventMeta) {
+    void handlePaused(params, meta).catch((error) => {
       console.warn("[routes] requestPaused handling failed", error);
     });
   }
@@ -197,17 +267,18 @@ export function createRoutes(page) {
     await page.cdp.send("Fetch.disable", {}, sessionId);
   }
 
-  async function route(match, handler) {
+  async function route(match: RouteMatch, handler: RouteHandler) {
     if (typeof handler !== "function") throw new TypeError("handler must be a function");
     entries.push({ match, handler });
     await ensureEnabled();
   }
 
-  async function unroute(match) {
+  async function unroute(match?: RouteMatch) {
     if (match === undefined) entries.length = 0;
     else {
       for (let index = entries.length - 1; index >= 0; index -= 1) {
-        if (sameMatch(entries[index].match, match)) entries.splice(index, 1);
+        const entry = entries[index];
+        if (entry && sameMatch(entry.match, match)) entries.splice(index, 1);
       }
     }
     if (entries.length === 0) await disableFetch();
