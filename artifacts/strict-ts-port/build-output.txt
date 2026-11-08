@@ -8,7 +8,7 @@ bridge/extension/
 12814 bridge/extension/background.js
 387 bridge/extension/manifest.json
 
-tracked files changed by the build: 0 (the regenerated extension is byte-identical to the committed one)
+tracked files changed by the build: 0 (the regenerated extension matches the committed file exactly)
 
 tracked .js/.mjs sources:
 bridge/extension/background.js
