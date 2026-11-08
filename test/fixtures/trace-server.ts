@@ -24,9 +24,14 @@ const HTML = `<!DOCTYPE html>
   </body>
 </html>`;
 
-export async function startTraceServer() {
+export interface TraceServer {
+  url: string;
+  close(): Promise<void>;
+}
+
+export async function startTraceServer(): Promise<TraceServer> {
   const server = createServer((request, response) => {
-    const url = new URL(request.url, "http://127.0.0.1");
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (url.pathname === "/") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(HTML);
@@ -46,13 +51,15 @@ export async function startTraceServer() {
     response.end("not found");
   });
 
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("trace fixture server has no TCP port");
+  const { port } = address;
   return {
     url: `http://127.0.0.1:${port}/`,
     async close() {
       server.closeAllConnections?.();
-      await new Promise(resolve => server.close(resolve));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
 }

@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "promise"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/consistent-type-imports": "error",
+    "import/no-cycle": "error",
+    "eslint/no-await-in-loop": "off",
+    "eslint/no-underscore-dangle": "off",
+    "unicorn/no-useless-spread": "off",
+    "promise/always-return": "off"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "test/fixtures/**",
+    "src/page-bundle.js"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "src/core.ts"
+      ],
+      "rules": {
+        "eslint/no-shadow": "off",
+        "eslint/no-unused-expressions": "off"
+      }
+    },
+    {
+      "files": [
+        "src/layers.ts",
+        "src/core.ts"
+      ],
+      "rules": {
+        "unicorn/consistent-function-scoping": "off"
+      }
+    }
+  ]
+}

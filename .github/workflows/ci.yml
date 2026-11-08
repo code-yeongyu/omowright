@@ -35,7 +35,7 @@ jobs:
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
 
-      # The page-video test (test/integration.test.mjs) needs ffmpeg with libvpx; without it the test skips.
+      # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
@@ -54,19 +54,24 @@ jobs:
           "$bin" --version
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
+      - name: Typecheck
+        shell: bash
+        run: bun x tsc --noEmit -p tsconfig.json
+
+      - name: Lint
+        shell: bash
+        run: bun x oxlint --deny-warnings src bin bridge test scripts
+
+      - name: Format
+        shell: bash
+        run: bun x oxfmt --check src bin bridge test scripts
+
       - name: bun test
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
         shell: bash
         run: bun run test 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
-
-      - name: node --test
-        env:
-          SHELL_BIN: ${{ steps.browser.outputs.bin }}
-          CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
-        shell: bash
-        run: bun run test:node 2>&1 | tee "$RUNNER_TEMP/node-test.log"
 
       - name: Workflow summary
         if: always()
@@ -82,7 +87,6 @@ jobs:
             echo "| Runner | ${{ runner.os }} |"
             echo "| Browser | ${{ steps.browser.outputs.bin }} |"
             echo "| bun test pass / fail | $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ pass$') / $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ fail$') |"
-            echo "| node --test pass / fail | $(count "$RUNNER_TEMP/node-test.log" '^ℹ pass [0-9]+') / $(count "$RUNNER_TEMP/node-test.log" '^ℹ fail [0-9]+') |"
             echo "| Ref | ${{ github.ref_name }} |"
             echo "| Commit | ${{ github.sha }} |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -112,15 +116,12 @@ jobs:
           node-version: "24"
       - run: bun install --frozen-lockfile
       - name: bun test (platform files, default TMPDIR)
-        run: bun test test/bridge-transport.test.mjs test/bridge-host-dir.test.mjs test/instances.test.mjs
-      - name: node --test (platform files, default TMPDIR)
-        run: node --test test/bridge-transport.test.mjs test/bridge-host-dir.test.mjs test/instances.test.mjs
-      - name: bun and node (platform files, TMPDIR under /tmp)
+        run: bun test test/bridge-transport.test.ts test/bridge-host-dir.test.ts test/instances.test.ts
+      - name: bun test (platform files, TMPDIR under /tmp)
         shell: bash
         run: |
           mkdir -p /tmp/omowright-ci
-          TMPDIR=/tmp/omowright-ci bun test test/bridge-transport.test.mjs test/bridge-host-dir.test.mjs
-          TMPDIR=/tmp/omowright-ci node --test test/bridge-transport.test.mjs test/bridge-host-dir.test.mjs
+          TMPDIR=/tmp/omowright-ci bun test test/bridge-transport.test.ts test/bridge-host-dir.test.ts
 
   test-windows:
     name: test (windows-latest)
@@ -144,7 +145,7 @@ jobs:
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
 
-      # The page-video test (test/integration.test.mjs) needs ffmpeg with libvpx; without it the test skips.
+      # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
       - name: Install ffmpeg
         run: choco install ffmpeg --no-progress -y
 
@@ -165,14 +166,6 @@ jobs:
         shell: bash
         run: bun run test 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
 
-      - name: node --test
-        if: ${{ !cancelled() && steps.browser.outcome == 'success' }}
-        env:
-          SHELL_BIN: ${{ steps.browser.outputs.bin }}
-          CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
-        shell: bash
-        run: bun run test:node 2>&1 | tee "$RUNNER_TEMP/node-test.log"
-
       - name: Workflow summary
         if: always()
         shell: bash
@@ -187,7 +180,6 @@ jobs:
             echo "| Runner | ${{ runner.os }} |"
             echo "| Browser | ${{ steps.browser.outputs.bin }} |"
             echo "| bun test pass / fail | $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ pass$') / $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ fail$') |"
-            echo "| node --test pass / fail | $(count "$RUNNER_TEMP/node-test.log" '^ℹ pass [0-9]+') / $(count "$RUNNER_TEMP/node-test.log" '^ℹ fail [0-9]+') |"
             echo "| Ref | ${{ github.ref_name }} |"
             echo "| Commit | ${{ github.sha }} |"
           } >> "$GITHUB_STEP_SUMMARY"

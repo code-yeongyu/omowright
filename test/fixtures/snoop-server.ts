@@ -48,13 +48,21 @@ const HTML = `<!DOCTYPE html>
   </body>
 </html>`;
 
-function itemsForPage(page) {
+export interface SnoopServer {
+  url: string;
+  port: number;
+  itemsPerPage: number;
+  maxPage: number;
+  close(): Promise<void>;
+}
+
+function itemsForPage(page: number): { id: number }[] {
   return Array.from({ length: PAGE_SIZE }, (_unused, index) => ({ id: (page - 1) * PAGE_SIZE + index + 1 }));
 }
 
-export async function startSnoopServer() {
+export async function startSnoopServer(): Promise<SnoopServer> {
   const server = createServer((request, response) => {
-    const url = new URL(request.url, "http://127.0.0.1");
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (url.pathname === "/") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(HTML);
@@ -75,8 +83,10 @@ export async function startSnoopServer() {
     response.end("not found");
   });
 
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address === null || typeof address === "string") throw new Error("snoop fixture server has no TCP port");
+  const { port } = address;
   return {
     url: `http://127.0.0.1:${port}/`,
     port,
@@ -84,7 +94,7 @@ export async function startSnoopServer() {
     maxPage: MAX_PAGE,
     async close() {
       server.closeAllConnections?.();
-      await new Promise(resolve => server.close(resolve));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
 }

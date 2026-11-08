@@ -1,6 +1,6 @@
 // OOPIF-aware snapshots.
 //
-// core.js already snapshots every frame its FrameManager knows about, prefixes child refs
+// core.ts already snapshots every frame its FrameManager knows about, prefixes child refs
 // with f<N>, stitches the child trees into the parent tree and routes page.locator("f1e1")
 // to the owning session. What it misses is an out-of-process iframe that already existed
 // when the page was attached (attach-to-existing-tab, reconnect): FrameManager.initialize()
@@ -11,19 +11,83 @@
 // snapshotWithFrames() is reconcile + page.snapshot(). Refs stay page-level: use
 // page.locator(ref), not frame.locator(ref).
 
+import type { CdpSend, CdpTargetInfo } from "./cdp-protocol.ts";
+
+export interface FrameTargetInfo {
+  targetId: string;
+  type: string;
+  browserContextId?: string;
+}
+
+export interface FrameEntry {
+  frameId: string;
+  parentFrameId: string | null;
+  url: string;
+  name?: string;
+  sessionId?: string;
+  isolatedContextId?: number | null;
+}
+
+export interface FrameManagerView {
+  frames: Map<string, FrameEntry>;
+  mainFrameId: string | null;
+  getFrame(frameId: string): FrameEntry | null | undefined;
+  collectDescendantFrames(frameId: string | null): ReadonlyArray<{ frameId: string }>;
+  ensureInjected(frameId: string): Promise<number | null>;
+}
+
+export interface FramesPage<S extends FramesSnapshot = FramesSnapshot> {
+  targetId: string;
+  cdp: { send: CdpSend };
+  frameManager: FrameManagerView;
+  snapshot(options?: object): Promise<S>;
+}
+
+export interface FramesSnapshot {
+  refs?: Readonly<Record<string, unknown>> | null;
+}
+
+export interface AdoptedFrame {
+  frameId: string;
+  parentFrameId: string;
+  url: string;
+  sessionId: string;
+  isolatedContextId: unknown;
+}
+
+export interface MissingFrame {
+  frameId: string;
+  url: string;
+  injected: false;
+}
+
+interface DescribedFrame {
+  id: string;
+  parentId?: string;
+  url?: string;
+  name?: string;
+}
+
 const AUTO_ATTACH = { autoAttach: true, waitForDebuggerOnStart: false, flatten: true };
 const REF_PATTERN = /^(f\d+)?e\d+$/;
 
-function detach(page, sessionId) {
+function detach(page: FramesPage, sessionId: string) {
   return page.cdp.send("Target.detachFromTarget", { sessionId }).catch(() => {});
 }
 
-async function iframeTargets(page) {
-  const { targetInfo } = await page.cdp.send("Target.getTargetInfo", { targetId: page.targetId });
+async function iframeTargets(page: FramesPage) {
+  const { targetInfo } = await page.cdp.send("Target.getTargetInfo", {
+    targetId: page.targetId,
+  });
   const browserContextId = targetInfo?.browserContextId;
-  const { targetInfos } = await page.cdp.send("Target.getTargets", { filter: [{ type: "iframe" }] });
-  return targetInfos.filter(info => info.type === "iframe"
-    && (!browserContextId || !info.browserContextId || info.browserContextId === browserContextId));
+  const { targetInfos } = await page.cdp.send("Target.getTargets", {
+    filter: [{ type: "iframe" }],
+  });
+  return targetInfos.filter(
+    (info) =>
+      info.type === "iframe" &&
+      (!browserContextId || !info.browserContextId || info.browserContextId === browserContextId),
+  );
 }
 
 // A frame only participates in snapshots if its parent chain reaches the main frame.
@@ -31,9 +95,9 @@ async function iframeTargets(page) {
 // Target.attachedToTarget handler falls back to null when the target info carries no
 // parent), and core then never walks into it, so the child content stays invisible.
 // Such an entry counts as missing and is re-attributed.
-function isAttributed(fm, frameId) {
-  const seen = new Set();
-  let frame = fm.frames.get(frameId);
+function isAttributed(fm: FrameManagerView, frameId: string) {
+  const seen = new Set<string>();
+  let frame: FrameEntry | null | undefined = fm.frames.get(frameId);
   while (frame && !seen.has(frame.frameId)) {
     if (frame.frameId === fm.mainFrameId) return true;
     seen.add(frame.frameId);
@@ -44,8 +108,11 @@ function isAttributed(fm, frameId) {
 
 // Attach, then ask the child itself who its parent is: Page.getFrameTree on the child
 // session is the only reliable attribution for an iframe target.
-async function describeTarget(page, targetId) {
-  const { sessionId } = await page.cdp.send("Target.attachToTarget", { targetId, flatten: true });
+async function describeTarget(page: FramesPage, targetId: string) {
+  const { sessionId } = await page.cdp.send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
   try {
     await page.cdp.send("Page.enable", undefined, sessionId);
     const { frameTree } = await page.cdp.send("Page.getFrameTree", undefined, sessionId);
@@ -56,7 +123,12 @@ async function describeTarget(page, targetId) {
   }
 }
 
-async function adopt(page, sessionId, frame, parentFrameId) {
+async function adopt(
+  page: FramesPage,
+  sessionId: string,
+  frame: DescribedFrame,
+  parentFrameId: string,
+): Promise<AdoptedFrame> {
   await page.cdp.send("DOM.enable", undefined, sessionId);
   // Nested OOPIFs then arrive through core's own Target.attachedToTarget handler, which
   // accepts the event once one of its frames carries this session.
@@ -76,14 +148,14 @@ async function adopt(page, sessionId, frame, parentFrameId) {
  * Adopt every iframe target of this page that FrameManager does not know yet.
  * Returns the frames that were added (empty when there was nothing to recover).
  */
-export async function reconcileFrames(page) {
+export async function reconcileFrames(page: FramesPage) {
   const fm = page.frameManager;
-  const added = [];
-  let pending = (await iframeTargets(page)).filter(info => !isAttributed(fm, info.targetId));
+  const added: AdoptedFrame[] = [];
+  let pending = (await iframeTargets(page)).filter((info) => !isAttributed(fm, info.targetId));
   let progress = true;
   while (progress && pending.length > 0) {
     progress = false;
-    const retry = [];
+    const retry: CdpTargetInfo[] = [];
     for (const target of pending) {
       if (isAttributed(fm, target.targetId)) continue;
       const { sessionId, frame } = await describeTarget(page, target.targetId);
@@ -105,18 +177,19 @@ export async function reconcileFrames(page) {
 
 // Mirrors core's prefix assignment: main frame "", the remaining frames f1..fN in the
 // BFS order of collectDescendantFrames.
-function framePrefixes(fm) {
+function framePrefixes(fm: FrameManagerView) {
   let counter = 1;
-  return fm.collectDescendantFrames(fm.mainFrameId)
+  return fm
+    .collectDescendantFrames(fm.mainFrameId)
     .map(({ frameId }) => ({ frameId, prefix: frameId === fm.mainFrameId ? "" : `f${counter++}` }));
 }
 
 // Diagnostics only: a frame that contributed no ref *and* has no isolated world is a frame
 // the snapshot could not enter. Frames that are merely empty keep their world, so they are
 // not reported.
-function collectMissingFrames(page, refs) {
-  const seen = new Set(Object.keys(refs ?? {}).map(ref => ref.match(REF_PATTERN)?.[1] ?? ""));
-  const missing = [];
+function collectMissingFrames(page: FramesPage, refs: FramesSnapshot["refs"]) {
+  const seen = new Set(Object.keys(refs ?? {}).map((ref) => ref.match(REF_PATTERN)?.[1] ?? ""));
+  const missing: MissingFrame[] = [];
   for (const { frameId, prefix } of framePrefixes(page.frameManager)) {
     if (prefix === "" || seen.has(prefix)) continue;
     const frame = page.frameManager.getFrame(frameId);
@@ -130,7 +203,10 @@ function collectMissingFrames(page, refs) {
  * page.snapshot() with pre-existing out-of-process iframes recovered first.
  * Adds `missingFrames` only when a frame could not be entered at all.
  */
-export async function snapshotWithFrames(page, opts = {}) {
+export async function snapshotWithFrames<S extends FramesSnapshot>(
+  page: FramesPage<S>,
+  opts: object = {},
+): Promise<S | (S & { missingFrames: MissingFrame[] })> {
   await reconcileFrames(page);
   const result = await page.snapshot(opts);
   const missingFrames = collectMissingFrames(page, result.refs);
