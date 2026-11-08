@@ -54,17 +54,12 @@ jobs:
           "$bin" --version
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
-      - name: Typecheck
+      # One gate, as the repo defines it: the typecheck control first (it proves the compiler can
+      # still reject the deliberate error), then the typecheck, lint and format check. Running the
+      # three steps separately here would leave the control out of CI entirely.
+      - name: Check
         shell: bash
-        run: bun x tsc --noEmit -p tsconfig.json
-
-      - name: Lint
-        shell: bash
-        run: bun x oxlint --deny-warnings src bin bridge test scripts
-
-      - name: Format
-        shell: bash
-        run: bun x oxfmt --check src bin bridge test scripts
+        run: bun run check
 
       - name: bun test
         env:
@@ -82,16 +77,14 @@ jobs:
         shell: bash
         run: bun run test:node 2>&1 | tee "$RUNNER_TEMP/node-test.log"
 
-      # The tarball a consumer installs, imported by its package name under Node, which
-      # is what `exports` has to resolve. The runtime half of the build only: the
-      # declarations step is still blocked, so prepack (the full build) is bypassed and
-      # this step is the guard for the export map until it lands.
+      # The tarball a consumer actually installs, built by `prepack` and imported by its
+      # package name under Node — the guard for the export map now that the branding test
+      # reads the source entry.
       - name: Packed artifact (Node import)
         shell: bash
         run: |
-          bun run build --only=js,assets,bin
           mkdir -p "$RUNNER_TEMP/packed/consumer"
-          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/packed"
+          npm pack --pack-destination "$RUNNER_TEMP/packed"
           cd "$RUNNER_TEMP/packed/consumer"
           npm init -y >/dev/null
           npm install ../omowright-*.tgz --no-audit --no-fund >/dev/null
