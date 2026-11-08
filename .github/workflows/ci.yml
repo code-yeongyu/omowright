@@ -54,17 +54,12 @@ jobs:
           "$bin" --version
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
-      - name: Typecheck
+      # One gate, as the repo defines it: the typecheck control first (it proves the compiler can
+      # still reject the deliberate error), then the typecheck, lint and format check. Running the
+      # three steps separately here would leave the control out of CI entirely.
+      - name: Check
         shell: bash
-        run: bun x tsc --noEmit -p tsconfig.json
-
-      - name: Lint
-        shell: bash
-        run: bun x oxlint --deny-warnings src bin bridge test scripts
-
-      - name: Format
-        shell: bash
-        run: bun x oxfmt --check src bin bridge test scripts
+        run: bun run check
 
       - name: bun test
         env:
@@ -72,6 +67,36 @@ jobs:
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
         shell: bash
         run: bun run test 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
+
+      # The same suite under real Node: bun is the development runner, and a package
+      # Node consumers install has to keep working there (see packages' exports).
+      - name: node test
+        env:
+          SHELL_BIN: ${{ steps.browser.outputs.bin }}
+          CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
+        shell: bash
+        run: bun run test:node 2>&1 | tee "$RUNNER_TEMP/node-test.log"
+
+      # The tarball a consumer actually installs, built by `prepack` and imported by its
+      # package name under Node — the guard for the export map now that the branding test
+      # reads the source entry.
+      - name: Packed artifact (Node import)
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/packed/consumer"
+          npm pack --pack-destination "$RUNNER_TEMP/packed"
+          cd "$RUNNER_TEMP/packed/consumer"
+          npm init -y >/dev/null
+          npm install ../omowright-*.tgz --no-audit --no-fund >/dev/null
+          # Beside the install, so `import("omowright")` resolves through its node_modules.
+          cat > import-check.mjs <<'JS'
+          const api = await import("omowright");
+          for (const name of ["OmOPage", "OmOMouse", "OmOKeyboard"]) {
+            if (api[name]?.name !== name) throw new Error(`wrong runtime class name: ${name}`);
+          }
+          console.log(`packed import ok: ${Object.keys(api).length} exports`);
+          JS
+          node import-check.mjs | tee "$RUNNER_TEMP/packed-import.log"
 
       - name: Workflow summary
         if: always()
@@ -87,6 +112,9 @@ jobs:
             echo "| Runner | ${{ runner.os }} |"
             echo "| Browser | ${{ steps.browser.outputs.bin }} |"
             echo "| bun test pass / fail | $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ pass$') / $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ fail$') |"
+            # Node 22 prints TAP (`# pass`), Node 24 prints the spec reporter (`ℹ pass`); the row
+            # must read it either way, or a red run looks like a row with no numbers.
+            echo "| node test pass / fail | $(count "$RUNNER_TEMP/node-test.log" '^(#|ℹ) pass ') / $(count "$RUNNER_TEMP/node-test.log" '^(#|ℹ) fail ') |"
             echo "| Ref | ${{ github.ref_name }} |"
             echo "| Commit | ${{ github.sha }} |"
           } >> "$GITHUB_STEP_SUMMARY"

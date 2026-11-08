@@ -22,11 +22,10 @@
     "url": "git+https://github.com/code-yeongyu/omowright.git"
   },
   "bin": {
-    "omowright-cloak": "./bin/omowright-cloak.ts"
+    "omowright-cloak": "./dist/bin/omowright-cloak.js"
   },
   "files": [
-    "src/",
-    "bin/",
+    "dist/",
     "skills/",
     "presets/",
     "README.md",
@@ -35,7 +34,12 @@
   ],
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -43,15 +47,21 @@
   },
   "scripts": {
     "test": "bun test",
+    "test:node": "bun scripts/node-test.ts",
     "test:cloak-profile": "bun test test/cloak-profile.test.ts test/cloak-profile.integration.test.ts",
-    "check": "bun x tsc --noEmit -p tsconfig.json",
-    "lint": "bun x oxlint --deny-warnings src bin bridge test scripts",
-    "lint:fix": "bun x oxlint --fix src bin bridge test scripts",
-    "format": "bun x oxfmt --write src bin bridge test scripts",
-    "format:check": "bun x oxfmt --check src bin bridge test scripts",
-    "verify": "bun run check && bun run lint && bun run format:check",
-    "build:extension": "bun bridge/build-extension.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:control": "bun scripts/typecheck-control.ts",
+    "check": "bun run typecheck:control && bun run typecheck && bun run lint && bun run fmt:check",
+    "lint": "oxlint --deny-warnings src bin bridge test scripts",
+    "lint:fix": "oxlint --fix src bin bridge test scripts",
+    "fmt": "oxfmt --write src bin bridge test scripts",
+    "fmt:check": "oxfmt --check src bin bridge test scripts",
+    "format": "bun run fmt",
+    "format:check": "bun run fmt:check",
+    "verify": "bun run check",
     "build": "bun build.ts",
+    "build:extension": "bun bridge/build-extension.ts",
+    "prepack": "bun run build",
     "preversion": "git diff --quiet HEAD --"
   },
   "dependencies": {
@@ -64,7 +74,8 @@
     "gpt-tokenizer": "4.1.0",
     "oxfmt": "^0.77.0",
     "oxlint": "^1.92.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "typescript-5": "npm:typescript@5.9.3"
   },
   "engines": {
     "bun": ">=1.4",
