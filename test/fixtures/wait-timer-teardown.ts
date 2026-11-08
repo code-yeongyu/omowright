@@ -32,7 +32,7 @@ const profile = mkdtempSync(path.join(tmpdir(), "omowright-wait-timers-"));
 let connection: Awaited<ReturnType<typeof connectPipe>> | undefined;
 try {
   connection = await connectPipe({
-    browserPath: process.env.SHELL_BIN,
+    browserPath: process.env["SHELL_BIN"],
     browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`],
     storageRoot: profile,
   });

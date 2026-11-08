@@ -117,7 +117,7 @@ export function win32PathRisk(item: Win32PathItem | undefined, kind: Win32PathKi
 }
 
 const systemBinary = (...segments: string[]) => {
-  const file = path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", ...segments);
+  const file = path.win32.join(process.env["SystemRoot"] || "C:\\Windows", "System32", ...segments);
   if (!existsSync(file)) throw new Error(`${file} is missing`);
   return file;
 };

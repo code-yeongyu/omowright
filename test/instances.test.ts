@@ -288,9 +288,9 @@ test(
       await writeFile(path.join(bin, "flock"), "#!/bin/sh\nprintf 'flock: Bad file descriptor\\n' >&2\nexit 1\n", {
         mode: 0o700,
       });
-      const previousPath = process.env.PATH;
+      const previousPath = process.env["PATH"];
       try {
-        process.env.PATH = bin;
+        process.env["PATH"] = bin;
         await assert.rejects(tryAcquire(path.join(root, "broken.flock")), (error) => {
           assert.equal(readProperty(error, "code"), "ERR_INSTANCE_LOCK");
           assert.ok(error instanceof Error);
@@ -298,7 +298,7 @@ test(
           return true;
         });
       } finally {
-        process.env.PATH = previousPath;
+        process.env["PATH"] = previousPath;
       }
     } finally {
       await rm(root, { recursive: true, force: true });

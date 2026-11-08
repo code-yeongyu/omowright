@@ -302,7 +302,7 @@ for (const name of ["tmp", "var", "etc"]) {
             throw Object.assign(new Error("unresolvable alias"), { code: scenario.split(" ")[1] });
           },
         };
-        const moduleUrl = ${JSON.stringify(new URL("../src/bridge-transport.js", import.meta.url).href)};
+        const moduleUrl = ${JSON.stringify(new URL("../src/bridge-transport.ts", import.meta.url).href)};
         let bridge;
         if (process.versions.bun) {
           const { mock } = await import("bun:test");

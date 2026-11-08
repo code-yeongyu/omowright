@@ -130,10 +130,10 @@ const checked = <T>(schema: ZodType<T>, value: unknown, message: string): T => {
   return result.data;
 };
 function schemaFor(value: BridgeMessage): ZodType | null {
-  if (value.type === "hello") return value.role === "host" ? HostHelloSchema : ExtensionHelloSchema;
-  if (value.type === "event") return EventSchema;
-  if (value.type === "command") return CommandSchema;
-  if (value.type === "response") return ResponseSchema;
+  if (value["type"] === "hello") return value["role"] === "host" ? HostHelloSchema : ExtensionHelloSchema;
+  if (value["type"] === "event") return EventSchema;
+  if (value["type"] === "command") return CommandSchema;
+  if (value["type"] === "response") return ResponseSchema;
   return null;
 }
 export function encodeFrame(value: BridgeMessage, maxMessageBytes: number = MAX_MESSAGE_BYTES): Buffer {
@@ -491,7 +491,7 @@ export function defaultNativeMessagingHostDir(
     if (WIN32_REGISTRY_KEYS[browser] === undefined)
       throw new BridgeProtocolError("custom browser requires nativeMessagingHostDir");
     return path.win32.join(
-      process.env.LOCALAPPDATA || path.win32.join(homedir(), "AppData", "Local"),
+      process.env["LOCALAPPDATA"] || path.win32.join(homedir(), "AppData", "Local"),
       "omowright",
       "NativeMessagingHosts",
       browser,
@@ -713,13 +713,13 @@ export function createChromeApi(connection: ChromeConnection, options: BridgeChr
           const unsubscribe = bridge.on(wire, (payload) =>
             listener(
               ...(namespace === "notifications" && event === "onClosed"
-                ? [payload.notificationId, payload.byUser]
+                ? [payload["notificationId"], payload["byUser"]]
                 : namespace === "notifications"
-                  ? [payload.notificationId]
+                  ? [payload["notificationId"]]
                   : namespace === "tabGroups"
-                    ? [payload.group]
+                    ? [payload["group"]]
                     : namespace === "windows"
-                      ? [payload.windowId]
+                      ? [payload["windowId"]]
                       : [payload]),
             ),
           );

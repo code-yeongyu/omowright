@@ -11,7 +11,7 @@ type Call = {
   method: string;
   params?: unknown;
   sessionId?: unknown;
-  options?: { capability?: unknown };
+  options?: { capability?: unknown } | undefined;
   url?: string;
   targetId?: string;
 };

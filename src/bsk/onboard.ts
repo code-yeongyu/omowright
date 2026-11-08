@@ -36,7 +36,7 @@ export interface DaemonReport {
   error?: unknown;
   code?: unknown;
   startBlocked?: boolean;
-  browsers: unknown[];
+  browsers: unknown;
   sessions: unknown;
 }
 
@@ -52,7 +52,11 @@ export interface InstallOutcome {
   [field: string]: unknown;
 }
 
-export type InstallCli = (options: { platform: string; home: string; installDir?: string }) => Promise<InstallOutcome>;
+export type InstallCli = (options: {
+  platform: string;
+  home: string;
+  installDir?: string | undefined;
+}) => Promise<InstallOutcome>;
 
 export interface HumanStepEvent {
   browser: unknown;
@@ -157,7 +161,7 @@ async function daemonReport(client: BskClient, waitForBrowserMs: number): Promis
       running: true,
       version: readProperty(status, "daemon_version"),
       protocolVersion: readProperty(status, "protocol_version"),
-      browsers: listOrEmpty(readProperty(status, "browsers"), "system.status browsers"),
+      browsers: readProperty(status, "browsers") ?? [],
       sessions: readProperty(status, "sessions") ?? [],
     };
   } catch (error) {
@@ -222,7 +226,7 @@ async function identify({
 }> {
   const catalog = catalogBrowsers({ platform, home, env, exists }).map((b) => withRegistration(platform, b));
   const observed = signals ?? (await probeSignals({ platform, home, browsers: catalog.filter((b) => b.hasProfile) }));
-  const explicit = browser ?? env.OMOWRIGHT_BROWSER ?? null;
+  const explicit = browser ?? env["OMOWRIGHT_BROWSER"] ?? null;
   const { primary, ...identification } = identifyBrowser({
     catalog,
     signals: observed,
@@ -282,18 +286,18 @@ export async function bskDoctor({
   const cli = await cliReport({ bskBin, env, cliVersion });
   const ipc = client ?? new BskIpcClient({ env, bskBin: cli.bskBin ?? undefined, autoStart: false });
   const daemon = await daemonReport(ipc, waitForBrowserMs);
+  const browsersConnected = listOrEmpty(daemon.browsers, "system.status browsers");
   const { browsers, identification, primary } = await identify({
     platform,
     home,
     env,
     exists,
     browser,
-    connected: daemon.browsers.map((b) => readProperty(b, "browser_name")),
+    connected: browsersConnected.map((b) => readProperty(b, "browser_name")),
     signals,
     probeSignals,
     now,
   });
-  const browsersConnected = daemon.browsers;
   const outdatedExtensions = browsersConnected.filter(isTabGroupingExtension);
   const report: BskDoctorReport = {
     cli,
@@ -335,13 +339,14 @@ export async function bskOnboard({
   }
   const ipc = client ?? new BskIpcClient({ env, bskBin: cli.bskBin ?? undefined, autoStart: true });
   let daemon = await daemonReport(ipc, 0);
+  let browsersConnected = listOrEmpty(daemon.browsers, "system.status browsers");
   const { browsers, identification, primary } = await identify({
     platform,
     home,
     env,
     exists,
     browser,
-    connected: daemon.browsers.map((b) => readProperty(b, "browser_name")),
+    connected: browsersConnected.map((b) => readProperty(b, "browser_name")),
     signals,
     probeSignals,
     now,
@@ -349,7 +354,7 @@ export async function bskOnboard({
   const registrations: BskOnboardReport["registrations"] = [];
   let humanStep: string | null = null;
   let needsChoice = false;
-  if (daemon.browsers.length === 0) {
+  if (browsersConnected.length === 0) {
     if (browsers.length === 0 && !primary) {
       humanStep = NO_BROWSER_STEP;
     } else if (identification.needsChoice) {
@@ -370,7 +375,6 @@ export async function bskOnboard({
     }
   }
   const deadline = Date.now() + waitTotalMs;
-  let browsersConnected = daemon.browsers;
   while (!needsChoice && browsersConnected.length === 0 && daemon.running && Date.now() < deadline) {
     browsersConnected = await listBrowsers(ipc, { waitForBrowserMs });
     if (waitForBrowserMs === 0) break;

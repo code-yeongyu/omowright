@@ -31,7 +31,7 @@ type CdpDownloadState = CdpEventPayload<"Browser.downloadProgress">["state"];
 export interface BrowserEventsOptions {
   downloadBehavior?: DownloadBehavior;
   /** Absolute path; required when `downloadBehavior` is "allow". */
-  downloadPath?: string;
+  downloadPath?: string | undefined;
 }
 
 export interface BrowserEventsConnection {
@@ -266,7 +266,7 @@ class BrowserEventBridge {
     for (const info of targets) this.#created(info, true);
   }
   async #configureDownloads() {
-    const params: { behavior: DownloadBehavior; eventsEnabled: boolean; downloadPath?: string } = {
+    const params: { behavior: DownloadBehavior; eventsEnabled: boolean; downloadPath?: string | undefined } = {
       behavior: this.#options.downloadBehavior,
       eventsEnabled: true,
     };

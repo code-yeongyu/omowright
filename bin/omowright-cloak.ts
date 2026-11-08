@@ -95,7 +95,7 @@ if (options.help) {
 }
 
 const profileDir = path.resolve(
-  options.profile ?? process.env.CLOAK_PROFILE_DIR ?? path.join(os.homedir(), ".local", "share", "omowright-cloak"),
+  options.profile ?? process.env["CLOAK_PROFILE_DIR"] ?? path.join(os.homedir(), ".local", "share", "omowright-cloak"),
 );
 const profile = await resolveCloakProfile({
   profileDir,

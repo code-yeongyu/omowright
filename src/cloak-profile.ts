@@ -248,9 +248,9 @@ async function assertCloakLaunchClear({
 }
 
 export async function connectCloakProfile({
-  browserPath = process.env.CLOAKBROWSER_BIN ?? findCloakBrowserPath(),
-  profileDir = process.env.CLOAK_PROFILE_DIR ?? DEFAULT_PROFILE_DIR,
-  fingerprintSeed = process.env.CLOAK_FINGERPRINT_SEED,
+  browserPath = process.env["CLOAKBROWSER_BIN"] ?? findCloakBrowserPath(),
+  profileDir = process.env["CLOAK_PROFILE_DIR"] ?? DEFAULT_PROFILE_DIR,
+  fingerprintSeed = process.env["CLOAK_FINGERPRINT_SEED"],
   browserArgs = [],
   storageRoot,
   name,

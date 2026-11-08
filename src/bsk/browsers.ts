@@ -361,10 +361,10 @@ function linuxRow(b: LinuxSpec, home: string, exists: Exists): CatalogBrowser {
 
 function windowsRow(b: WindowsSpec, env: NodeJS.ProcessEnv, home: string, exists: Exists): CatalogBrowser {
   const { join } = path.win32;
-  const localAppData = env.LOCALAPPDATA ?? join(home, "AppData", "Local");
+  const localAppData = env["LOCALAPPDATA"] ?? join(home, "AppData", "Local");
   const programFiles = [
     localAppData,
-    env.PROGRAMFILES,
+    env["PROGRAMFILES"],
     env["PROGRAMFILES(X86)"],
     "C:\\Program Files",
     "C:\\Program Files (x86)",

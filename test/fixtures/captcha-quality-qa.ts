@@ -84,10 +84,10 @@ export async function runScenario(scenario: string | undefined, evidenceDir: str
   if (evidenceDir) mkdirSync(evidenceDir, { recursive: true });
   const profile = mkdtempSync(path.join(tmpdir(), "omowright-captcha-qa-"));
   const browserPath =
-    process.env.SHELL_BIN ??
+    process.env["SHELL_BIN"] ??
     globSync(
       path.join(
-        process.env.HOME ?? "",
+        process.env["HOME"] ?? "",
         "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
       ),
     )
@@ -161,7 +161,7 @@ export async function runScenario(scenario: string | undefined, evidenceDir: str
       result.inputReceipt = await page.evaluate(() => window.nextInput);
       assert.equal(result.inputReceipt.trusted, true);
       assert.equal(
-        await page.evaluate(() => document.querySelector<HTMLElement>("#application-status")?.dataset.accepted),
+        await page.evaluate(() => document.querySelector<HTMLElement>("#application-status")?.dataset["accepted"]),
         "false",
       );
       assert.equal(typeof captcha.waitFor, "function", "captcha must support explicit completion waiting");
@@ -179,7 +179,7 @@ export async function runScenario(scenario: string | undefined, evidenceDir: str
         .waitFor({
           until: async (p) => {
             const accepted = await p.evaluate(
-              () => document.querySelector<HTMLElement>("#application-status")?.dataset.accepted === "true",
+              () => document.querySelector<HTMLElement>("#application-status")?.dataset["accepted"] === "true",
             );
             if (first) {
               first = false;
@@ -239,7 +239,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const flag = process.argv.indexOf("--scenario");
   const scenario = flag < 0 ? "all" : process.argv[flag + 1];
   for (const name of scenario === "all" ? ["targeting", "completion"] : [scenario]) {
-    const dir = process.env.CAPTCHA_EVIDENCE_DIR;
+    const dir = process.env["CAPTCHA_EVIDENCE_DIR"];
     await runScenario(name, dir && (scenario === "all" ? path.join(dir, name ?? "") : dir));
   }
   console.log(`PASS ${scenario}`);

@@ -13,7 +13,7 @@ import { removeTreeSync } from "./fixtures/remove-tree.ts";
 function findHeadlessShell() {
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
@@ -23,7 +23,7 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 
 function hasIntegerId(item: unknown): boolean {
   return typeof item === "object" && item !== null && "id" in item && Number.isInteger(item.id);

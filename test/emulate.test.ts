@@ -10,7 +10,7 @@ import { removeTreeSync } from "./fixtures/remove-tree.ts";
 function findHeadlessShell() {
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
@@ -20,7 +20,7 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 
 // Live tests are skipped without a binary; inside them the path is required.
 function requireBinary(binary: string | null | undefined): string {
@@ -30,7 +30,12 @@ function requireBinary(binary: string | null | undefined): string {
 
 // FakeCdp pattern from events.test.mjs
 type FakeListener = (params: unknown, meta: unknown) => void;
-type FakeCall = { method: string; params?: Record<string, unknown>; sessionId?: string; options?: unknown };
+type FakeCall = {
+  method: string;
+  params?: Record<string, unknown> | undefined;
+  sessionId?: string | undefined;
+  options?: unknown;
+};
 
 class FakeEmitter {
   #listeners = new Map<string, Set<FakeListener>>();
@@ -145,8 +150,8 @@ test("emulate(page, 'iphone-14') sends correct CDP calls", async () => {
 
   const ua = cdp.calls.find((c) => c.method === "Emulation.setUserAgentOverride");
   assert(ua, "setUserAgentOverride not called");
-  assert(String(ua.params?.userAgent).includes("iPhone"));
-  assert.equal(ua.params?.platform, "iPhone");
+  assert(String(ua.params?.["userAgent"]).includes("iPhone"));
+  assert.equal(ua.params?.["platform"], "iPhone");
   assert.equal(ua.sessionId, "s1");
 });
 
@@ -177,7 +182,7 @@ test("emulate(page, null) restores original UA", async () => {
 
   const restoreUA = cdp.calls.find((c) => c.method === "Emulation.setUserAgentOverride");
   assert(restoreUA, "setUserAgentOverride not called on restore");
-  assert.equal(restoreUA.params?.userAgent, "OrigUA");
+  assert.equal(restoreUA.params?.["userAgent"], "OrigUA");
   assert.equal(restoreUA.sessionId, "s1");
 });
 

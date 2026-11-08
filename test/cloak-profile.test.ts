@@ -127,7 +127,7 @@ test("resolveCloakProfile tightens existing metadata permissions", { timeout: 60
 });
 
 // Contract owner: the anonymous (name-less) connectCloakProfile path never
-// touches the named-instance registry (IS-5). The child re-imports src/index.js
+// touches the named-instance registry (IS-5). The child re-imports src/index.ts
 // with HOME inside the temp dir so even the default registry root derivation is
 // observable; if the anonymous path ever delegated to connectNamed, that child
 // would create the registry directories and both assertions below would fail.
@@ -154,7 +154,7 @@ test("anonymous connectCloakProfile creates no registry artifacts", { timeout: 1
     );
     chmodSync(fakeBrowserPath, 0o755);
   }
-  const entryPoint = pathToFileURL(fileURLToPath(new URL("../src/index.js", import.meta.url))).href;
+  const entryPoint = pathToFileURL(fileURLToPath(new URL("../src/index.ts", import.meta.url))).href;
   const childPath = path.join(homeDir, "anon-child.mjs");
   writeFileSync(
     childPath,

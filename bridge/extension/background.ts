@@ -82,13 +82,13 @@ const responseName = (name: unknown) => (isCommandName(name) ? name : PROTOCOL_E
 const response = (request: UntrustedRecord, ok: boolean, value: unknown, name: unknown) => ({
   protocol: PROTOCOL,
   type: "response",
-  requestId: request.requestId,
+  requestId: request["requestId"],
   name: responseName(name),
   ok,
   ...(ok ? { result: value } : { error: value }),
 });
 const errorFor = (error: unknown) => {
-  const debuggerFailure = asRecord(error)?.code === "DEBUGGER_ERROR";
+  const debuggerFailure = asRecord(error)?.["code"] === "DEBUGGER_ERROR";
   return {
     code: debuggerFailure ? "DEBUGGER_ERROR" : "CHROME_ERROR",
     message: debuggerFailure ? "debugger operation failed" : "Chrome operation failed",
@@ -144,10 +144,10 @@ function scheduleReconnect() {
 function acceptHello(message: UntrustedRecord) {
   const { commands, events, hostVersion, maxMessageBytes } = message;
   if (
-    message.protocol !== PROTOCOL ||
-    message.role !== "host" ||
-    message.hostName !== HOST_NAME ||
-    !validId(message.connectionId) ||
+    message["protocol"] !== PROTOCOL ||
+    message["role"] !== "host" ||
+    message["hostName"] !== HOST_NAME ||
+    !validId(message["connectionId"]) ||
     typeof hostVersion !== "string" ||
     !hostVersion.length ||
     hostVersion.length > 64 ||
@@ -191,20 +191,20 @@ function connect() {
     const message = asRecord(received);
     try {
       if (current !== port || currentEpoch !== epoch) return;
-      if (message?.type === "hello") return acceptHello(message);
-      if (message?.type !== "command") {
-        if (validId(message?.requestId))
+      if (message?.["type"] === "hello") return acceptHello(message);
+      if (message?.["type"] !== "command") {
+        if (validId(message?.["requestId"]))
           safePost(
-            response(message, false, { code: "INVALID_MESSAGE", message: "invalid command" }, message.name),
+            response(message, false, { code: "INVALID_MESSAGE", message: "invalid command" }, message["name"]),
             current,
           );
         return;
       }
       const { name, params, requestId } = message;
-      const details = plain(params) && exact(params, ["details"], ["details"]) ? params.details : undefined;
+      const details = plain(params) && exact(params, ["details"], ["details"]) ? params["details"] : undefined;
       if (
         !(
-          message.protocol === PROTOCOL &&
+          message["protocol"] === PROTOCOL &&
           validId(requestId) &&
           isCommandName(name) &&
           capabilities.commands.has(name) &&
@@ -226,9 +226,14 @@ function connect() {
       if (current === port && currentEpoch === epoch)
         safePost(response(message, true, result === undefined ? {} : result, name), current);
     } catch (error) {
-      pending.delete(message?.requestId);
-      if (current === port && currentEpoch === epoch && message?.type === "command" && validId(message.requestId))
-        safePost(response(message, false, errorFor(error), message.name), current);
+      pending.delete(message?.["requestId"]);
+      if (
+        current === port &&
+        currentEpoch === epoch &&
+        message?.["type"] === "command" &&
+        validId(message["requestId"])
+      )
+        safePost(response(message, false, errorFor(error), message["name"]), current);
     }
   });
   current.onDisconnect.addListener(() => {

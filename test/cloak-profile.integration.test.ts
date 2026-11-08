@@ -41,7 +41,7 @@ try {
 } catch {
   cloakBrowser = undefined;
 }
-const BROWSER = process.env.CLOAKBROWSER_BIN ?? cloakBrowser;
+const BROWSER = process.env["CLOAKBROWSER_BIN"] ?? cloakBrowser;
 
 const probe = `(() => ({ webdriver: navigator.webdriver, value: localStorage.getItem("omowright-profile-smoke") }))()`;
 
@@ -50,14 +50,14 @@ const probe = `(() => ({ webdriver: navigator.webdriver, value: localStorage.get
 // rather than relying on its load winning the attach race.
 test(
   "a reused cloak profile initializes domains before its first navigation",
-  { skip: !BROWSER && !process.env.SHELL_BIN && "no Chromium binary found", timeout: 60000 },
+  { skip: !BROWSER && !process.env["SHELL_BIN"] && "no Chromium binary found", timeout: 60000 },
   async () => {
     const pageEnabled = Promise.withResolvers<void>();
     const domainReady = Promise.withResolvers<void>();
     const blocked = Promise.withResolvers<void>();
     await withSmokeServer(
       async ({ profileDir, url }) => {
-        const browserPath = BROWSER ?? process.env.SHELL_BIN;
+        const browserPath = BROWSER ?? process.env["SHELL_BIN"];
         const first = await connectCloakProfile({ browserPath, profileDir, fingerprintSeed: 31415 });
         await first.close();
         let second;

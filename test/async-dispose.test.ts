@@ -16,7 +16,7 @@ import { field } from "./fixtures/read-field.ts";
 function findHeadlessShell() {
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
@@ -26,13 +26,13 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 // Live tests are skipped without a binary; inside them the path is required.
 function requireBinary(binary: string | null | undefined): string {
   assert.ok(binary, "live test ran without a Chromium binary");
   return binary;
 }
-const INDEX = new URL("../src/index.js", import.meta.url).href;
+const INDEX = new URL("../src/index.ts", import.meta.url).href;
 // A script that never releases its socket keeps running until this bound.
 const EXIT_BOUND_MS = 20_000;
 

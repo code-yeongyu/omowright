@@ -31,8 +31,8 @@ test("readDaemonInfo parses daemon.json and rejects a missing one", async () => 
   try {
     const info = readDaemonInfo(daemon.home);
     assert.equal(info?.sock_path, daemon.sockPath);
-    assert.equal(info?.version, "0.3.0-fake");
-    assert.equal(info?.ws_port, 52800);
+    assert.equal(info?.["version"], "0.3.0-fake");
+    assert.equal(info?.["ws_port"], 52800);
   } finally {
     await daemon.close();
   }

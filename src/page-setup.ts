@@ -102,7 +102,7 @@ function bindingValue(value: unknown, decode?: false): EncodedBindingValue;
 function bindingValue(value: EncodedBindingArray, decode: true): unknown[];
 function bindingValue(value: EncodedBindingValue, decode: true): unknown;
 function bindingValue(
-  ...[value, decode]: [value: unknown, decode?: false] | [value: EncodedBindingValue, decode: true]
+  ...[value, decode]: [value: unknown, decode?: false | undefined] | [value: EncodedBindingValue, decode: true]
 ): unknown {
   if (decode) {
     const [type, data] = value;

@@ -8,7 +8,7 @@ import { WebSocketServer } from "ws";
 // FAKE_SIGNAL_LOG names a file that receives "CLOSE <epoch ms>" for each
 // Browser.close and "TERM <epoch ms>" for SIGTERM. Like Chrome it quits after
 // answering Browser.close; FAKE_ON_CLOSE=ignore keeps it running.
-const signalLog = process.env.FAKE_SIGNAL_LOG;
+const signalLog = process.env["FAKE_SIGNAL_LOG"];
 const record = (event: string) => {
   if (signalLog) appendFileSync(signalLog, `${event} ${Date.now()}\n`);
 };
@@ -77,8 +77,8 @@ webSockets.on("connection", (webSocket) => {
     if (message.method === "Browser.close") {
       record("CLOSE");
       const reply = JSON.stringify({ id: message.id, result: {} });
-      if (process.env.FAKE_ON_CLOSE === "ignore") webSocket.send(reply);
-      else if (process.env.FAKE_ON_CLOSE === "delayed") {
+      if (process.env["FAKE_ON_CLOSE"] === "ignore") webSocket.send(reply);
+      else if (process.env["FAKE_ON_CLOSE"] === "delayed") {
         // Model asynchronous browser cleanup after acknowledging the request.
         // On Windows terminateChild itself grants 5 s after Browser.close.
         // Cleanup at 6 s needs the named close's additional 2 s window too.

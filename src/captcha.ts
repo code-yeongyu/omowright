@@ -31,7 +31,7 @@ export interface CaptchaPage {
 }
 
 export interface CaptchaOptions {
-  ocr?: CaptchaOcr;
+  ocr?: CaptchaOcr | undefined;
 }
 
 export interface CaptchaClickOptions {

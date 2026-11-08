@@ -90,7 +90,7 @@ function portOf(server: Server) {
 }
 
 function findHeadlessShell() {
-  const home = process.env.HOME;
+  const home = process.env["HOME"];
   assert.ok(home !== undefined, "HOME is unset");
   const candidates = globSync(
     path.join(
@@ -104,11 +104,11 @@ function findHeadlessShell() {
   return undefined;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 
 function findFfmpeg() {
   const binary = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
-  const candidates = (process.env.PATH ?? "")
+  const candidates = (process.env["PATH"] ?? "")
     .split(path.delimiter)
     .filter(Boolean)
     .map((dir) => path.join(dir, binary));
@@ -162,7 +162,7 @@ test(
     assert.ok(FFMPEG);
     const ud = mkdtempSync(path.join(tmpdir(), "omowright-video-"));
     let connection;
-    const originalPath = process.env.PATH;
+    const originalPath = process.env["PATH"];
     try {
       connection = await connectPipe({
         browserPath: SHELL,
@@ -171,7 +171,7 @@ test(
       });
       // Keep the qualified binary in place: Windows package-manager shims and
       // shared builds can depend on files next to the executable.
-      process.env.PATH = `${path.dirname(FFMPEG)}${path.delimiter}${originalPath ?? ""}`;
+      process.env["PATH"] = `${path.dirname(FFMPEG)}${path.delimiter}${originalPath ?? ""}`;
       const page = await connection.newTab("about:blank");
       const video = page.video();
       await video.start({ path: "capture/raw.webm", size: { width: 320, height: 240 } });
@@ -189,8 +189,8 @@ test(
       await video.delete();
       assert.equal(existsSync(clip), false);
     } finally {
-      if (originalPath === undefined) delete process.env.PATH;
-      else process.env.PATH = originalPath;
+      if (originalPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = originalPath;
       await connection?.close();
       removeTreeSync(ud);
     }
@@ -286,7 +286,7 @@ test(
         const button = shadow.querySelector("button");
         if (!button) throw new Error("the shadow button is missing");
         button.addEventListener("click", () => {
-          document.body.dataset.clicked = "shadow";
+          document.body.dataset["clicked"] = "shadow";
         });
       });
       assert.equal(await page.locator("#inside-shadow").count(), 1);
@@ -765,7 +765,7 @@ test(
       const page = await browser.newTab(`data:text/html,${encodeURIComponent(html)}`);
       const full = await page.snapshot();
       assertTreeRead(full);
-      const fullRef = (name: string) => Object.keys(full.refs).find((ref) => full.refs[ref]?.name === name);
+      const fullRef = (name: string) => Object.keys(full.refs).find((ref) => full.refs[ref]?.["name"] === name);
       const coupons = fullRef("Coupon code");
       const button = fullRef("Pay now");
       // Change the page between the full read and the searches, so a search that replaced the
@@ -1032,7 +1032,7 @@ test(
         const button = shadow.querySelector("button");
         if (!button) throw new Error("the shadow button is missing");
         button.addEventListener("click", () => {
-          document.body.dataset.clicked = "shadow";
+          document.body.dataset["clicked"] = "shadow";
         });
         const nested = shadow.querySelector("#nested");
         if (!nested) throw new Error("#nested is missing");
