@@ -5,7 +5,8 @@
 import { BrowserConnection } from "../connection.js";
 import { Dialog, answerWithPolicy, normalizeDialogPolicy } from "../dialog-policy.js";
 import { SerialEmitter as Emittery } from "../serial-emitter.js";
-import { CdpCommandTimeoutError, CdpSessionDetachedError } from "../cdp-errors.js";
+import { CdpCommandTimeoutError, CdpSessionCrashedError, CdpSessionDetachedError } from "../cdp-errors.js";
+import { randomInt } from "node:crypto";
 import { targetCreationCapability } from "../internal-capability.js";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
@@ -21,7 +22,10 @@ export class EgoCdpError extends Error {
 
 export class EgoCdpClient {
   #ego;
-  #seq = 1;
+  // CDP ids are int32; a random base keeps two clients on one Ego session from reusing an id.
+  #seq = randomInt(1, 2 ** 30);
+  #onMessageHandler = (payload) => this.#onMessage(payload);
+  #onSendErrorHandler = (message, code) => this.#onSendError(message, code);
   #pending = new Map();
   #closedSessions = new Set();
   #events = new Emittery();
@@ -51,8 +55,11 @@ export class EgoCdpClient {
 
   async ensureConnected() {
     if (this.#connected) return;
-    this.#ego.onCDPMessage = (payload) => this.#onMessage(payload);
-    this.#ego.onSendCDPMessageError = (message, code) => this.#onSendError(message, code);
+    if (this.#ego.onCDPMessage || this.#ego.onSendCDPMessageError) {
+      throw new EgoCdpError("ego_busy", "another client already holds Ego's CDP callbacks in this runtime; close it first");
+    }
+    this.#ego.onCDPMessage = this.#onMessageHandler;
+    this.#ego.onSendCDPMessageError = this.#onSendErrorHandler;
     this.#connected = true;
     await this.#dispatch("Target.setDiscoverTargets", { discover: true }).catch(() => {});
     await this.transportEvents.emit("connected");
@@ -118,8 +125,8 @@ export class EgoCdpClient {
   async close() {
     if (!this.#connected) return;
     this.#connected = false;
-    if (this.#ego.onCDPMessage) this.#ego.onCDPMessage = undefined;
-    if (this.#ego.onSendCDPMessageError) this.#ego.onSendCDPMessageError = undefined;
+    if (this.#ego.onCDPMessage === this.#onMessageHandler) this.#ego.onCDPMessage = undefined;
+    if (this.#ego.onSendCDPMessageError === this.#onSendErrorHandler) this.#ego.onSendCDPMessageError = undefined;
     this.#failWhere(() => true, (entry) => new EgoCdpError("ego_closed", `Ego CDP client closed: ${entry.method}`, { method: entry.method }));
     await this.transportEvents.emit("disconnected").catch(() => {});
   }
@@ -173,6 +180,9 @@ export class EgoCdpClient {
     if (msg.method === "Target.detachedFromTarget" && msg.params?.sessionId) {
       const sessionId = msg.params.sessionId;
       this.#failWhere((entry) => entry.sessionId === sessionId, (entry) => new CdpSessionDetachedError(`CDP session detached: ${entry.method}`, { method: entry.method, sessionId }));
+    } else if (msg.method === "Inspector.targetCrashed" && msg.sessionId) {
+      // Same as PipeCdpClient: a pending reload brings the target back, everything else fails now.
+      this.#failWhere((entry) => entry.sessionId === msg.sessionId && entry.method !== "Page.reload", (entry) => new CdpSessionCrashedError(`CDP session crashed: ${entry.method}`, { method: entry.method, sessionId: msg.sessionId }));
     }
     const meta = { sessionId: msg.sessionId };
     if (msg.method === "Page.javascriptDialogOpening" && msg.sessionId) {
@@ -186,11 +196,14 @@ export class EgoCdpClient {
 // Ego sends raw CDP only for the task space the script selected and the agent owns. By default a
 // new agent task space is created; pass `taskSpace` (a numeric id the agent already claimed) to reuse one.
 async function selectTaskSpace(ego, { taskSpace, taskName, profileId }) {
-  if (typeof taskSpace === "number") {
+  if (taskSpace !== undefined) {
+    if (!Number.isInteger(taskSpace)) throw new TypeError("taskSpace is Ego's numeric task-space id (ego.listTaskSpaces()[i].id)");
     ego.useTaskSpace(taskSpace);
     return { id: taskSpace };
   }
-  if (typeof ego.createTaskSpace !== "function") return null;
+  if (typeof ego.createTaskSpace !== "function" || typeof ego.useTaskSpace !== "function") {
+    throw new EgoCdpError("ego_task_space_unsupported", "this Ego runtime has no createTaskSpace/useTaskSpace; pass taskSpace with an id the agent already claimed");
+  }
   const created = await ego.createTaskSpace(taskName ?? `omowright-${Date.now()}`, ...(profileId ? [profileId] : []));
   if (!created || created.error) {
     throw new EgoCdpError(created?.error_code ?? "ego_task_space_failed", `Ego could not create a task space: ${created?.error ?? "no result"}`);

@@ -21,6 +21,12 @@ const MARKER = /^\[(ok|error) \| \d+ms\]$/;
 // Aside colours its banner, prompt and markers even on a pipe.
 const ANSI = /\x1B\[[0-9;?]*[ -/]*[@-~]/g;
 const plain = (text) => text.replace(ANSI, "");
+// A call's own [ok] comes right after its result line; page logs can print a marker of their own.
+const finished = (lines, tag) => {
+  const last = lines.at(-1) ?? "";
+  if (!MARKER.test(last)) return false;
+  return !tag || last.startsWith("[error") || (lines.at(-2) ?? "").startsWith(tag);
+};
 
 export class AsideReplError extends Error {
   constructor(code, message, { output = [], setup } = {}) {
@@ -91,7 +97,7 @@ export class AsideSession {
     // as a JSON string literal and a direct eval runs it in the REPL's scope (page, tabs, snapshot).
     const body = `(async () => {\n${code}\n})()`;
     const line = `console.log(${JSON.stringify(tag)} + JSON.stringify((await eval(${JSON.stringify(body)})) ?? null))`;
-    const output = await this.#call(line);
+    const output = await this.#call(line, tag);
     const logs = [];
     let value;
     let found = false;
@@ -138,13 +144,13 @@ export class AsideSession {
     }
   }
 
-  #call(line) {
+  #call(line, tag) {
     const run = this.#queue.then(async () => {
       if (this.#closed) throw new AsideReplError("repl_closed", "aside repl session is closed");
       this.#child.stdin.write(`${line}\n`);
       // Page output can contain the prompt text and arrive split right after it, so a call is
       // finished only once its last complete line is the [ok|error] marker and a prompt follows.
-      const output = await this.#waitFor((pending, lines) => pending.endsWith(PROMPT) && MARKER.test(lines.at(-1) ?? ""), this.#callTimeoutMs, "repl_timeout");
+      const output = await this.#waitFor((pending, lines) => pending.endsWith(PROMPT) && finished(lines, tag), this.#callTimeoutMs, "repl_timeout");
       const markerAt = output.findLastIndex((entry) => MARKER.test(entry));
       if (markerAt === -1) throw new AsideReplError("repl_protocol", "aside repl answered without an [ok|error] marker", { output });
       const body = output.slice(0, markerAt);
