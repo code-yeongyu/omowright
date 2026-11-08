@@ -121,20 +121,25 @@ test("externalExtensionEntry uses the HKCU registry on Windows and a system dir 
 });
 
 // Public API error contract (#274): a catalog row missing the directory its platform needs throws path.join's own
-// argument error. The expected values are what the JavaScript source at e02c2d232a (the parent of #263) threw on
-// bun; the port replaced them with a code-less TypeError.
+// argument error. The expected messages are what the JavaScript source at e02c2d232a (the parent of #263) threw on
+// each runtime the suite runs under; the port replaced them with a code-less TypeError.
+const missingDirMessage = (value: "undefined" | "null") =>
+  process.versions.bun
+    ? `The "paths[0]" property must be of type string, got ${value === "null" ? "object" : value}`
+    : `The "path" argument must be of type string. Received ${value}`;
+
 test("externalExtensionEntry rejects a browser without its platform directory with ERR_INVALID_ARG_TYPE", () => {
   for (const [platform, browser, got] of [
     ["linux", { id: "chrome", store: "chrome" }, "undefined"],
     ["darwin", { id: "brave", store: "chrome" }, "undefined"],
-    ["linux", { id: "chrome", store: "chrome", externalDir: null }, "object"],
-  ] satisfies [string, ExtensionBrowser, string][]) {
+    ["linux", { id: "chrome", store: "chrome", externalDir: null }, "null"],
+  ] satisfies [string, ExtensionBrowser, "undefined" | "null"][]) {
     assert.throws(
       () => externalExtensionEntry({ platform, browser }),
       {
         name: "TypeError",
         code: "ERR_INVALID_ARG_TYPE",
-        message: `The "paths[0]" property must be of type string, got ${got}`,
+        message: missingDirMessage(got),
       },
       `${platform} ${got}`,
     );
