@@ -63,13 +63,6 @@ jobs:
         shell: bash
         run: bun run test 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
 
-      - name: node --test
-        env:
-          SHELL_BIN: ${{ steps.browser.outputs.bin }}
-          CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
-        shell: bash
-        run: bun run test:node 2>&1 | tee "$RUNNER_TEMP/node-test.log"
-
       - name: Workflow summary
         if: always()
         shell: bash
@@ -84,7 +77,6 @@ jobs:
             echo "| Runner | ${{ runner.os }} |"
             echo "| Browser | ${{ steps.browser.outputs.bin }} |"
             echo "| bun test pass / fail | $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ pass$') / $(count "$RUNNER_TEMP/bun-test.log" '^ *[0-9]+ fail$') |"
-            echo "| node --test pass / fail | $(count "$RUNNER_TEMP/node-test.log" '^ℹ pass [0-9]+') / $(count "$RUNNER_TEMP/node-test.log" '^ℹ fail [0-9]+') |"
             echo "| Ref | ${{ github.ref_name }} |"
             echo "| Commit | ${{ github.sha }} |"
           } >> "$GITHUB_STEP_SUMMARY"

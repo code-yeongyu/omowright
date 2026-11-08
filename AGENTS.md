@@ -1,12 +1,12 @@
 # Agent notes: omowright
 
 ## Tests
-- Full suite, both runners (CI runs both): `bun run test` and `bun run test:node`.
-- Focused: `bun test test/<file>.test.mjs` and `node --test test/<file>.test.mjs`.
-- Both scripts in `package.json` list their test files explicitly. A new test file runs only after you add it to BOTH lists; a deleted one must leave both.
+- Full suite (CI runs this): `bun run test`, which is `bun test` over the whole tree.
+- Focused: `bun test test/<file>.test.ts`.
+- One runner only: the `node --test` path is retired, so a new test file needs no second list.
 - Cloak profile tests: `bun run test:cloak-profile`.
 - Live tests need a Chromium headless shell: set `SHELL_BIN` (and `CLOAKBROWSER_BIN` for the event-bridge test), or install one into Playwright's cache.
-- `test/hygiene.test.mjs` fails on any tracked file that contains an absolute home path, a personal address or a private host. Write paths as `~/...` or relative, and never paste real hosts or addresses into docs, fixtures or tests.
+- `test/hygiene.test.ts` fails on any tracked file that contains an absolute home path, a personal address or a private host. Write paths as `~/...` or relative, and never paste real hosts or addresses into docs, fixtures or tests.
 
 ## Test authoring gate
 Before adding or changing a test, answer all four; a missing answer means do not add it yet:
