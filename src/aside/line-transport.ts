@@ -9,7 +9,6 @@ const CLOSE_TIMEOUT_MS = 5_000;
 const PROMPT = "repl > ";
 const MARKER = /^\[(ok|error) \| \d+ms\]$/;
 // Aside colours its banner, prompt and markers even on a pipe.
-// oxlint-disable-next-line no-control-regex -- the pattern exists to strip the ESC byte of ANSI colour codes.
 const ANSI = /\x1B\[[0-9;?]*[ -/]*[@-~]/g;
 const plain = (text: string) => text.replace(ANSI, "");
 // Every call ends with its own result line and then [ok] (errors are caught into the result
