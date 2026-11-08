@@ -65,6 +65,8 @@ export class AsideSession {
       this.#settle(new AsideReplError("repl_closed", `aside repl exited (code ${code}, signal ${signal})`, { output: this.#lines.splice(0) }));
       resolve();
     }));
+    // Closing writes "exit" to a child that a timeout may already have killed; that EPIPE is expected.
+    child.stdin.on("error", () => {});
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => this.#onData(chunk));
     child.stderr?.setEncoding("utf8");
