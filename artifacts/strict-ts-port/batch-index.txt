@@ -1,0 +1,41 @@
+Per-batch evidence directories, 2026-11-08T11:01Z
+
+Each directory holds the notes, tsc before/after lists and gate output for one
+disjoint file scope of the port. Count: 31
+
+a-f-finish/
+a-f/
+am-finish/
+am/
+aside-ego/
+bin-bridge/
+binbridge/
+bridge-transport/
+bsk/
+casts-a-f/
+casts-src/
+core-group/
+events-pipe-routes-terminal/
+frames-zero/
+g-chrome/
+g-misc/
+g-p/
+integration-zero/
+lint-zero/
+nz-finish/
+nz/
+page-contract/
+q-z/
+src-bsk/
+src-orphans/
+src-root/
+src-split2/
+test-orphans/
+tests-zero/
+v2-src-rest/
+v2-tests-c/
+
+Tracked sources by extension on this branch:
+  .ts   174
+  .js   2 (the two packaging artifacts)
+  .mjs  0
