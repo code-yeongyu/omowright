@@ -5,7 +5,10 @@ import { readProperty } from "../src/read-property.ts";
 
 const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const coreSource = await readFile(new URL("../src/core.ts", import.meta.url), "utf8");
-const publicApi: Record<string, unknown> = await import("omowright");
+// The source entry, not the package name: a self-import resolves through `exports` to
+// dist/index.js, and checkJs then typechecks that bundle as part of this project. The
+// published entry is covered by the packed-artifact step in CI.
+const publicApi: Record<string, unknown> = await import("../src/index.ts");
 
 test("package exposes the OmOWright identity", () => {
   assert.equal(packageJson.name, "omowright");
