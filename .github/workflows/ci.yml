@@ -88,13 +88,15 @@ jobs:
           cd "$RUNNER_TEMP/packed/consumer"
           npm init -y >/dev/null
           npm install ../omowright-*.tgz --no-audit --no-fund >/dev/null
-          node --input-type=module -e '
-            const api = await import("omowright");
-            for (const name of ["OmOPage", "OmOMouse", "OmOKeyboard"]) {
-              if (api[name]?.name !== name) throw new Error(`wrong runtime class name: ${name}`);
-            }
-            console.log(`packed import ok: ${Object.keys(api).length} exports`);
-          ' | tee "$RUNNER_TEMP/packed-import.log"
+          # Beside the install, so `import("omowright")` resolves through its node_modules.
+          cat > import-check.mjs <<'JS'
+          const api = await import("omowright");
+          for (const name of ["OmOPage", "OmOMouse", "OmOKeyboard"]) {
+            if (api[name]?.name !== name) throw new Error(`wrong runtime class name: ${name}`);
+          }
+          console.log(`packed import ok: ${Object.keys(api).length} exports`);
+          JS
+          node import-check.mjs | tee "$RUNNER_TEMP/packed-import.log"
 
       - name: Workflow summary
         if: always()
