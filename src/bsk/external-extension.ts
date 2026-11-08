@@ -73,10 +73,12 @@ type ReadFile = (file: string, encoding: "utf8") => string;
 type WriteFile = (file: string, content: string) => void;
 type RunReg = (args: string[]) => Promise<{ code: number | null; stderr?: string }>;
 
-// path.join rejected a missing directory here before the types made it explicit.
-function requireDir(dir: string | null | undefined, what: string): string {
-  if (typeof dir !== "string") throw new TypeError(`${what} is not set for this browser`);
-  return dir;
+// A catalog row without the directory this platform needs has always failed inside path.join, whose own
+// ERR_INVALID_ARG_TYPE error (message and code) is the public contract. Let the target platform's join raise it.
+function requireDir(dir: string | null | undefined, join: (...paths: string[]) => string): string {
+  if (typeof dir === "string") return dir;
+  Reflect.apply(join, undefined, [dir]);
+  throw new TypeError(`path.join accepted a ${typeof dir} directory`);
 }
 
 const ENABLE_STEP = (browser: string) =>
@@ -121,7 +123,7 @@ export function externalExtensionEntry({
   if (platform === "linux" && !browser.userExternalDir) {
     return {
       kind: "file",
-      path: pathFor(platform).join(requireDir(browser.externalDir, "externalDir"), `${id}.json`),
+      path: pathFor(platform).join(requireDir(browser.externalDir, pathFor(platform).join), `${id}.json`),
       content,
       needsRestart: true,
       storeUrl: STORE_PAGE_URLS[browser.store],
@@ -130,7 +132,11 @@ export function externalExtensionEntry({
   }
   return {
     kind: "file",
-    path: pathFor(platform).join(requireDir(browser.userDataDir, "userDataDir"), "External Extensions", `${id}.json`),
+    path: pathFor(platform).join(
+      requireDir(browser.userDataDir, pathFor(platform).join),
+      "External Extensions",
+      `${id}.json`,
+    ),
     content,
     needsRestart: true,
     storeUrl: STORE_PAGE_URLS[browser.store],
