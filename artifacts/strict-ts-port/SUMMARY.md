@@ -5,7 +5,7 @@ file in this directory (or the command) that produced it.
 
 | # | criterion | evidence | result |
 |---|---|---|---|
-| 1 | baseline on the untouched tree | `baseline-suite.txt` | 510 pass / 24 skip / 0 fail / 534 tests / 58 files; 5,312 tsc errors recorded right after the rename |
+| 1 | baseline on the untouched tree | `baseline-suite.txt`, `baseline-tsc-by-directory.md` | 510 pass / 24 skip / 0 fail / 534 tests / 58 files; 5,312 tsc errors recorded per directory right after the rename (src 2,300 / test 2,108 / bridge 80 / ego 70 / bin 15) |
 | 2 | every directory ported | batch runs under `.omo/plans/omowright-strict-ts-port.md` | every tracked `.js`/`.mjs` source is `.ts` |
 | 3 | behaviour comparison | `behaviour-comparison.md` | modules=83 ported=83 lost=0 |
 | 4 | strict typecheck | `bun x tsc --noEmit -p tsconfig.json` | 0 errors |
