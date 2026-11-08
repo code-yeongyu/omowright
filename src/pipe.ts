@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess, SpawnOptions, StdioOptions } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import { finished } from "node:stream/promises";
 import {
   browserSpawnDetached,
@@ -7,14 +9,27 @@ import {
   removeBrowserPidFile,
   terminateChild,
   writeBrowserPidFile,
-} from "./browser-process.js";
-import { BrowserConnection } from "./connection.js";
-import { Dialog, answerWithPolicy, normalizeDialogPolicy } from "./dialog-policy.js";
-import { NulFrameReader } from "./nul-frames.js";
-import { targetCreationCapability } from "./internal-capability.js";
-import { SerialEmitter as Emittery } from "./serial-emitter.js";
-import { CdpCommandTimeoutError, CdpPipeClosedError, CdpSessionDetachedError, CdpSessionCrashedError } from "./cdp-errors.js";
-export { CdpCommandTimeoutError, CdpPipeClosedError, CdpSessionDetachedError, CdpSessionCrashedError } from "./cdp-errors.js";
+} from "./browser-process.ts";
+import { BrowserConnection } from "./connection.ts";
+import { Dialog, answerWithPolicy, normalizeDialogPolicy } from "./dialog-policy.ts";
+import type { DialogOpeningParams, DialogPolicy } from "./dialog-policy.ts";
+import type { CdpCommandErrorDetails } from "./cdp-errors.ts";
+import type {
+  CdpEventMeta,
+  CdpEventPayload,
+  CdpResult,
+  CdpSendOptions,
+  CdpTargetInfo,
+  CdpTargetSummary,
+  CdpTransport,
+  CdpUnsubscribe,
+} from "./cdp-protocol.ts";
+import { readProperty } from "./read-property.ts";
+import { NulFrameReader } from "./nul-frames.ts";
+import { targetCreationCapability } from "./internal-capability.ts";
+import { SerialEmitter as Emittery } from "./serial-emitter.ts";
+import { CdpCommandTimeoutError, CdpPipeClosedError, CdpSessionDetachedError, CdpSessionCrashedError } from "./cdp-errors.ts";
+export { CdpCommandTimeoutError, CdpPipeClosedError, CdpSessionDetachedError, CdpSessionCrashedError } from "./cdp-errors.ts";
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_READINESS_TIMEOUT_MS = 10_000;
@@ -22,34 +37,107 @@ const GRACEFUL_CLOSE_TIMEOUT_MS = 2_000;
 const STDIO_TAIL_LIMIT = 16_384;
 const EXIT_STDERR_DRAIN_MS = 1_000;
 
-export class PipeCdpClient {
-  #child;
-  #writeStream;
-  #readStream;
+export interface PipeCdpClientOptions {
+  /** Required: the constructor throws a TypeError without it. */
+  browserPath?: string;
+  browserArgs?: readonly string[];
+  /** Spawn options for the browser process; `stdio` is always owned by the client. */
+  spawnOptions?: Omit<SpawnOptions, "stdio">;
+  commandTimeoutMs?: number;
+  readinessTimeoutMs?: number;
+  logId?: string;
+  dialogPolicy?: DialogPolicy;
+}
+
+export interface ConnectPipeOptions extends PipeCdpClientOptions {
+  storageRoot?: string;
+}
+
+export interface PipeEventMeta extends CdpEventMeta {
+  dialog?: Dialog;
+}
+
+interface PipeEventEnvelope {
+  data: { payload: unknown; meta: PipeEventMeta };
+}
+
+/** Event params the transport itself reads; everything else passes through untouched. */
+interface PipeWireParams extends DialogOpeningParams {
+  sessionId?: string;
+  targetInfo?: { targetId?: string; [key: string]: unknown };
+  [key: string]: unknown;
+}
+
+/**
+ * One NUL-delimited frame as Chromium writes it. JSON boundary: `id` and
+ * `method` are checked with typeof before use; the rest follows the CDP wire format.
+ */
+export interface PipeWireMessage {
+  id?: unknown;
+  method?: unknown;
+  sessionId?: string;
+  params?: PipeWireParams;
+  result?: { sessionId?: string; [key: string]: unknown };
+  error?: { message?: string; code?: unknown; data?: unknown };
+}
+
+interface PipeWireCommand {
+  id: number;
+  method: string;
+  params?: object;
+  sessionId?: string;
+}
+
+interface PipeCommandEntry {
+  method: string;
+  sessionId: string | undefined;
+  targetId: unknown;
+  sentAt: number;
+  receivedBytes: number;
+}
+
+interface PendingPipeCommand extends PipeCommandEntry {
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
+  timeout: ReturnType<typeof setTimeout> | undefined;
+}
+
+type CdpCommandErrorClass = new (message: string, details?: CdpCommandErrorDetails) => Error;
+
+/** Chromium's TargetInfo plus the two `/json/list` fields discoverTargets forwards when present. */
+interface PipeTargetInfo extends CdpTargetInfo {
+  description?: string;
+  faviconUrl?: string;
+}
+
+export class PipeCdpClient implements CdpTransport {
+  #child: ChildProcess | undefined;
+  #writeStream: Writable | undefined;
+  #readStream: Readable | undefined;
   #frames = new NulFrameReader();
   #seq = 1;
-  #pending = new Map();
-  #closedSessions = new Set();
-  #sessionTargets = new Map();
-  #launch;
-  #launchId;
+  #pending = new Map<number, PendingPipeCommand>();
+  #closedSessions = new Set<unknown>();
+  #sessionTargets = new Map<unknown, unknown>();
+  #launch: object | undefined;
+  #launchId: string | undefined;
   #launchedAt = 0;
   #receivedBytes = 0;
   #malformedFrameCount = 0;
-  #events = new Emittery();
+  #events = new Emittery<PipeEventEnvelope>();
   #connected = false;
-  #commandTimeoutMs;
-  #readinessTimeoutMs;
-  #browserPath;
-  #browserArgs;
-  #spawnOptions;
+  #commandTimeoutMs: number;
+  #readinessTimeoutMs: number;
+  #browserPath: string;
+  #browserArgs: readonly string[];
+  #spawnOptions: Omit<SpawnOptions, "stdio">;
   #stdioTail = "";
   #stderrHead = "";
-  #dialogPolicy;
-  transportEvents = new Emittery();
-  logId;
+  #dialogPolicy: DialogPolicy;
+  transportEvents = new Emittery<void>();
+  logId: string;
 
-  constructor({ browserPath, browserArgs = [], spawnOptions = {}, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy }) {
+  constructor({ browserPath, browserArgs = [], spawnOptions = {}, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy }: PipeCdpClientOptions) {
     if (!browserPath) throw new TypeError("PipeCdpClient requires browserPath");
     this.#browserPath = browserPath;
     this.#browserArgs = browserArgs;
@@ -65,7 +153,7 @@ export class PipeCdpClient {
   get childProcess() { return this.#child; }
   get dialogPolicy() { return this.#dialogPolicy; }
 
-  setDialogPolicy(policy) {
+  setDialogPolicy(policy: DialogPolicy) {
     this.#dialogPolicy = normalizeDialogPolicy(policy);
   }
 
@@ -76,28 +164,29 @@ export class PipeCdpClient {
     // line and GoogleUpdater child logs), and inherited fds would spray it raw
     // onto the caller's tty (it corrupted the senpi TUI). Pipe + drain into a
     // bounded tail kept for launch diagnostics.
-    const stdio = ["ignore", "pipe", "pipe", "pipe", "pipe"];
+    const stdio: StdioOptions = ["ignore", "pipe", "pipe", "pipe", "pipe"];
     const profileDir = profileDirFromArgs(this.#browserArgs);
     await reapOrphanedBrowser(profileDir);
-    this.#child = spawn(this.#browserPath, [...this.#browserArgs, "--remote-debugging-pipe"], {
+    const child = spawn(this.#browserPath, [...this.#browserArgs, "--remote-debugging-pipe"], {
       detached: browserSpawnDetached,
       ...this.#spawnOptions,
       stdio,
     });
+    this.#child = child;
     // A spawn that fails (missing or non-executable browserPath) has no pid and
     // emits "error" instead of "spawn"; unheard, that error crashes the caller.
-    const spawnFailed = new Promise(resolve => this.#child.once("error", resolve));
-    if (this.#child.pid === undefined) {
+    const spawnFailed = new Promise<Error>(resolve => child.once("error", resolve));
+    if (child.pid === undefined) {
       const error = await spawnFailed;
       this.#child = undefined;
       throw error;
     }
-    const browserPid = this.#child.pid;
+    const browserPid = child.pid;
     // A helper process can keep an old launch's pipe open after that browser is
     // gone; its late events must never touch the launch that replaced it.
     const launch = {};
     this.#launch = launch;
-    const owned = listener => (...args) => { if (this.#launch === launch) listener(...args); };
+    const owned = <A extends unknown[]>(listener: (...args: A) => void) => (...args: A) => { if (this.#launch === launch) listener(...args); };
     this.#launchId = `${this.logId}:${browserPid}`;
     this.#launchedAt = performance.now();
     this.#receivedBytes = 0;
@@ -105,14 +194,14 @@ export class PipeCdpClient {
     this.#frames = new NulFrameReader();
     this.#sessionTargets.clear();
     this.#closedSessions.clear();
-    this.#child.once("exit", () => removeBrowserPidFile(profileDir, browserPid));
+    child.once("exit", () => removeBrowserPidFile(profileDir, browserPid));
     this.#stdioTail = "";
     this.#stderrHead = "";
-    const stderr = this.#child.stderr;
-    for (const stream of [this.#child.stdout, stderr]) {
+    const stderr = child.stderr;
+    for (const stream of [child.stdout, stderr]) {
       if (!stream) continue;
       stream.setEncoding("utf8");
-      stream.on("data", (chunk) => {
+      stream.on("data", (chunk: string) => {
         this.#stdioTail = (this.#stdioTail + chunk).slice(-STDIO_TAIL_LIMIT);
         // Only the first stderr line is read: stop growing the head once it holds
         // a complete non-blank line or is full.
@@ -122,18 +211,24 @@ export class PipeCdpClient {
       });
       stream.on("error", () => {});
     }
-    this.#writeStream = this.#child.stdio[3];
-    this.#readStream = this.#child.stdio[4];
-    this.#readStream.on("data", owned(chunk => this.#onData(chunk)));
-    for (const event of ["end", "close"]) {
-      this.#readStream.on(event, owned(() => this.#failCommands(CdpPipeClosedError, `CDP pipe read stream ${event}`)));
+    const writeStream = child.stdio[3];
+    const readStream = child.stdio[4];
+    // stdio[3]/[4] are "pipe", so both are duplex streams; the JS original hit a
+    // TypeError on first use otherwise, and so do these checks.
+    if (!writeStream || !("write" in writeStream)) throw new TypeError("CDP pipe write stream (fd 3) is missing");
+    if (!readStream || !("read" in readStream)) throw new TypeError("CDP pipe read stream (fd 4) is missing");
+    this.#writeStream = writeStream;
+    this.#readStream = readStream;
+    readStream.on("data", owned((chunk: Buffer) => this.#onData(chunk)));
+    for (const event of ["end", "close"] as const) {
+      readStream.on(event, owned(() => this.#failCommands(CdpPipeClosedError, `CDP pipe read stream ${event}`)));
     }
     // A killed browser resets its end of the CDP pipes (ECONNRESET/EPIPE on Linux);
     // without a listener Node rethrows that as an uncaught exception in the caller.
-    for (const stream of [this.#writeStream, this.#readStream]) {
-      stream.on("error", owned(error => this.#failAll(Error(`CDP pipe error: ${error.code ?? error.message}`))));
+    for (const stream of [writeStream, readStream]) {
+      stream.on("error", owned((error: NodeJS.ErrnoException) => this.#failAll(Error(`CDP pipe error: ${error.code ?? error.message}`))));
     }
-    this.#child.on("exit", owned(() => {
+    child.on("exit", owned(() => {
       this.#connected = false;
       this.#failAll(Error("CDP pipe browser exited"));
       this.transportEvents.emit("disconnected").catch(() => {});
@@ -162,6 +257,8 @@ export class PipeCdpClient {
     this.#child = undefined;
     this.#connected = false;
     this.#failAll(Error("CDP pipe launch failed"));
+    // Called only while a launch holds a child; the JS original threw this TypeError otherwise.
+    if (child === undefined) throw new TypeError("Cannot read properties of undefined (reading 'pid')");
     await terminateChild(child);
   }
 
@@ -170,11 +267,13 @@ export class PipeCdpClient {
   // that exits fails the launch at once, naming the exit.
   async #awaitReady() {
     const child = this.#child;
+    // Runs right after a spawn stored the child; the JS original threw this TypeError otherwise.
+    if (child === undefined) throw new TypeError("Cannot read properties of undefined (reading 'exitCode')");
     const deadline = Date.now() + this.#readinessTimeoutMs;
     const exited = child.exitCode !== null || child.signalCode !== null
       ? Promise.resolve("exited")
-      : new Promise(resolve => child.once("exit", () => resolve("exited")));
-    let lastError;
+      : new Promise<"exited">(resolve => child.once("exit", () => resolve("exited")));
+    let lastError: unknown;
     while (Date.now() < deadline) {
       try {
         const outcome = await Promise.race([
@@ -186,14 +285,14 @@ export class PipeCdpClient {
         lastError = error;
       }
       if (child.exitCode !== null || child.signalCode !== null) throw await this.#exitedBeforeReady(child, deadline);
-      let timer;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([new Promise(resolve => { timer = setTimeout(resolve, 100); }), exited]);
       } finally {
         clearTimeout(timer);
       }
     }
-    const reason = lastError ? String(lastError.message ?? lastError) : "no response";
+    const reason = lastError ? String(readProperty(lastError, "message") ?? lastError) : "no response";
     const tail = this.#stdioTail.trim();
     throw Error(
       `Browser did not become ready over the CDP pipe (${reason})` +
@@ -201,11 +300,11 @@ export class PipeCdpClient {
     );
   }
 
-  async #exitedBeforeReady(child, deadline) {
+  async #exitedBeforeReady(child: ChildProcess, deadline: number) {
     // stderr can still hold unread output when "exit" fires; drain it. Bounded:
     // a surviving grandchild may hold the write end open indefinitely.
     if (child.stderr) {
-      let timer;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         finished(child.stderr).catch(() => {}),
         new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, Math.min(EXIT_STDERR_DRAIN_MS, deadline - Date.now()))); }),
@@ -226,7 +325,8 @@ export class PipeCdpClient {
     );
   }
 
-  async send(method, params, sessionId, opts = {}) {
+  send<M extends string>(method: M, params?: object, sessionId?: string, opts?: CdpSendOptions): Promise<CdpResult<M>>;
+  async send(method: string, params?: object, sessionId?: string, opts: CdpSendOptions = {}): Promise<unknown> {
     if (method === "Target.createTarget" && opts.capability !== targetCreationCapability) throw Error("Target.createTarget is reserved for createAgentTabs");
     if (String(method).startsWith("OmO.")) {
       throw Error(`Extension commands are unavailable over pipe transport: ${method}`);
@@ -235,22 +335,25 @@ export class PipeCdpClient {
     return this.#dispatch(method, params, sessionId, opts);
   }
 
-  async #dispatch(method, params, sessionId, opts = {}) {
+  async #dispatch(method: string, params?: object, sessionId?: string, opts: CdpSendOptions = {}): Promise<unknown> {
     const id = this.#seq++;
-    const msg = { id, method };
+    const msg: PipeWireCommand = { id, method };
     if (params !== undefined) msg.params = params;
     if (sessionId) msg.sessionId = sessionId;
-    const entry = {
-      method, sessionId, targetId: params?.targetId ?? this.#sessionTargets.get(sessionId),
+    const entry: PipeCommandEntry = {
+      method, sessionId, targetId: (params === undefined || params === null ? undefined : readProperty(params, "targetId")) ?? this.#sessionTargets.get(sessionId),
       sentAt: performance.now(), receivedBytes: this.#receivedBytes,
     };
     if (this.#closedSessions.has(sessionId) && method !== "Page.close") {
       throw this.#commandError(CdpSessionDetachedError, "Page closed", entry);
     }
-    if (this.#readStream.readableEnded || this.#readStream.destroyed) {
+    const readStream = this.#readStream;
+    // Every dispatch follows a launch that stored both streams; the JS original threw this TypeError otherwise.
+    if (readStream === undefined) throw new TypeError("Cannot read properties of undefined (reading 'readableEnded')");
+    if (readStream.readableEnded || readStream.destroyed) {
       throw this.#commandError(CdpPipeClosedError, "CDP pipe read stream closed", entry);
     }
-    const { promise, resolve, reject } = Promise.withResolvers();
+    const { promise, resolve, reject } = Promise.withResolvers<unknown>();
     const timeoutMs = opts.timeoutMs ?? this.#commandTimeoutMs;
     const timeout = timeoutMs > 0
       ? setTimeout(() => {
@@ -259,17 +362,19 @@ export class PipeCdpClient {
       }, timeoutMs)
       : undefined;
     this.#pending.set(id, { ...entry, resolve, reject, timeout });
+    if (this.#writeStream === undefined) throw new TypeError("Cannot read properties of undefined (reading 'write')");
     this.#writeStream.write(JSON.stringify(msg) + "\0");
     return promise;
   }
 
-  on(method, fn) {
+  on<E extends string>(method: E, fn: (payload: CdpEventPayload<E>, meta: PipeEventMeta) => unknown): CdpUnsubscribe;
+  on(method: string, fn: (payload: unknown, meta: PipeEventMeta) => unknown): CdpUnsubscribe {
     return this.#events.on(method, ({ data }) => fn(data.payload, data.meta));
   }
 
-  async discoverTargets() {
+  async discoverTargets(): Promise<CdpTargetSummary[]> {
     const { targetInfos } = await this.send("Target.getTargets");
-    return targetInfos.map(t => ({
+    return targetInfos.map((t: PipeTargetInfo) => ({
       id: t.targetId,
       type: t.type,
       url: t.url ?? "",
@@ -281,7 +386,7 @@ export class PipeCdpClient {
   }
 
 
-  closeSession(sessionId) {
+  closeSession(sessionId: string) {
     this.#closedSessions.add(sessionId);
     this.#failCommands(CdpSessionDetachedError, "Page closed", sessionId);
   }
@@ -290,7 +395,7 @@ export class PipeCdpClient {
     const child = this.#child;
     this.#child = undefined;
     if (child && child.exitCode === null) {
-      const exited = new Promise(resolve => child.once("exit", resolve));
+      const exited = new Promise<unknown>(resolve => child.once("exit", resolve));
       let quitRequested = false;
       if (this.#connected) {
         await Promise.race([
@@ -303,7 +408,7 @@ export class PipeCdpClient {
       this.#connected = false;
       this.#failAll(Error("CDP pipe client closed"));
       if (child.exitCode === null) {
-        let timer;
+        let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
             exited,
@@ -320,24 +425,24 @@ export class PipeCdpClient {
     this.#failAll(Error("CDP pipe client closed"));
   }
 
-  #onData(chunk) {
+  #onData(chunk: Buffer) {
     this.#receivedBytes += chunk.length;
     for (const raw of this.#frames.push(chunk)) {
       if (raw.length === 0) continue;
-      let msg;
+      let msg: PipeWireMessage;
       try { msg = JSON.parse(raw); } catch { this.#malformedFrameCount++; continue; }
       this._handleTransportMessage(msg);
     }
   }
 
-  _handleTransportMessage(msg) {
+  _handleTransportMessage(msg: PipeWireMessage) {
     if (typeof msg.id === "number") {
       const entry = this.#pending.get(msg.id);
       if (!entry) return;
       this.#pending.delete(msg.id);
       if (entry.timeout) clearTimeout(entry.timeout);
       if (msg.error) {
-        const err = Error(msg.error.message ?? `CDP command failed: ${entry.method}`);
+        const err: Error & { code?: unknown; data?: unknown } = Error(msg.error.message ?? `CDP command failed: ${entry.method}`);
         err.code = msg.error.code;
         err.data = msg.error.data;
         entry.reject(err);
@@ -362,21 +467,23 @@ export class PipeCdpClient {
         // later reload, with "Target crashed"; reject those now.
         this.#failCommands(CdpSessionCrashedError, "CDP session crashed", msg.sessionId, "Page.reload");
       }
-      const meta = { sessionId: msg.sessionId };
-      if (msg.method === "Page.javascriptDialogOpening" && msg.sessionId) {
-        meta.dialog = new Dialog(msg.params, action => this.send("Page.handleJavaScriptDialog", action, msg.sessionId));
+      const meta: PipeEventMeta = { sessionId: msg.sessionId };
+      const dialogSessionId = msg.sessionId;
+      if (msg.method === "Page.javascriptDialogOpening" && dialogSessionId) {
+        meta.dialog = new Dialog(msg.params, action => this.send("Page.handleJavaScriptDialog", action, dialogSessionId));
       }
       const emitted = this.#events.emit(msg.method, { data: { payload: msg.params, meta } }).catch(() => {});
-      return meta.dialog
-        ? emitted.then(() => answerWithPolicy(meta.dialog, this.#dialogPolicy, msg.params)).catch(() => {})
+      const { dialog } = meta;
+      return dialog
+        ? emitted.then(() => answerWithPolicy(dialog, this.#dialogPolicy, msg.params)).catch(() => {})
         : undefined;
     }
   }
 
-  #commandError(ErrorType, reason, entry) {
+  #commandError(ErrorType: CdpCommandErrorClass, reason: string, entry: PipeCommandEntry) {
     const now = performance.now();
     const receivedBytesSinceSend = this.#receivedBytes - entry.receivedBytes;
-    const details = {
+    const details: CdpCommandErrorDetails = {
       method: entry.method, launchId: this.#launchId,
       sessionId: entry.sessionId ?? null,
       targetId: entry.targetId ?? this.#sessionTargets.get(entry.sessionId) ?? null,
@@ -389,7 +496,7 @@ export class PipeCdpClient {
     return new ErrorType(`${reason}: ${entry.method} (${context})`, details);
   }
 
-  #failCommands(ErrorType, reason, sessionId, sparedMethod) {
+  #failCommands(ErrorType: CdpCommandErrorClass, reason: string, sessionId?: unknown, sparedMethod?: string) {
     for (const [id, entry] of this.#pending) {
       if (sessionId !== undefined && entry.sessionId !== sessionId) continue;
       if (entry.method === sparedMethod) continue;
@@ -399,7 +506,7 @@ export class PipeCdpClient {
     }
   }
 
-  #failAll(err) {
+  #failAll(err: Error) {
     for (const entry of this.#pending.values()) {
       if (entry.timeout) clearTimeout(entry.timeout);
       entry.reject(err);
@@ -408,7 +515,7 @@ export class PipeCdpClient {
   }
 }
 
-export async function connectPipe({ browserPath, browserArgs = [], spawnOptions, storageRoot, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy } = {}) {
+export async function connectPipe({ browserPath, browserArgs = [], spawnOptions, storageRoot, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy }: ConnectPipeOptions = {}) {
   const client = new PipeCdpClient({ browserPath, browserArgs, spawnOptions, commandTimeoutMs, readinessTimeoutMs, logId, dialogPolicy });
   await client.ensureConnected();
   const connection = new BrowserConnection(client, { storageRoot });

@@ -1,9 +1,27 @@
 const MAX_TIMER_MS = 2147483647;
 const STOP = Symbol("wait stopped");
 
-export async function waitForCaptcha(page, {
+export type CaptchaWaitOutcome = "matched" | "cancelled" | "timed_out";
+
+export interface CaptchaWaitResult {
+  outcome: CaptchaWaitOutcome;
+  elapsedMs: number;
+}
+
+/** Polled until it returns exactly `true`; `signal` aborts once the wait ends. */
+export type CaptchaWaitPredicate<P> = (page: P, context: { signal: AbortSignal }) => unknown;
+
+export interface CaptchaWaitOptions<P> {
+  /** Required: waitForCaptcha throws a TypeError without it. */
+  until?: CaptchaWaitPredicate<P> | undefined;
+  timeoutMs?: number | undefined;
+  pollMs?: number | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+export async function waitForCaptcha<P>(page: P, {
   until, timeoutMs = 10000, pollMs = 100, signal,
-} = {}) {
+}: CaptchaWaitOptions<P> = {}): Promise<CaptchaWaitResult> {
   if (typeof until !== "function") throw new TypeError("until must be a function");
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_TIMER_MS) {
     throw new RangeError("timeoutMs must be between 0 and 2147483647");
@@ -19,13 +37,13 @@ export async function waitForCaptcha(page, {
   const started = performance.now();
   const deadline = started + timeoutMs;
   const operation = new AbortController();
-  let deadlineTimer;
-  let pollTimer;
-  let stop;
-  const stopped = new Promise(resolve => { stop = () => resolve(STOP); });
-  const terminal = () => signal?.aborted ? "cancelled"
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  const { promise: stopped, resolve: resolveStopped } = Promise.withResolvers<typeof STOP>();
+  const stop = () => resolveStopped(STOP);
+  const terminal = (): CaptchaWaitOutcome | null => signal?.aborted ? "cancelled"
     : performance.now() >= deadline ? "timed_out" : null;
-  const result = outcome => ({ outcome, elapsedMs: performance.now() - started });
+  const result = (outcome: CaptchaWaitOutcome): CaptchaWaitResult => ({ outcome, elapsedMs: performance.now() - started });
   const scheduleDeadline = () => {
     const remaining = deadline - performance.now();
     if (remaining <= 0) stop();
@@ -41,7 +59,7 @@ export async function waitForCaptcha(page, {
     // between the call and this microtask must not time the wait out unevaluated.
     let evaluated = false;
     for (;;) {
-      let accepted;
+      let accepted: unknown;
       try {
         // Promise.race keeps a rejection handler on a non-cooperative predicate
         // even after this wait has timed out or been cancelled.

@@ -6,18 +6,22 @@ import { rmSync } from "node:fs";
 // through maxRetries, but Bun's rmSync ignores maxRetries and throws on the
 // first attempt, so this retries the same codes with the same linear backoff
 // as Node (100 ms x attempt, 10 retries) under both runners.
-const RETRYABLE = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
+const RETRYABLE: ReadonlySet<unknown> = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY", "EPERM"]);
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 100;
 const sleeper = new Int32Array(new SharedArrayBuffer(4));
 
-export function removeTreeSync(dir) {
+function errorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+}
+
+export function removeTreeSync(dir: string) {
   for (let attempt = 1; ; attempt += 1) {
     try {
       rmSync(dir, { recursive: true, force: true });
       return;
     } catch (error) {
-      if (!RETRYABLE.has(error?.code) || attempt > MAX_RETRIES) throw error;
+      if (!RETRYABLE.has(errorCode(error)) || attempt > MAX_RETRIES) throw error;
       Atomics.wait(sleeper, 0, 0, RETRY_DELAY_MS * attempt);
     }
   }

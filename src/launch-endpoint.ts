@@ -1,12 +1,42 @@
+import type { ChildProcess } from "node:child_process";
 import { watch } from "node:fs";
+import type { FSWatcher, Stats } from "node:fs";
+import type { Readable } from "node:stream";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { readProperty } from "./read-property.ts";
+
+/** Where a launched browser says its DevTools endpoint is; `browserPath` is the `/devtools/browser/<guid>` path. */
+export interface LaunchReport {
+  endpoint: string;
+  browserPath: string | null;
+}
+
+interface ActivePortIdentity {
+  ino: number;
+  mtimeMs: number;
+  size: number;
+}
+
+export interface ActivePortSnapshot extends ActivePortIdentity {
+  text: string;
+}
+
+export interface DiscoverLaunchOptions {
+  profileDir?: string | null | undefined;
+  timeoutMs?: number | undefined;
+  previousActivePort?: ActivePortSnapshot | null | undefined;
+}
+
+function errorCode(error: unknown): unknown {
+  return error === null || error === undefined ? undefined : readProperty(error, "code");
+}
 
 // fs.watch can drop or delay directory events on a loaded host (seconds, or
 // never), so the file is also re-read on this interval until the launch settles.
 const ACTIVE_PORT_POLL_MS = 100;
 
-function httpEndpointFromWebSocket(webSocketUrl) {
+function httpEndpointFromWebSocket(webSocketUrl: string) {
   const endpoint = new URL(webSocketUrl);
   endpoint.protocol = endpoint.protocol === "wss:" ? "https:" : "http:";
   endpoint.pathname = "/";
@@ -16,7 +46,7 @@ function httpEndpointFromWebSocket(webSocketUrl) {
 }
 
 // Chromium writes `<port>\n/devtools/browser/<guid>`; the second line names the browser.
-function parseActivePort(text) {
+function parseActivePort(text: string): LaunchReport | null {
   const [portLine, browserPath] = text.trim().split(/\r?\n/);
   const port = Number(portLine);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
@@ -26,7 +56,7 @@ function parseActivePort(text) {
   };
 }
 
-function activePortIdentity(info) {
+function activePortIdentity(info: Stats): ActivePortIdentity {
   return { ino: info.ino, mtimeMs: info.mtimeMs, size: info.size };
 }
 
@@ -37,19 +67,19 @@ function activePortIdentity(info) {
 // the bytes changed (Linux updates mtime before it copies a write's data, and a
 // touch or an in-place rewrite moves it too), and stale bytes name another
 // browser whose id the launch check would then compare against itself (#107).
-export async function snapshotActivePort(profileDir) {
+export async function snapshotActivePort(profileDir: string | null | undefined): Promise<ActivePortSnapshot | null> {
   if (!profileDir) return null;
   const activePortPath = path.join(profileDir, "DevToolsActivePort");
   try {
     const identity = activePortIdentity(await stat(activePortPath));
     return { ...identity, text: await readFile(activePortPath, "utf8") };
   } catch (error) {
-    if (error?.code === "ENOENT") return null;
+    if (errorCode(error) === "ENOENT") return null;
     throw error;
   }
 }
 
-function isSameFile(info, previous) {
+function isSameFile(info: ActivePortIdentity, previous: ActivePortSnapshot | null) {
   return (
     previous !== null &&
     info.ino === previous.ino &&
@@ -60,7 +90,7 @@ function isSameFile(info, previous) {
 
 // The endpoint is the launched browser's only if it answers with the browser id
 // that browser reported, and the browser is still the one we spawned.
-export function assertLaunchedBrowser(child, report, webSocketDebuggerUrl) {
+export function assertLaunchedBrowser(child: ChildProcess, report: LaunchReport, webSocketDebuggerUrl: string) {
   if (child.exitCode !== null || child.signalCode !== null) {
     throw new Error(
       `browser exited before its DevTools endpoint ${report.endpoint} could be verified`,
@@ -74,23 +104,25 @@ export function assertLaunchedBrowser(child, report, webSocketDebuggerUrl) {
   }
 }
 
+// Resolves undefined only if `finish` is handed a falsy error value, which no
+// caller below produces (every error is an Error object).
 export async function discoverLaunchedEndpoint(
-  child,
-  { profileDir, timeoutMs, previousActivePort = null } = {},
-) {
+  child: ChildProcess & { stderr: Readable },
+  { profileDir, timeoutMs, previousActivePort = null }: DiscoverLaunchOptions = {},
+): Promise<LaunchReport | undefined> {
   const activePortPath = profileDir
     ? path.join(profileDir, "DevToolsActivePort")
     : null;
 
-  return new Promise((resolve, reject) => {
+  return new Promise<LaunchReport | undefined>((resolve, reject) => {
     let settled = false;
     let stderr = "";
-    let activePortWatcher;
+    let activePortWatcher: FSWatcher | undefined;
     let activePortReading = false;
     let activePortChangedWhileReading = false;
-    const cleanups = [];
+    const cleanups: Array<() => void> = [];
 
-    const finish = (error, endpoint) => {
+    const finish = (error: unknown, endpoint?: LaunchReport) => {
       if (settled) return;
       settled = true;
       for (const cleanup of cleanups.splice(0)) cleanup();
@@ -99,7 +131,7 @@ export async function discoverLaunchedEndpoint(
       else resolve(endpoint);
     };
 
-    const readActivePort = async () => {
+    const readActivePort = async (activePortPath: string) => {
       const info = await stat(activePortPath);
       if (isSameFile(activePortIdentity(info), previousActivePort)) return;
       const text = await readFile(activePortPath, "utf8");
@@ -118,28 +150,30 @@ export async function discoverLaunchedEndpoint(
       try {
         do {
           activePortChangedWhileReading = false;
-          await readActivePort();
+          await readActivePort(activePortPath);
         } while (activePortChangedWhileReading && !settled);
       } catch (error) {
-        if (error?.code !== "ENOENT") finish(error);
+        if (errorCode(error) !== "ENOENT") finish(error);
       } finally {
         activePortReading = false;
       }
     };
 
-    const onStderr = (chunk) => {
+    const onStderr = (chunk: string) => {
       stderr = `${stderr}${chunk}`.slice(-16_384);
       const match = /DevTools listening on (ws:\/\/\S+)/.exec(stderr);
-      if (match) {
+      // The capture group always takes part in a match.
+      const webSocketUrl = match?.[1];
+      if (webSocketUrl !== undefined) {
         finish(null, {
-          endpoint: httpEndpointFromWebSocket(match[1]),
-          browserPath: new URL(match[1]).pathname,
+          endpoint: httpEndpointFromWebSocket(webSocketUrl),
+          browserPath: new URL(webSocketUrl).pathname,
         });
       }
       else void tryActivePort();
     };
-    const onError = (error) => finish(error);
-    const onExit = (code, signal) => {
+    const onError = (error: Error) => finish(error);
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
       finish(
         new Error(
           `browser exited before exposing DevTools (code ${code}, signal ${signal ?? "none"})${stderr ? `\n${stderr}` : ""}`,
@@ -154,7 +188,8 @@ export async function discoverLaunchedEndpoint(
     cleanups.push(() => child.off("error", onError));
     cleanups.push(() => child.off("exit", onExit));
 
-    if (activePortPath) {
+    // activePortPath is set exactly when profileDir is.
+    if (activePortPath && profileDir) {
       try {
         activePortWatcher = watch(profileDir, (event, filename) => {
           if (
@@ -166,7 +201,7 @@ export async function discoverLaunchedEndpoint(
           }
         });
       } catch (error) {
-        if (error?.code !== "ENOENT") finish(error);
+        if (errorCode(error) !== "ENOENT") finish(error);
       }
       void tryActivePort();
       const poll = setInterval(() => void tryActivePort(), ACTIVE_PORT_POLL_MS);

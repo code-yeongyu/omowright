@@ -5,32 +5,51 @@
 // endpoint below counts upgrades at the real HTTP/WebSocket attach boundary.
 import { EventEmitter, once } from "node:events";
 import { createServer } from "node:http";
+import type { Server } from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
-import { connect } from "../src/connection.js";
-import { connectNamed } from "../src/instances.js";
-import * as sharedConnections from "../src/shared-connections.js";
+import type { WebSocket } from "ws";
+import { connect } from "../src/connection.ts";
+import type { BrowserConnection, ConnectOptions } from "../src/connection.ts";
+import type { CdpEventMeta, CdpTransportEvents } from "../src/cdp-protocol.ts";
+import { connectNamed } from "../src/instances.ts";
+import { readProperty } from "../src/read-property.ts";
+import * as sharedConnections from "../src/shared-connections.ts";
+
+interface DialogAnswer {
+  socket: number | undefined;
+  accept: unknown;
+}
+
+function portOf(server: Server) {
+  const address = server.address();
+  assert.ok(address !== null && typeof address === "object", "the server is not listening on a TCP port");
+  return address.port;
+}
 
 // A browser that answers discovery with its current GUID and, like Chrome,
 // only upgrades the WebSocket path of that GUID.
 async function fakeCdpEndpoint() {
   let guid = "first";
-  const upgrades = [];
-  const authorizations = [];
-  const sockets = new Set();
+  const upgrades: string[] = [];
+  const authorizations: Array<string | null> = [];
+  const sockets = new Set<WebSocket>();
   // Each socket's id is its upgrade order; answers records how every socket
   // answered the dialogs emitDialog() raised on it.
-  const socketIds = new Map();
-  const answers = [];
+  const socketIds = new Map<WebSocket, number>();
+  const answers: DialogAnswer[] = [];
   const answered = new EventEmitter();
   const server = createServer((request, response) => {
-    const body = request.url === "/json/version"
-      ? { Browser: "FakeChrome/1.0", webSocketDebuggerUrl: webSocketUrl() }
-      : request.url === "/json/list" ? [] : null;
+    const body =
+      request.url === "/json/version"
+        ? { Browser: "FakeChrome/1.0", webSocketDebuggerUrl: webSocketUrl() }
+        : request.url === "/json/list"
+          ? []
+          : null;
     if (!body) return void response.writeHead(404).end();
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(body));
@@ -59,7 +78,7 @@ async function fakeCdpEndpoint() {
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const endpoint = `http://127.0.0.1:${server.address().port}`;
+  const endpoint = `http://127.0.0.1:${portOf(server)}`;
   function webSocketUrl() {
     return `${endpoint.replace(/^http/, "ws")}/devtools/browser/${guid}`;
   }
@@ -71,13 +90,13 @@ async function fakeCdpEndpoint() {
     answers,
     webSocketUrl,
     // One CDP event pushed down every open socket.
-    emitEvent(method, params = {}) {
+    emitEvent(method: string, params: object = {}) {
       for (const webSocket of sockets) webSocket.send(JSON.stringify({ method, params }));
     },
     // One confirm() on every open socket; resolves once each has answered.
     async dialogOnEverySocket() {
       const expected = answers.length + sockets.size;
-      const done = new Promise((resolve) => {
+      const done = new Promise<DialogAnswer[]>((resolve) => {
         const check = () => {
           if (answers.length < expected) return;
           answered.off("answer", check);
@@ -86,17 +105,19 @@ async function fakeCdpEndpoint() {
         answered.on("answer", check);
       });
       for (const webSocket of sockets) {
-        webSocket.send(JSON.stringify({
-          method: "Page.javascriptDialogOpening",
-          sessionId: "dialog-session",
-          params: { type: "confirm", message: "Leave?", url: "about:blank" },
-        }));
+        webSocket.send(
+          JSON.stringify({
+            method: "Page.javascriptDialogOpening",
+            sessionId: "dialog-session",
+            params: { type: "confirm", message: "Leave?", url: "about:blank" },
+          }),
+        );
       }
       return done;
     },
     // The browser behind the port is now another one. Open sockets are kept,
     // so a stale cached connection is still alive when the lookup happens.
-    becomeBrowser(nextGuid) {
+    becomeBrowser(nextGuid: string) {
       guid = nextGuid;
     },
     dropConnections() {
@@ -106,12 +127,35 @@ async function fakeCdpEndpoint() {
       for (const webSocket of sockets) webSocket.terminate();
       webSockets.close();
       server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
 }
 
-async function register(registryRoot, name, fake) {
+type FakeEndpoint = Awaited<ReturnType<typeof fakeCdpEndpoint>>;
+interface AttachContext {
+  fake: FakeEndpoint;
+  registryRoot: string;
+}
+interface AttachPath {
+  label: string;
+  attach(context: AttachContext, options?: ConnectOptions): Promise<BrowserConnection>;
+  browserChanged(context: AttachContext): Promise<void>;
+}
+interface BrowserRun extends AttachContext {
+  attach(options?: ConnectOptions): Promise<BrowserConnection>;
+  browserChanged(): Promise<void>;
+}
+interface HolderRun {
+  fake: FakeEndpoint;
+  connectAs(options?: ConnectOptions): Promise<BrowserConnection>;
+}
+interface HolderCase {
+  label: string;
+  run(context: HolderRun): Promise<void>;
+}
+
+async function register(registryRoot: string, name: string, fake: FakeEndpoint) {
   await mkdir(registryRoot, { recursive: true, mode: 0o700 });
   const record = {
     version: 2,
@@ -124,16 +168,32 @@ async function register(registryRoot, name, fake) {
     browserPath: process.execPath,
     startedAt: new Date().toISOString(),
   };
-  await writeFile(
-    path.join(registryRoot, `${name}.json`),
-    `${JSON.stringify(record, null, 2)}\n`,
-    { mode: 0o600 },
-  );
+  await writeFile(path.join(registryRoot, `${name}.json`), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
 }
 
-function nextTransportEvent(connection, name) {
-  return new Promise((resolve) => {
-    const off = connection.cdp.transportEvents.on(name, () => {
+// Every connected handle carries transport events; CdpTransport declares them optional.
+function transportEventsOf(connection: BrowserConnection): CdpTransportEvents {
+  const events = connection.cdp.transportEvents;
+  assert.ok(events, "handle exposes no transportEvents");
+  return events;
+}
+
+// Calls a method the handle has at runtime but CdpTransport does not declare.
+function callUndeclared(target: object, name: string, ...args: unknown[]): unknown {
+  const method: unknown = Reflect.get(target, name);
+  assert.ok(typeof method === "function", `${name} is not a method`);
+  return Reflect.apply(method, target, args);
+}
+
+function objectField(value: unknown, key: string): object {
+  const found = readProperty(value, key);
+  assert.ok(typeof found === "object" && found !== null, `${key} is not an object`);
+  return found;
+}
+
+function nextTransportEvent(connection: BrowserConnection, name: string) {
+  return new Promise<void>((resolve) => {
+    const off = transportEventsOf(connection).on(name, () => {
       off();
       resolve();
     });
@@ -143,25 +203,24 @@ function nextTransportEvent(connection, name) {
 // Both attach paths run every case below. A named attach finds the browser
 // through its registry record (re-registered when the browser changes); a URL
 // attach finds it through the endpoint's /json/version.
-const attachPaths = [
-  {
-    label: "connectNamed",
-    attach: ({ registryRoot }, options = {}) => connectNamed("mine", { registryRoot, ...options }),
-    browserChanged: ({ registryRoot, fake }) => register(registryRoot, "mine", fake),
-  },
-  {
-    label: "connect(url)",
-    attach: ({ fake }, options) => connect(fake.endpoint, options),
-    browserChanged: async () => {},
-  },
-];
+const namedAttach: AttachPath = {
+  label: "connectNamed",
+  attach: ({ registryRoot }, options = {}) => connectNamed("mine", { registryRoot, ...options }),
+  browserChanged: ({ registryRoot, fake }) => register(registryRoot, "mine", fake),
+};
+const urlAttach: AttachPath = {
+  label: "connect(url)",
+  attach: ({ fake }, options) => connect(fake.endpoint, options),
+  browserChanged: async () => {},
+};
+const attachPaths = [namedAttach, urlAttach];
 
-async function withFakeBrowser(attachPath, run) {
+async function withFakeBrowser(attachPath: AttachPath, run: (context: BrowserRun) => Promise<void>) {
   const registryRoot = await mkdtemp(path.join(tmpdir(), "omowright-shared-"));
   const fake = await fakeCdpEndpoint();
-  const connections = [];
+  const connections: BrowserConnection[] = [];
   const context = { fake, registryRoot };
-  const attach = async (options) => {
+  const attach = async (options?: ConnectOptions) => {
     const connection = await attachPath.attach(context, options);
     connections.push(connection);
     return connection;
@@ -192,7 +251,8 @@ for (const attachPath of attachPaths) {
 
       // The last release disconnects, so a script that closes can still exit.
       const [socket] = fake.sockets;
-      const closed = once(socket, "close");
+      assert.ok(socket, "no socket is open");
+      const closed = new Promise<void>((resolve) => socket.on("close", () => resolve()));
       await third.close();
       await closed;
       assert.deepEqual(fake.upgrades, ["first"]);
@@ -240,22 +300,25 @@ for (const attachPath of attachPaths) {
 // key must never end up serving another browser (#79 review). Short reconnect
 // delays keep the doomed reconnects to the vanished GUID quick.
 test("connect(url) never leases a connection that would serve a different browser", async () => {
-  await withFakeBrowser(attachPaths[1], async ({ fake }) => {
+  await withFakeBrowser(urlAttach, async ({ fake }) => {
     const options = { client: { reconnectDelaysMs: [0, 50] } };
     const oldUrl = fake.webSocketUrl();
     const first = await connect(fake.endpoint, options);
-    let stale;
-    let fresh;
+    let stale: BrowserConnection | undefined;
+    let fresh: BrowserConnection | undefined;
     try {
       const dropped = nextTransportEvent(first, "disconnected");
       fake.becomeBrowser("second");
       fake.dropConnections();
       await dropped;
 
-      const error = await connect(oldUrl, options).then((attached) => {
-        stale = attached;
-        return null;
-      }, (rejection) => rejection);
+      const error = await connect(oldUrl, options).then(
+        (attached) => {
+          stale = attached;
+          return null;
+        },
+        (rejection) => rejection,
+      );
       assert.ok(error instanceof Error, "an attach to the vanished browser must fail, not lease");
       assert.deepEqual(fake.upgrades, ["first"]);
 
@@ -274,15 +337,15 @@ test("connect(url) never leases a connection that would serve a different browse
 // own connection, authorized with its own token.
 test("connect(url) never shares one connection across two authorizers", async () => {
   class TokenAuthorizer {
-    #token;
-    constructor(token) {
+    #token: string;
+    constructor(token: string) {
       this.#token = token;
     }
     async resolveAuthorization() {
       return `Bearer ${this.#token}`;
     }
   }
-  await withFakeBrowser(attachPaths[1], async ({ fake }) => {
+  await withFakeBrowser(urlAttach, async ({ fake }) => {
     const a = await connect(fake.endpoint, { client: { authorizer: new TokenAuthorizer("thread-a") } });
     const b = await connect(fake.endpoint, { client: { authorizer: new TokenAuthorizer("thread-b") } });
     try {
@@ -298,42 +361,57 @@ test("connect(url) never shares one connection across two authorizers", async ()
 // The shared connection's dialog policy, client, properties and listeners are
 // what every other holder and every later attach sees. Socket 0 is the first
 // connection in every row; dialogs are raised on every open socket.
+type DialogPolicyArgument = Parameters<BrowserConnection["setDialogPolicy"]>[0];
 const sharedPolicyPaths = [
-  { label: "the handle", set: (handle, policy) => handle.setDialogPolicy(policy) },
-  { label: "the handle's cdp", set: (handle, policy) => handle.cdp.setDialogPolicy(policy) },
+  {
+    label: "the handle",
+    set: (handle: BrowserConnection, policy: DialogPolicyArgument) => handle.setDialogPolicy(policy),
+  },
+  {
+    label: "the handle's cdp",
+    set: (handle: BrowserConnection, policy: DialogPolicyArgument) => {
+      const { cdp } = handle;
+      assert.ok(cdp.setDialogPolicy, "handle cdp has no setDialogPolicy");
+      cdp.setDialogPolicy(policy);
+    },
+  },
 ];
-const byDialogSocket = (answers) => answers.sort((x, y) => x.socket - y.socket).map((a) => a.accept);
-const holderCases = [
-  ...sharedPolicyPaths.map((path) => ({
-    label: `setDialogPolicy through ${path.label} on a shared connection throws SharedConnectionError`,
+const byDialogSocket = (answers: DialogAnswer[]) =>
+  answers.toSorted((x, y) => Number(x.socket) - Number(y.socket)).map((a) => a.accept);
+const holderCases: HolderCase[] = [
+  ...sharedPolicyPaths.map((policyPath): HolderCase => ({
+    label: `setDialogPolicy through ${policyPath.label} on a shared connection throws SharedConnectionError`,
     async run({ fake, connectAs }) {
       const changing = await connectAs();
       await connectAs();
-      assert.throws(() => path.set(changing, { accept: false }), (error) => {
-        assert.equal(error?.name, "SharedConnectionError");
-        assert.ok(error instanceof sharedConnections.SharedConnectionError);
-        assert.equal(error.code, "shared_connection");
-        assert.match(error.message, /pass dialogPolicy to connect\(\)\/connectNamed\(\)/);
-        return true;
-      });
+      assert.throws(
+        () => policyPath.set(changing, { accept: false }),
+        (error) => {
+          assert.equal(readProperty(error, "name"), "SharedConnectionError");
+          assert.ok(error instanceof sharedConnections.SharedConnectionError);
+          assert.equal(readProperty(error, "code"), "shared_connection");
+          assert.match(error.message, /pass dialogPolicy to connect\(\)\/connectNamed\(\)/);
+          return true;
+        },
+      );
       assert.deepEqual(byDialogSocket(await fake.dialogOnEverySocket()), [true]);
       assert.deepEqual(fake.upgrades, ["first"]);
     },
   })),
-  ...sharedPolicyPaths.map((path) => ({
-    label: `a sole holder's setDialogPolicy through ${path.label} works and stops sharing`,
+  ...sharedPolicyPaths.map((policyPath): HolderCase => ({
+    label: `a sole holder's setDialogPolicy through ${policyPath.label} works and stops sharing`,
     async run({ fake, connectAs }) {
       const sole = await connectAs();
-      path.set(sole, { accept: false });
+      policyPath.set(sole, { accept: false });
       await connectAs();
       assert.deepEqual(byDialogSocket(await fake.dialogOnEverySocket()), [false, true]);
     },
   })),
-  ...sharedPolicyPaths.map((path) => ({
-    label: `setDialogPolicy(undefined) through ${path.label} resets to accepting dialogs`,
+  ...sharedPolicyPaths.map((policyPath): HolderCase => ({
+    label: `setDialogPolicy(undefined) through ${policyPath.label} resets to accepting dialogs`,
     async run({ fake, connectAs }) {
       const sole = await connectAs({ dialogPolicy: { accept: false } });
-      path.set(sole, undefined);
+      policyPath.set(sole, undefined);
       assert.deepEqual(byDialogSocket(await fake.dialogOnEverySocket()), [true]);
     },
   })),
@@ -362,8 +440,9 @@ const holderCases = [
       await connectAs({ dialogPolicy: { accept: false } });
       assert.deepEqual(fake.upgrades, ["first", "first"]);
       // The live policy reached through a handle can't be changed in place.
+      const otherPolicy: { accept?: unknown } & object = objectField(other.cdp, "dialogPolicy");
       assert.throws(() => {
-        other.cdp.dialogPolicy.accept = false;
+        otherPolicy.accept = false;
       }, TypeError);
       assert.deepEqual(byDialogSocket(await fake.dialogOnEverySocket()), [true, false]);
     },
@@ -375,10 +454,11 @@ const holderCases = [
     async run({ fake, connectAs }) {
       const mutating = await connectAs();
       const other = await connectAs();
+      const mutatingPolicy: { accept?: unknown } & object = objectField(mutating.cdp, "dialogPolicy");
       assert.throws(() => {
-        mutating.cdp.dialogPolicy.accept = false;
+        mutatingPolicy.accept = false;
       }, TypeError);
-      assert.equal(other.cdp.dialogPolicy.accept, true);
+      assert.equal(readProperty(objectField(other.cdp, "dialogPolicy"), "accept"), true);
       assert.deepEqual(fake.upgrades, ["first"]);
       assert.deepEqual(byDialogSocket(await fake.dialogOnEverySocket()), [true]);
     },
@@ -392,14 +472,14 @@ const holderCases = [
     async run({ fake, connectAs }) {
       const churning = await connectAs();
       const other = await connectAs();
-      const heard = [];
+      const heard: string[] = [];
       const listener = () => heard.push("other");
       for (let i = 0; i < 50; i += 1) {
-        churning.cdp.transportEvents.on("disconnected", listener)();
+        transportEventsOf(churning).on("disconnected", listener)();
         churning.cdp.on("Target.targetCreated", listener)();
       }
-      other.cdp.transportEvents.on("disconnected", listener);
-      churning.cdp.transportEvents.clearListeners();
+      transportEventsOf(other).on("disconnected", listener);
+      callUndeclared(transportEventsOf(churning), "clearListeners");
       await churning.close();
       const dropped = nextTransportEvent(other, "disconnected");
       fake.dropConnections();
@@ -410,17 +490,17 @@ const holderCases = [
   // #140: each handle's registration is its own entry, even for one function,
   // so one holder unsubscribing or closing never removes another holder's.
   ...[
-    { how: "unsubscribes", remove: (_handle, unsubscribe) => unsubscribe() },
-    { how: "closes", remove: (handle) => handle.close() },
-  ].map(({ how, remove }) => ({
+    { how: "unsubscribes", remove: (_handle: BrowserConnection, unsubscribe: () => void) => unsubscribe() },
+    { how: "closes", remove: (handle: BrowserConnection) => handle.close() },
+  ].map(({ how, remove }): HolderCase => ({
     label: `a handle that ${how} leaves another handle's registration of the same transport listener`,
     async run({ fake, connectAs }) {
       const removing = await connectAs();
       const other = await connectAs();
-      const heard = [];
+      const heard: string[] = [];
       const listener = () => heard.push("heard");
-      const unsubscribe = removing.cdp.transportEvents.on("disconnected", listener);
-      other.cdp.transportEvents.on("disconnected", listener);
+      const unsubscribe = transportEventsOf(removing).on("disconnected", listener);
+      transportEventsOf(other).on("disconnected", listener);
       await remove(removing, unsubscribe);
       const dropped = nextTransportEvent(other, "disconnected");
       fake.dropConnections();
@@ -435,22 +515,30 @@ const holderCases = [
     async run({ fake, connectAs }) {
       const listening = await connectAs();
       await connectAs();
-      const answered = [];
-      listening.cdp.on("Page.javascriptDialogOpening", (_params, meta) => {
-        answered.push(meta.dialog.dismiss());
+      const answered: unknown[] = [];
+      // The dialog handle rides on the event meta, which CdpEventMeta does not declare.
+      listening.cdp.on("Page.javascriptDialogOpening", (_params: unknown, meta: CdpEventMeta) => {
+        const dialog = readProperty(meta, "dialog");
+        const dismiss = readProperty(dialog, "dismiss");
+        assert.ok(typeof dismiss === "function", "the dialog event meta carries no dismiss()");
+        answered.push(Reflect.apply(dismiss, dialog, []));
       });
       assert.deepEqual(byDialogSocket(await fake.dialogOnEverySocket()), [false]);
       await Promise.all(answered);
       await listening.close();
       assert.deepEqual(byDialogSocket(await fake.dialogOnEverySocket()), [true]);
-      assert.deepEqual(fake.answers.map((a) => a.accept), [false, true]);
+      assert.deepEqual(
+        fake.answers.map((a) => a.accept),
+        [false, true],
+      );
     },
   },
   {
     label: "a property set or defined on a handle stays on that handle",
     async run({ connectAs }) {
-      const writer = await connectAs();
-      const other = await connectAs();
+      // A handle accepts properties its type does not declare; these views write and read them as written.
+      const writer: { marker?: unknown; defined?: unknown } & object = await connectAs();
+      const other: { marker?: unknown; defined?: unknown } & object = await connectAs();
       writer.marker = "set";
       Object.defineProperty(writer, "defined", { value: "defined", configurable: true });
       assert.equal(writer.marker, "set");
@@ -462,7 +550,7 @@ const holderCases = [
   {
     label: "a handle cannot delete a shared property",
     async run({ connectAs }) {
-      const deleting = await connectAs();
+      const deleting: { tabs?: unknown } & object = await connectAs();
       const other = await connectAs();
       assert.throws(() => {
         delete deleting.tabs;
@@ -473,9 +561,9 @@ const holderCases = [
   {
     label: "a client reference taken through a handle cannot change the shared client",
     async run({ fake, connectAs }) {
-      const client = (await connectAs()).cdp;
+      const client: { logId?: unknown } & object = (await connectAs()).cdp;
       const other = await connectAs();
-      const before = other.cdp.logId;
+      const before = readProperty(other.cdp, "logId");
       assert.throws(() => {
         client.logId = "changed";
       }, TypeError);
@@ -483,7 +571,7 @@ const holderCases = [
       assert.throws(() => {
         delete client.logId;
       }, TypeError);
-      assert.equal(other.cdp.logId, before);
+      assert.equal(readProperty(other.cdp, "logId"), before);
       await other.cdp.send("Browser.getVersion");
       assert.deepEqual(fake.upgrades, ["first"]);
     },
@@ -493,11 +581,11 @@ const holderCases = [
     async run({ fake, connectAs }) {
       const closing = await connectAs();
       const other = await connectAs();
-      const heardByClosed = [];
+      const heardByClosed: string[] = [];
       closing.cdp.on("Target.targetCreated", () => heardByClosed.push("cdp"));
-      closing.cdp.transportEvents.on("disconnected", () => heardByClosed.push("transport"));
+      transportEventsOf(closing).on("disconnected", () => heardByClosed.push("transport"));
       await closing.close();
-      const delivered = new Promise((resolve) => other.cdp.on("Target.targetCreated", resolve));
+      const delivered = new Promise<void>((resolve) => other.cdp.on("Target.targetCreated", () => resolve()));
       const dropped = nextTransportEvent(other, "disconnected");
       fake.emitEvent("Target.targetCreated", { targetInfo: { targetId: "t", type: "page" } });
       await delivered;
@@ -533,10 +621,10 @@ const holderCases = [
     async run({ fake, connectAs }) {
       const clearing = await connectAs();
       const other = await connectAs();
-      const heard = [];
-      clearing.cdp.transportEvents.on("disconnected", () => heard.push("clearing"));
-      other.cdp.transportEvents.on("disconnected", () => heard.push("other"));
-      clearing.cdp.transportEvents.clearListeners();
+      const heard: string[] = [];
+      transportEventsOf(clearing).on("disconnected", () => heard.push("clearing"));
+      transportEventsOf(other).on("disconnected", () => heard.push("other"));
+      callUndeclared(transportEventsOf(clearing), "clearListeners");
       const dropped = nextTransportEvent(other, "disconnected");
       fake.dropConnections();
       await dropped;
@@ -548,20 +636,24 @@ const holderCases = [
     async run({ connectAs }) {
       const emitting = await connectAs();
       const other = await connectAs();
-      const heard = [];
-      other.cdp.transportEvents.on("disconnected", () => heard.push("other"));
-      assert.throws(() => emitting.cdp.transportEvents.emit("disconnected"), TypeError);
+      const heard: string[] = [];
+      transportEventsOf(other).on("disconnected", () => heard.push("other"));
+      assert.throws(() => callUndeclared(transportEventsOf(emitting), "emit", "disconnected"), TypeError);
       assert.deepEqual(heard, []);
     },
   },
   {
     label: "a handle's reserved members cannot be replaced",
     async run({ connectAs }) {
-      const handle = await connectAs();
-      for (const member of ["cdp", "close", "setDialogPolicy"]) {
-        assert.throws(() => {
-          handle[member] = () => {};
-        }, TypeError, member);
+      const handle: { cdp?: unknown; close?: unknown; setDialogPolicy?: unknown } & object = await connectAs();
+      for (const member of ["cdp", "close", "setDialogPolicy"] as const) {
+        assert.throws(
+          () => {
+            handle[member] = () => {};
+          },
+          TypeError,
+          member,
+        );
         assert.throws(() => Object.defineProperty(handle, member, { value: 1, configurable: true }), TypeError, member);
       }
     },
@@ -569,7 +661,7 @@ const holderCases = [
   {
     label: "a handle's own keys and descriptors show what was set on it",
     async run({ connectAs }) {
-      const writer = await connectAs();
+      const writer: { marker?: unknown } & object = await connectAs();
       const other = await connectAs();
       writer.marker = "set";
       assert.ok(Object.keys(writer).includes("marker"));
@@ -584,7 +676,8 @@ for (const attachPath of attachPaths) {
   for (const holderCase of holderCases) {
     test(`${attachPath.label}: ${holderCase.label}`, async () => {
       await withFakeBrowser(attachPath, ({ fake, attach }) =>
-        holderCase.run({ fake, connectAs: (options) => attach(options) }));
+        holderCase.run({ fake, connectAs: (options) => attach(options) }),
+      );
     });
   }
 }
@@ -597,7 +690,7 @@ const unshareableOptions = [
   {
     label: "cyclic options",
     make: () => {
-      const options = { client: {} };
+      const options: { client: { owner?: unknown } } = { client: {} };
       options.client.owner = options;
       return options;
     },
@@ -607,16 +700,23 @@ const unshareableOptions = [
     make: () => Object.defineProperty({}, "dialogPolicy", { value: { accept: false }, enumerable: false }),
   },
   { label: "a symbol key", make: () => ({ [Symbol.for("omowright.test")]: true }) },
-  { label: "an accessor", make: () => ({ get storageRoot() { return "."; } }) },
+  {
+    label: "an accessor",
+    make: () => ({
+      get storageRoot() {
+        return ".";
+      },
+    }),
+  },
 ];
 for (const unshareable of unshareableOptions) {
   test(`connect(url) with ${unshareable.label} gets a connection of its own`, async () => {
-    await withFakeBrowser(attachPaths[1], async ({ fake }) => {
-      const handles = [];
+    await withFakeBrowser(urlAttach, async ({ fake }) => {
+      const handles: BrowserConnection[] = [];
       try {
         handles.push(await connect(fake.endpoint, unshareable.make()));
         handles.push(await connect(fake.endpoint, unshareable.make()));
-        assert.notEqual(handles[0].cdp, handles[1].cdp);
+        assert.notEqual(handles[0]?.cdp, handles[1]?.cdp);
         assert.deepEqual(fake.upgrades, ["first", "first"]);
       } finally {
         await Promise.all(handles.map((h) => h.close().catch(() => {})));

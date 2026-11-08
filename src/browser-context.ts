@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { cookieToCdp } from "./cookies.js";
-import { createAgentTabs, getAgentTabs } from "./agent-tabs.js";
+import { cookieToCdp } from "./cookies.ts";
+import { createAgentTabs, getAgentTabs } from "./agent-tabs.ts";
 
 export class BrowserContext {
   #connection;

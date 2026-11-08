@@ -1,27 +1,33 @@
 import { unlink } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { probeOnce, tryAcquire } from "./lock-backend.js";
+import { probeOnce, tryAcquire } from "./lock-backend.ts";
+import type { HeldLock } from "./lock-backend.ts";
+import { readProperty } from "./read-property.ts";
 
-const localLocks = new Map();
+const localLocks = new Map<string, Promise<unknown>>();
 
-export function isPidAlive(pid) {
+function errorCode(error: unknown): unknown {
+  return error === null || error === undefined ? undefined : readProperty(error, "code");
+}
+
+export function isPidAlive(pid: number) {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    if (error?.code === "EPERM") return true;
-    if (error?.code === "ESRCH") return false;
+    if (errorCode(error) === "EPERM") return true;
+    if (errorCode(error) === "ESRCH") return false;
     throw error;
   }
 }
 
-export async function unlinkIfPresent(target) {
-  await unlink(target).catch((error) => {
-    if (error?.code !== "ENOENT") throw error;
+export async function unlinkIfPresent(target: string) {
+  await unlink(target).catch((error: unknown) => {
+    if (errorCode(error) !== "ENOENT") throw error;
   });
 }
 
-async function acquireLock(lockPath, timeoutMs) {
+async function acquireLock(lockPath: string, timeoutMs: number): Promise<HeldLock> {
   const deadline = performance.now() + timeoutMs;
   let delay = 10;
   for (;;) {
@@ -42,10 +48,10 @@ async function acquireLock(lockPath, timeoutMs) {
   }
 }
 
-async function acquireLocalLock(key) {
+async function acquireLocalLock(key: string) {
   const previous = localLocks.get(key) ?? Promise.resolve();
-  let releaseCurrent;
-  const current = new Promise((resolve) => {
+  let releaseCurrent: (value: void) => void;
+  const current = new Promise<void>((resolve) => {
     releaseCurrent = resolve;
   });
   const tail = previous.then(() => current);
@@ -59,7 +65,7 @@ async function acquireLocalLock(key) {
 
 // The kernel owns exclusion and crash release; the local FIFO avoids polling
 // between callers in this process. Neither acquisition nor release removes files.
-export async function withLock(lockPath, { timeoutMs }, run) {
+export async function withLock<T>(lockPath: string, { timeoutMs }: { timeoutMs: number }, run: () => Promise<T>): Promise<T> {
   const releaseLocal = await acquireLocalLock(lockPath);
   try {
     const held = await acquireLock(lockPath, timeoutMs);

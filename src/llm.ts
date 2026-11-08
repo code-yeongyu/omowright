@@ -1,8 +1,32 @@
 const SNAPSHOT_PARSE_ERROR =
   "compactSnapshot expected a snapshot() result (JSON string or {tree, refs} object)";
 
-export function compactSnapshot(snapshot) {
-  const obj = typeof snapshot === "string" ? JSON.parse(snapshot) : snapshot;
+export interface SnapshotDiff {
+  added: Array<{ tree: string }>;
+  changed: Array<{ tree: string }>;
+  removed: string[];
+  focused?: string | null;
+}
+
+/** A snapshot() result as an object; compactSnapshot also takes its JSON string. */
+export interface SnapshotResult {
+  tree?: unknown;
+  full?: boolean;
+  diff?: SnapshotDiff;
+  find?: { query: string; matches: number };
+  refs?: unknown;
+}
+
+// JSON boundary: any object (or function) is read as a SnapshotResult; the checks below reject
+// one without a string tree, exactly as property reads on a primitive did.
+function isSnapshotLike(value: unknown): value is SnapshotResult {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
+}
+
+/** Validates at runtime: anything that is not a snapshot() result throws a TypeError. */
+export function compactSnapshot(snapshot: unknown): string {
+  const parsed: unknown = typeof snapshot === "string" ? JSON.parse(snapshot) : snapshot;
+  const obj = isSnapshotLike(parsed) ? parsed : undefined;
   if (obj?.full === false && obj.diff) {
     const { added, changed, removed, focused } = obj.diff;
     const lines = [
@@ -22,22 +46,32 @@ export function compactSnapshot(snapshot) {
   return obj.tree;
 }
 
-function refRanges(refs) {
+function refRanges(refs: string[]) {
   const sorted = refs.map(ref => {
-    const [, prefix, number] = /^((?:f\d+)?e)(\d+)$/.exec(ref);
+    const match = /^((?:f\d+)?e)(\d+)$/.exec(ref);
+    // A ref that does not parse threw this TypeError in the JS original (destructuring null).
+    if (match === null) throw new TypeError(`Cannot destructure a malformed snapshot ref: ${ref}`);
+    // Both groups always take part in a match.
+    const [, prefix = "", number = ""] = match;
     return { prefix, number: Number(number) };
   }).toSorted((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
-  const ranges = [];
+  const ranges: string[] = [];
   for (let i = 0; i < sorted.length; i++) {
     const first = sorted[i];
+    if (first === undefined) break;
     let last = first;
-    while (sorted[i + 1]?.prefix === first.prefix && sorted[i + 1].number === last.number + 1) last = sorted[++i];
+    let next = sorted[i + 1];
+    while (next?.prefix === first.prefix && next.number === last.number + 1) {
+      last = next;
+      i += 1;
+      next = sorted[i + 1];
+    }
     ranges.push(first === last ? `${first.prefix}${first.number}` : `${first.prefix}${first.number}-${last.prefix}${last.number}`);
   }
   return ranges.join(", ");
 }
 
-export function snapshotTokens(snapshot) {
+export function snapshotTokens(snapshot: unknown) {
   const text = typeof snapshot === "string" ? snapshot : JSON.stringify(snapshot);
   return { bytes: Buffer.byteLength(text, "utf8"), estTokens: Math.ceil(Buffer.byteLength(text, "utf8") / 4) };
 }

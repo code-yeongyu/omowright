@@ -17,33 +17,52 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+/** Runs a Windows tool; `restrictToOwner` takes one so its contract can be tested off Windows. */
+export type CommandRunner = (
+  file: string,
+  args: readonly string[],
+  options: { timeout: number; windowsHide: boolean },
+) => Promise<{ stdout: unknown }>;
+
+export type OwnerOnlyKind = "file" | "directory";
+
+export interface RestrictToOwnerOptions {
+  platform?: NodeJS.Platform | undefined;
+  run?: CommandRunner | undefined;
+}
+
+interface ParsedDacl {
+  flags: string;
+  aces: string[][];
+}
+
 const execFileAsync = promisify(execFile);
 const WINDOWS_COMMAND_TIMEOUT_MS = 15_000;
 // Directories this process restricted or found restricted, by volume and file
 // id rather than by name: a directory that later takes a restricted one's name
 // never got the grant, and on a case-sensitive NTFS directory two names that
 // differ only in case are two directories.
-const ownerOnlyDirectories = new Set();
+const ownerOnlyDirectories = new Set<string>();
 // SDDL trustees that may hold allow entries on an owner-only directory besides
 // the user: SYSTEM, Administrators and TrustedInstaller (the trusted set of
 // src/native-host-win32.js), OWNER RIGHTS (the owner, the user) and CREATOR
 // OWNER (whoever creates a child, on that child). SDDL writes well-known SIDs
 // as aliases; their numeric forms are listed too.
-const TRUSTED_TRUSTEES = new Set([
+const TRUSTED_TRUSTEES: ReadonlySet<string | undefined> = new Set([
   "SY", "S-1-5-18",
   "BA", "S-1-5-32-544",
   "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
   "OW", "S-1-3-4",
   "CO", "S-1-3-0",
 ]);
-const DENY_ACE_TYPES = new Set(["D", "OD", "XD"]);
-let currentUserSid;
+const DENY_ACE_TYPES: ReadonlySet<string | undefined> = new Set(["D", "OD", "XD"]);
+let currentUserSid: Promise<string> | undefined;
 
-export function windowsSystemTool(name, env = process.env) {
+export function windowsSystemTool(name: string, env: NodeJS.ProcessEnv = process.env) {
   return path.win32.join(env.SystemRoot || env.windir || "C:\\Windows", "System32", name);
 }
 
-async function readCurrentUserSid(run) {
+async function readCurrentUserSid(run: CommandRunner) {
   const { stdout } = await run(windowsSystemTool("whoami.exe"), ["/user", "/fo", "csv", "/nh"], {
     timeout: WINDOWS_COMMAND_TIMEOUT_MS,
     windowsHide: true,
@@ -54,7 +73,7 @@ async function readCurrentUserSid(run) {
 }
 
 function cachedCurrentUserSid() {
-  currentUserSid ??= readCurrentUserSid(execFileAsync).catch((error) => {
+  currentUserSid ??= readCurrentUserSid(execFileAsync).catch((error: unknown) => {
     currentUserSid = undefined;
     throw error;
   });
@@ -63,7 +82,7 @@ function cachedCurrentUserSid() {
 
 // The directory's DACL as SDDL. `icacls /save` without /T reads this one
 // object only and writes it, as UTF-16, to a file.
-async function readDirectoryDacl(dir, run) {
+async function readDirectoryDacl(dir: string, run: CommandRunner) {
   const scratch = await mkdtemp(path.join(tmpdir(), "omowright-acl-"));
   try {
     const saved = path.join(scratch, "acl");
@@ -83,10 +102,10 @@ async function readDirectoryDacl(dir, run) {
 // ACEs, up to the SACL `S:` that may follow), or null when it does not parse,
 // as for `D:NO_ACCESS_CONTROL`. A conditional ACE nests parentheses and may
 // quote strings, so ACEs are split at depth zero, skipping quoted text.
-function parseDacl(dacl) {
+function parseDacl(dacl: string): ParsedDacl | null {
   const head = /^D:([A-Z]*)/.exec(dacl);
   if (!head) return null;
-  const aces = [];
+  const aces: string[][] = [];
   let depth = 0;
   let start = 0;
   let i = head[0].length;
@@ -105,7 +124,8 @@ function parseDacl(dacl) {
     }
   }
   if (depth !== 0 || (i < dacl.length && !dacl.startsWith("S:", i))) return null;
-  return { flags: head[1], aces };
+  // head[0] is "D:" plus the flags group, so this slice is exactly head[1].
+  return { flags: dacl.slice("D:".length, head[0].length), aces };
 }
 
 // Reads a directory DACL against the grant below. `ownerOnly`: already what
@@ -115,18 +135,19 @@ function parseDacl(dacl) {
 // grant removes (it drops inherited entries itself). Deny entries grant nothing
 // and stay. `parsed` is false for a DACL that could not be read, whose entries
 // are unknown. SDDL names the built-in Administrator and Guest accounts LA and LG.
-function inspectDirectoryDacl(text, sid) {
+function inspectDirectoryDacl(text: string, sid: string) {
   const dacl = parseDacl(text);
   if (!dacl) return { parsed: false, ownerOnly: false, foreign: [] };
-  const isUser = (trustee) =>
+  const isUser = (trustee: string | undefined) =>
     trustee === sid || (trustee === "LA" && sid.endsWith("-500")) || (trustee === "LG" && sid.endsWith("-501"));
   const own = dacl.aces.filter((fields) => isUser(fields[5]));
   const others = dacl.aces.filter(([type, , , , , trustee]) => !isUser(trustee) && !TRUSTED_TRUSTEES.has(trustee) && !DENY_ACE_TYPES.has(type));
   return {
     parsed: true,
     ownerOnly: dacl.flags.includes("P") && others.length === 0 &&
-      own.length === 1 && own[0][0] === "A" && own[0][1] === "OICI" && own[0][2] === "FA",
-    foreign: [...new Set(others.filter(([, flags]) => !flags.includes("ID")).map(([, , , , , trustee]) => trustee))],
+      own.length === 1 && own[0]?.[0] === "A" && own[0]?.[1] === "OICI" && own[0]?.[2] === "FA",
+    // An ACE with no flags field throws here (TypeError), failing restrictToOwner closed.
+    foreign: [...new Set(others.filter(([, flags]) => !String.prototype.includes.call(flags, "ID")).map(([, , , , , trustee]) => trustee))],
   };
 }
 
@@ -135,21 +156,25 @@ function inspectDirectoryDacl(text, sid) {
 // reuse a deleted directory's id); the creation time tells them apart. A file
 // system that reports no file id gives none, and its directories are not
 // remembered.
-async function directoryIdentity(dir) {
+async function directoryIdentity(dir: string) {
   const { dev, ino, birthtimeNs } = await stat(dir, { bigint: true });
   return ino === 0n ? null : `${dev}:${ino}:${birthtimeNs}`;
 }
 
 // The memo only spares later tool runs, so a directory whose identity cannot
 // be read is not remembered and files created in it get their own grant.
-async function rememberOwnerOnlyDirectory(dir) {
+async function rememberOwnerOnlyDirectory(dir: string) {
   const identity = await directoryIdentity(dir).catch(() => null);
   if (identity) ownerOnlyDirectories.add(identity);
 }
 
 // `platform` and `run` let the security contract above (absolute tool paths,
 // fail closed) be tested off Windows; production callers pass neither.
-export async function restrictToOwner(target, kind, { platform = process.platform, run } = {}) {
+export async function restrictToOwner(
+  target: string,
+  kind: OwnerOnlyKind,
+  { platform = process.platform, run }: RestrictToOwnerOptions = {},
+) {
   if (platform !== "win32") {
     await chmod(target, kind === "directory" ? 0o700 : 0o600);
     return;
@@ -185,7 +210,7 @@ export async function restrictToOwner(target, kind, { platform = process.platfor
 // For a file the caller has just created. On Windows a file created inside a
 // directory restrictToOwner handled in this process inherits that directory's
 // owner-only grant at creation, so no tool runs for it.
-export async function restrictNewFileToOwner(target, options = {}) {
+export async function restrictNewFileToOwner(target: string, options: RestrictToOwnerOptions = {}) {
   const platform = options.platform ?? process.platform;
   if (platform === "win32") {
     // A parent that cannot be identified is not trusted: the file gets its own grant.

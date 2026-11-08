@@ -1,59 +1,99 @@
 import { parse } from "acorn";
+import type { AnyNode, Identifier, Program } from "acorn";
+
+type ScopeKind = "function" | "block";
+
+interface Scope {
+  parent: Scope | null;
+  kind: ScopeKind;
+  bindings: Set<string>;
+}
+
+export interface ScopeReference {
+  name: string;
+  node: Identifier;
+  scope: Scope;
+}
+
+export interface ScopeAnalysis {
+  ast: Program;
+  references: ScopeReference[];
+  free: ScopeReference[];
+}
+
+function isNode(value: unknown): value is AnyNode {
+  return typeof value === "object" && value !== null && "type" in value && Boolean(value.type);
+}
 
 // Resolve references after visiting the entire tree so hoisted and forward
 // declarations count, without making a sibling block's bindings visible.
-export function analyzeScopes(source) {
+export function analyzeScopes(source: string): ScopeAnalysis {
   const ast = parse(source, { ecmaVersion: "latest", sourceType: "module", locations: true });
-  const references = [];
-  const scope = (parent, kind) => ({ parent, kind, bindings: new Set() });
+  const references: ScopeReference[] = [];
+  const scope = (parent: Scope | null, kind: ScopeKind): Scope => ({ parent, kind, bindings: new Set() });
   const root = scope(null, "function");
-  function bind(node, current) {
+  function bind(node: AnyNode | null | undefined, current: Scope) {
     if (!node) return;
     switch (node.type) {
-      case "Identifier": current.bindings.add(node.name); break;
-      case "RestElement": bind(node.argument, current); break;
-      case "AssignmentPattern": bind(node.left, current); break;
-      case "ArrayPattern": node.elements.forEach(item => bind(item, current)); break;
+      case "Identifier":
+        current.bindings.add(node.name);
+        break;
+      case "RestElement":
+        bind(node.argument, current);
+        break;
+      case "AssignmentPattern":
+        bind(node.left, current);
+        break;
+      case "ArrayPattern":
+        node.elements.forEach((item) => bind(item, current));
+        break;
       case "ObjectPattern":
-        node.properties.forEach(item => bind(item.type === "RestElement" ? item.argument : item.value, current));
+        node.properties.forEach((item) => bind(item.type === "RestElement" ? item.argument : item.value, current));
         break;
     }
   }
-  function defaults(node, current) {
+  function defaults(node: AnyNode | null | undefined, current: Scope) {
     if (!node) return;
     if (node.type === "AssignmentPattern") {
       visit(node.right, current);
       defaults(node.left, current);
     } else if (node.type === "ObjectPattern") {
       for (const property of node.properties) {
+        if (property.type === "RestElement") {
+          defaults(property.argument, current);
+          continue;
+        }
         if (property.computed) visit(property.key, current);
-        defaults(property.value ?? property.argument, current);
+        defaults(property.value, current);
       }
     } else if (node.type === "ArrayPattern") {
-      node.elements.forEach(item => defaults(item, current));
+      node.elements.forEach((item) => defaults(item, current));
     } else if (node.type === "RestElement") defaults(node.argument, current);
   }
-  function children(node, current, excluded = []) {
-    for (const [key, value] of Object.entries(node)) {
+  function children(node: AnyNode, current: Scope, excluded: readonly string[] = []) {
+    const entries: Array<[string, unknown]> = Object.entries(node);
+    for (const [key, value] of entries) {
       if (excluded.includes(key)) continue;
-      if (Array.isArray(value)) value.forEach(item => visit(item, current));
-      else if (value?.type) visit(value, current);
+      if (Array.isArray(value)) value.forEach((item) => visit(item, current));
+      else if (isNode(value)) visit(value, current);
     }
   }
-  function visit(node, current) {
-    if (!node?.type) return;
+  function visit(node: unknown, current: Scope) {
+    if (!isNode(node)) return;
     switch (node.type) {
       case "Identifier":
         references.push({ name: node.name, node, scope: current });
         return;
-      case "PrivateIdentifier": return;
-      case "ImportDeclaration":
-        node.specifiers.forEach(item => bind(item.local, current));
+      case "PrivateIdentifier":
         return;
-      case "ExportAllDeclaration": return;
+      case "ImportDeclaration":
+        node.specifiers.forEach((item) => bind(item.local, current));
+        return;
+      case "ExportAllDeclaration":
+        return;
       case "ExportNamedDeclaration":
         visit(node.declaration, current);
-        if (!node.source) node.specifiers.forEach(item => visit(item.local, current));
+        if (!node.source) node.specifiers.forEach((item) => visit(item.local, current));
         return;
       case "FunctionDeclaration":
       case "FunctionExpression":
@@ -62,8 +102,8 @@ export function analyzeScopes(source) {
         const local = scope(current, "function");
         bind(node.id, local);
         if (node.type !== "ArrowFunctionExpression") local.bindings.add("arguments");
-        node.params.forEach(param => bind(param, local));
-        node.params.forEach(param => defaults(param, local));
+        node.params.forEach((param) => bind(param, local));
+        node.params.forEach((param) => defaults(param, local));
         // Body var declarations are not visible to parameter initializers.
         visit(node.body, scope(local, "function"));
         return;
@@ -94,7 +134,8 @@ export function analyzeScopes(source) {
       }
       case "VariableDeclaration": {
         let target = current;
-        if (node.kind === "var") while (target.kind !== "function") target = target.parent;
+        // The root scope is a function scope, so a var always finds one before the chain ends.
+        if (node.kind === "var") while (target.kind !== "function" && target.parent) target = target.parent;
         for (const declaration of node.declarations) {
           bind(declaration.id, target);
           defaults(declaration.id, current);
@@ -112,16 +153,20 @@ export function analyzeScopes(source) {
         if (node.computed) visit(node.key, current);
         visit(node.value, current);
         return;
-      case "LabeledStatement": visit(node.body, current); return;
+      case "LabeledStatement":
+        visit(node.body, current);
+        return;
       case "BreakStatement":
-      case "ContinueStatement": return;
-      case "MetaProperty": return;
+      case "ContinueStatement":
+        return;
+      case "MetaProperty":
+        return;
     }
     children(node, current);
   }
   visit(ast, root);
-  const free = references.filter(reference => {
-    for (let current = reference.scope; current; current = current.parent) {
+  const free = references.filter((reference) => {
+    for (let current: Scope | null = reference.scope; current; current = current.parent) {
       if (current.bindings.has(reference.name)) return false;
     }
     return true;

@@ -16,17 +16,19 @@
 // "No usable sandbox!" FATAL and its stack). One START line per launch.
 import { appendFileSync, createReadStream, createWriteStream } from "node:fs";
 import { Socket } from "node:net";
+import type { Readable } from "node:stream";
 
 const mode = process.env.FAKE_BROWSER_MODE ?? "ready";
 const signalLog = process.env.FAKE_SIGNAL_LOG;
-const record = (event) => {
+const record = (event: string) => {
   if (signalLog) appendFileSync(signalLog, `${event} ${Date.now()}\n`);
 };
 if (mode === "exit-early") {
   record("START");
   let text = "FATAL: fake browser cannot start\n";
-  for (let frame = 0; frame < Number(process.env.FAKE_STDERR_FRAMES ?? 1); frame++) text += `#${frame} fake browser frame\n`;
-  await new Promise(resolve => process.stderr.write(text, resolve));
+  for (let frame = 0; frame < Number(process.env.FAKE_STDERR_FRAMES ?? 1); frame++)
+    text += `#${frame} fake browser frame\n`;
+  await new Promise((resolve) => process.stderr.write(text, resolve));
   process.exit(1);
 }
 if (process.env.FAKE_ON_TERM) {
@@ -46,20 +48,25 @@ if (mode === "mute-cdp") {
   // Under node, a non-blocking socket: fs.createReadStream parks a threadpool
   // thread in a blocking read on the pipe, which holds process.exit() in the
   // SIGTERM handler. Bun's net.Socket does not read an inherited pipe fd.
-  const input = typeof Bun === "undefined"
-    ? new Socket({ fd: 3, readable: true, writable: false })
-    : createReadStream(null, { fd: 3 });
-  const output = createWriteStream(null, { fd: 4 });
+  const input: Readable =
+    typeof Bun === "undefined"
+      ? new Socket({ fd: 3, readable: true, writable: false })
+      : createReadStream("", { fd: 3 });
+  const output = createWriteStream("", { fd: 4 });
   let buffer = Buffer.alloc(0);
-  input.on("data", (chunk) => {
+  input.on("data", (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
     let idx;
     while ((idx = buffer.indexOf(0)) !== -1) {
       const raw = buffer.subarray(0, idx).toString("utf8");
       buffer = buffer.subarray(idx + 1);
       if (raw.length === 0) continue;
-      let msg;
-      try { msg = JSON.parse(raw); } catch { continue; }
+      let msg: { id?: unknown; method?: unknown };
+      try {
+        msg = JSON.parse(raw);
+      } catch {
+        continue;
+      }
       if (msg.method === "Browser.close") {
         record("CLOSE");
         output.write(JSON.stringify({ id: msg.id, result: {} }) + "\0", () => {
@@ -67,9 +74,7 @@ if (mode === "mute-cdp") {
         });
         continue;
       }
-      const result = msg.method === "Browser.getVersion"
-        ? { product: "FakeChrome/1.0", protocolVersion: "1.3" }
-        : {};
+      const result = msg.method === "Browser.getVersion" ? { product: "FakeChrome/1.0", protocolVersion: "1.3" } : {};
       output.write(JSON.stringify({ id: msg.id, result }) + "\0");
     }
   });

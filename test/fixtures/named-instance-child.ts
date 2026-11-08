@@ -2,12 +2,10 @@
 // name, released from a stdin barrier at the same instant, so the contention
 // lands on the registry lock file instead of on one process's in-memory queue.
 import { fileURLToPath } from "node:url";
-import { connectNamed } from "../../src/instances.js";
+import { connectNamed } from "../../src/instances.ts";
 
-const [registryRoot, name] = process.argv.slice(2);
-const browserArgs = [
-  fileURLToPath(new URL("./fake-named-browser.mjs", import.meta.url)),
-];
+const [registryRoot, name = ""] = process.argv.slice(2);
+const browserArgs = [fileURLToPath(new URL("./fake-named-browser.ts", import.meta.url))];
 
 process.stdout.write("READY\n");
 await new Promise((resolve) => process.stdin.once("data", resolve));

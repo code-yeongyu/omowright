@@ -6,13 +6,16 @@ import { existsSync, globSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { connectPipe, createAgentTabs } from "../src/index.js";
-import { requestHuman } from "../src/human-handoff.js";
+import { connectPipe, createAgentTabs } from "../src/index.ts";
+import { requestHuman } from "../src/human-handoff.ts";
 import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME ?? "", "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      process.env.HOME ?? "",
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
   if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -42,7 +45,10 @@ interface FakePage {
   evaluate(fnOrExpr: unknown, arg?: unknown): Promise<unknown>;
 }
 
-function createFakePage({ url = "https://example.test/waiting", bringToFrontError }: { url?: string; bringToFrontError?: Error } = {}) {
+function createFakePage({
+  url = "https://example.test/waiting",
+  bringToFrontError,
+}: { url?: string; bringToFrontError?: Error } = {}) {
   const page: FakePage = {
     currentUrl: url,
     bringToFrontCalls: 0,
@@ -71,7 +77,8 @@ function createFakePage({ url = "https://example.test/waiting", bringToFrontErro
 function dispatchFakeEvaluate(page: FakePage, source: string, arg: unknown) {
   const hasAttr = source.includes("data-omowright-human");
   const hasRemove = /\.remove\s*\(/.test(source) || source.includes("removeChild");
-  const hasCreate = source.includes("createElement") || source.includes("attachShadow") || source.includes("2147483647");
+  const hasCreate =
+    source.includes("createElement") || source.includes("attachShadow") || source.includes("2147483647");
   const hasDone = source.includes("__omowrightHumanDone");
   if (hasAttr && hasRemove && !hasCreate) {
     page.bannerRemoved += 1;
@@ -93,7 +100,10 @@ function dispatchFakeEvaluate(page: FakePage, source: string, arg: unknown) {
 function assertBannerRemoved(page: FakePage) {
   assert.ok(page.bannerRemoved > 0, "banner removal evaluate call happened");
   assert.ok(
-    page.evaluateCalls.some(({ source }) => source.includes("data-omowright-human") && (/\.remove\s*\(/.test(source) || source.includes("removeChild"))),
+    page.evaluateCalls.some(
+      ({ source }) =>
+        source.includes("data-omowright-human") && (/\.remove\s*\(/.test(source) || source.includes("removeChild")),
+    ),
     "banner removal evaluate source removes [data-omowright-human]",
   );
 }
@@ -125,10 +135,13 @@ function startFixtureServer(): Promise<{ server: Server; url: string }> {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(FIXTURE_HTML);
   });
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      resolve({ server, url: `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : undefined}/` });
+      resolve({
+        server,
+        url: `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : undefined}/`,
+      });
     });
   });
 }
@@ -143,7 +156,12 @@ test("requestHuman continues when until url matches and removes the banner", asy
     while (performance.now() - stallStart < 45);
     return bringToFront();
   };
-  const result = await requestHuman(page, { prompt: "Finish login", until: { url: "/done" }, pollMs: 5, timeoutMs: 30 });
+  const result = await requestHuman(page, {
+    prompt: "Finish login",
+    until: { url: "/done" },
+    pollMs: 5,
+    timeoutMs: 30,
+  });
   assert.equal(result.outcome, "continued");
   assert.equal(result.reason, "until");
   assert.equal(typeof result.elapsedMs, "number");
@@ -155,14 +173,24 @@ test("requestHuman continues when until url matches and removes the banner", asy
 
 test("requestHuman continues when until url regex or selector or predicate holds", async () => {
   const regexPage = createFakePage({ url: "https://example.test/next" });
-  const regexResult = await requestHuman(regexPage, { prompt: "go", until: { url: /example\.test\/next/ }, pollMs: 5, timeoutMs: 30 });
+  const regexResult = await requestHuman(regexPage, {
+    prompt: "go",
+    until: { url: /example\.test\/next/ },
+    pollMs: 5,
+    timeoutMs: 30,
+  });
   assert.equal(regexResult.outcome, "continued");
   assert.equal(regexResult.reason, "until");
   assertBannerRemoved(regexPage);
 
   const selectorPage = createFakePage();
   selectorPage.selectors.add("#ready");
-  const selectorResult = await requestHuman(selectorPage, { prompt: "go", until: { selector: "#ready" }, pollMs: 5, timeoutMs: 30 });
+  const selectorResult = await requestHuman(selectorPage, {
+    prompt: "go",
+    until: { selector: "#ready" },
+    pollMs: 5,
+    timeoutMs: 30,
+  });
   assert.equal(selectorResult.outcome, "continued");
   assert.equal(selectorResult.reason, "until");
   assertBannerRemoved(selectorPage);
@@ -205,67 +233,95 @@ test("requestHuman cancels when the signal aborts", async () => {
   const page = createFakePage();
   const ac = new AbortController();
   ac.abort();
-  const result = await requestHuman(page, { prompt: "wait", until: { selector: "#never" }, pollMs: 5, timeoutMs: 30, signal: ac.signal });
+  const result = await requestHuman(page, {
+    prompt: "wait",
+    until: { selector: "#never" },
+    pollMs: 5,
+    timeoutMs: 30,
+    signal: ac.signal,
+  });
   assert.equal(result.outcome, "cancelled");
   assert.equal(result.reason, "signal");
   assertBannerRemoved(page);
 });
 
-test("live: until selector #ready continues and removes the banner", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const { server, url } = await startFixtureServer();
-  let launched;
-  try {
-    launched = await launch();
-    const { connection } = launched;
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    await page.goto(url);
-    const result = await requestHuman(page, { prompt: "Wait for ready", until: { selector: "#ready" }, pollMs: 50, timeoutMs: 5000 });
-    assert.equal(result.outcome, "continued");
-    assert.equal(result.reason, "until");
-    assert.equal(await page.evaluate("document.querySelector('[data-omowright-human]')"), null);
-  } finally {
-    await launched?.cleanup();
-    await new Promise(resolve => server.close(resolve));
-  }
-});
+test(
+  "live: until selector #ready continues and removes the banner",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const { server, url } = await startFixtureServer();
+    let launched;
+    try {
+      launched = await launch();
+      const { connection } = launched;
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+      await page.goto(url);
+      const result = await requestHuman(page, {
+        prompt: "Wait for ready",
+        until: { selector: "#ready" },
+        pollMs: 50,
+        timeoutMs: 5000,
+      });
+      assert.equal(result.outcome, "continued");
+      assert.equal(result.reason, "until");
+      assert.equal(await page.evaluate("document.querySelector('[data-omowright-human]')"), null);
+    } finally {
+      await launched?.cleanup();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);
 
-test("live: timeoutMs 200 with until that never holds", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const { server, url } = await startFixtureServer();
-  let launched;
-  try {
-    launched = await launch();
-    const { connection } = launched;
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    await page.goto(url);
-    const result = await requestHuman(page, { prompt: "This will time out", until: { selector: "#never" }, pollMs: 50, timeoutMs: 200 });
-    assert.equal(result.outcome, "timed_out");
-  } finally {
-    await launched?.cleanup();
-    await new Promise(resolve => server.close(resolve));
-  }
-});
+test(
+  "live: timeoutMs 200 with until that never holds",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const { server, url } = await startFixtureServer();
+    let launched;
+    try {
+      launched = await launch();
+      const { connection } = launched;
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+      await page.goto(url);
+      const result = await requestHuman(page, {
+        prompt: "This will time out",
+        until: { selector: "#never" },
+        pollMs: 50,
+        timeoutMs: 200,
+      });
+      assert.equal(result.outcome, "timed_out");
+    } finally {
+      await launched?.cleanup();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);
 
-test("live: AbortController aborted after 100ms cancels", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const { server, url } = await startFixtureServer();
-  let launched;
-  try {
-    launched = await launch();
-    const { connection } = launched;
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    await page.goto(url);
-    const ac = new AbortController();
-    setTimeout(() => ac.abort(), 100);
-    const result = await requestHuman(page, {
-      prompt: "This will cancel",
-      until: { selector: "#never" },
-      pollMs: 50,
-      timeoutMs: 5000,
-      signal: ac.signal,
-    });
-    assert.equal(result.outcome, "cancelled");
-    assert.equal(result.reason, "signal");
-  } finally {
-    await launched?.cleanup();
-    await new Promise(resolve => server.close(resolve));
-  }
-});
+test(
+  "live: AbortController aborted after 100ms cancels",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const { server, url } = await startFixtureServer();
+    let launched;
+    try {
+      launched = await launch();
+      const { connection } = launched;
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+      await page.goto(url);
+      const ac = new AbortController();
+      setTimeout(() => ac.abort(), 100);
+      const result = await requestHuman(page, {
+        prompt: "This will cancel",
+        until: { selector: "#never" },
+        pollMs: 50,
+        timeoutMs: 5000,
+        signal: ac.signal,
+      });
+      assert.equal(result.outcome, "cancelled");
+      assert.equal(result.reason, "signal");
+    } finally {
+      await launched?.cleanup();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);

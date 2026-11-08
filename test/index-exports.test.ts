@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as api from "../src/index.js";
+import * as api from "../src/index.ts";
 
 const FUNCTION_EXPORTS = [
   "createNetworkSnoop",
@@ -33,9 +33,14 @@ const FUNCTION_EXPORTS = [
   "bskOnboard",
   "readDaemonInfo",
   "resolveBskHome",
-];
+] as const satisfies ReadonlyArray<keyof typeof api>;
 
-const CLASS_EXPORTS = ["BskIpcClient", "BskRpcError", "BskSession", "SharedConnectionError"];
+const CLASS_EXPORTS = [
+  "BskIpcClient",
+  "BskRpcError",
+  "BskSession",
+  "SharedConnectionError",
+] as const satisfies ReadonlyArray<keyof typeof api>;
 
 test("package entrypoint exports the new public surfaces", () => {
   for (const name of FUNCTION_EXPORTS) {

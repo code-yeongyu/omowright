@@ -3,11 +3,11 @@ import path from "node:path";
 import { mkdir, open, readFile, readlink, realpath, rename, lstat, chmod } from "node:fs/promises";
 import { homedir } from "node:os";
 import { TextDecoder } from "node:util";
-import { createChromeApi as createStandaloneChromeApi } from "./chrome.js";
-import { UnsupportedOperationError } from "./core.js";
-import { WIN32_REGISTRY_KEYS, installWin32NativeHost, isWin32RegistryKey } from "./native-host-win32.js";
-import { HOST_NAME, PROTOCOL, MAX_MESSAGE_BYTES, EVENT_NAMES, COMMAND_NAMES, payloadSchemas, ExtensionHelloSchema, HostHelloSchema, EventSchema, CommandSchema, ResponseSchema } from "./bridge-schemas.js";
-export { HOST_NAME, PROTOCOL, MAX_MESSAGE_BYTES, EVENT_NAMES, COMMAND_NAMES, ExtensionHelloSchema, HostHelloSchema, EventSchema, CommandSchema, ResponseSchema } from "./bridge-schemas.js";
+import { createChromeApi as createStandaloneChromeApi } from "./chrome.ts";
+import { UnsupportedOperationError } from "./core.ts";
+import { WIN32_REGISTRY_KEYS, installWin32NativeHost, isWin32RegistryKey } from "./native-host-win32.ts";
+import { HOST_NAME, PROTOCOL, MAX_MESSAGE_BYTES, EVENT_NAMES, COMMAND_NAMES, payloadSchemas, ExtensionHelloSchema, HostHelloSchema, EventSchema, CommandSchema, ResponseSchema } from "./bridge-schemas.ts";
+export { HOST_NAME, PROTOCOL, MAX_MESSAGE_BYTES, EVENT_NAMES, COMMAND_NAMES, ExtensionHelloSchema, HostHelloSchema, EventSchema, CommandSchema, ResponseSchema } from "./bridge-schemas.ts";
 
 export class BridgeUnavailableError extends Error { constructor(message = "Cloak bridge is unavailable") { super(message); this.name = "BridgeUnavailableError"; } }
 export class BridgeProtocolError extends Error { constructor(message) { super(message); this.name = "BridgeProtocolError"; } }

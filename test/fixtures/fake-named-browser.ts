@@ -1,5 +1,7 @@
 import { appendFileSync, closeSync, openSync, writeSync } from "node:fs";
 import { createServer } from "node:http";
+import type { Server } from "node:http";
+import type { Socket } from "node:net";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 
@@ -7,7 +9,7 @@ import { WebSocketServer } from "ws";
 // Browser.close and "TERM <epoch ms>" for SIGTERM. Like Chrome it quits after
 // answering Browser.close; FAKE_ON_CLOSE=ignore keeps it running.
 const signalLog = process.env.FAKE_SIGNAL_LOG;
-const record = (event) => {
+const record = (event: string) => {
   if (signalLog) appendFileSync(signalLog, `${event} ${Date.now()}\n`);
 };
 
@@ -19,8 +21,13 @@ const target = {
   url: "about:blank",
 };
 
+function tcpPort(listening: Server) {
+  const address = listening.address();
+  return typeof address === "object" && address !== null ? address.port : undefined;
+}
+
 const server = createServer((req, res) => {
-  const port = server.address().port;
+  const port = tcpPort(server);
   if (req.url === "/json/version") {
     // A bounded discovery latency exercises the caller's timeout contract.
     const delay = Number(flag("fake-probe-delay") ?? 0);
@@ -30,8 +37,7 @@ const server = createServer((req, res) => {
         JSON.stringify({
           Browser: "FakeNamedBrowser/1.0",
           "Protocol-Version": "1.3",
-          webSocketDebuggerUrl:
-            `ws://127.0.0.1:${port}/devtools/browser/fake`,
+          webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/fake`,
         }),
       );
     };
@@ -47,7 +53,7 @@ const server = createServer((req, res) => {
   res.writeHead(404).end();
 });
 
-const sockets = new Set();
+const sockets = new Set<Socket>();
 server.on("connection", (socket) => {
   sockets.add(socket);
   socket.on("close", () => sockets.delete(socket));
@@ -61,7 +67,7 @@ server.on("upgrade", (req, socket, head) => {
 });
 webSockets.on("connection", (webSocket) => {
   webSocket.on("message", (data) => {
-    let message;
+    let message: { id?: unknown; method?: unknown };
     try {
       message = JSON.parse(data.toString());
     } catch {
@@ -80,9 +86,8 @@ webSockets.on("connection", (webSocket) => {
       } else webSocket.send(reply, shutdown);
       return;
     }
-    const result = message.method === "Browser.getVersion"
-      ? { product: "FakeNamedBrowser/1.0", protocolVersion: "1.3" }
-      : {};
+    const result =
+      message.method === "Browser.getVersion" ? { product: "FakeNamedBrowser/1.0", protocolVersion: "1.3" } : {};
     webSocket.send(JSON.stringify({ id: message.id, result }));
   });
 });
@@ -100,7 +105,7 @@ process.once("SIGTERM", () => {
   shutdown();
 });
 
-function flag(name) {
+function flag(name: string) {
   const prefix = `--${name}=`;
   return process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
@@ -109,7 +114,7 @@ function flag(name) {
 // --fake-quiet drops the stderr line (chrome.exe on Windows has none), and
 // --fake-active-port writes another port, as a second browser on the dir would.
 server.listen(0, "127.0.0.1", () => {
-  const port = server.address().port;
+  const port = tcpPort(server);
   const userDataDir = flag("user-data-dir");
   if (userDataDir) {
     // Truncated at open, then written, as Chromium does. bun's writeFileSync
@@ -123,8 +128,6 @@ server.listen(0, "127.0.0.1", () => {
     }
   }
   if (!process.argv.includes("--fake-quiet")) {
-    process.stderr.write(
-      `DevTools listening on ws://127.0.0.1:${port}/devtools/browser/fake\n`,
-    );
+    process.stderr.write(`DevTools listening on ws://127.0.0.1:${port}/devtools/browser/fake\n`);
   }
 });

@@ -3,17 +3,65 @@
 // http://127.0.0.1:<portB>: same host, different *site*, which is what makes the iframe
 // an out-of-process frame under --site-per-process.
 import { createServer } from "node:http";
+import type { RequestListener, ServerResponse } from "node:http";
 import { mkdtempSync, existsSync, globSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { connectPipe } from "../../src/index.js";
-import { targetCreationCapability } from "../../src/internal-capability.js";
-import { removeTreeSync } from "./remove-tree.mjs";
+import { connectPipe } from "../../src/index.ts";
+import { targetCreationCapability } from "../../src/internal-capability.ts";
+import { removeTreeSync } from "./remove-tree.ts";
+
+type Connection = Awaited<ReturnType<typeof connectPipe>>;
+
+export interface TargetInfo {
+  targetId: string;
+  type: string;
+  url: string;
+  attached?: boolean;
+}
+
+interface Frame {
+  frameId: string;
+  url(): string;
+}
+
+export interface HarnessPage {
+  targetId: string;
+  cdp: { send(method: string, params?: unknown, sessionId?: string): Promise<unknown> };
+  frameManager: {
+    frames: Map<string, unknown>;
+    getFrame(frameId: string): { sessionId?: string } | null | undefined;
+  };
+  frames(): Frame[];
+  resolveSessionId(): Promise<string>;
+  evaluateInFrame(frameId: string, expression: string): Promise<unknown>;
+  evaluate(fn: () => unknown): Promise<unknown>;
+  locator(ref: string): { click(): Promise<unknown> };
+}
+
+interface Listening {
+  port: number | undefined;
+  close(): Promise<void>;
+}
+
+export interface FixtureServers {
+  childUrl: string;
+  urlFor(name: string): string;
+  close(): Promise<void>;
+}
+
+interface WaitOptions {
+  timeoutMs?: number;
+  label?: string;
+}
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      process.env.HOME ?? "",
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
   if (candidates.length > 0) return candidates.sort().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -24,18 +72,25 @@ function findHeadlessShell() {
 export const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
 const FIXTURE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-function listen(handler) {
+function tcpPort(server: ReturnType<typeof createServer>) {
+  const address = server.address();
+  return typeof address === "object" && address !== null ? address.port : undefined;
+}
+
+function listen(handler: RequestListener): Promise<Listening> {
   const server = createServer(handler);
   return new Promise((resolve, reject) => {
-    server.listen(0, "127.0.0.1", () => resolve({
-      port: server.address().port,
-      close: () => new Promise((done, fail) => server.close(error => error ? fail(error) : done())),
-    }));
+    server.listen(0, "127.0.0.1", () =>
+      resolve({
+        port: tcpPort(server),
+        close: () => new Promise<void>((done, fail) => server.close((error) => (error ? fail(error) : done()))),
+      }),
+    );
     server.on("error", reject);
   });
 }
 
-function sendFixture(res, name, childUrl) {
+function sendFixture(res: ServerResponse, name: string, childUrl: string) {
   try {
     const body = readFileSync(path.join(FIXTURE_DIR, name), "utf8").replaceAll("__CHILD_URL__", childUrl);
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -46,11 +101,12 @@ function sendFixture(res, name, childUrl) {
   }
 }
 
-export async function startFixtureServers() {
+export async function startFixtureServers(): Promise<FixtureServers> {
   const child = await listen((req, res) => sendFixture(res, "oopif-child.html", ""));
   const childUrl = `http://127.0.0.1:${child.port}/child`;
   const parent = await listen((req, res) => {
-    const name = path.basename((req.url ?? "/").split("?")[0]);
+    const [pathname = ""] = (req.url ?? "/").split("?");
+    const name = path.basename(pathname);
     if (!/^oopif-[a-z-]+\.html$/.test(name)) {
       res.writeHead(404);
       res.end("not found");
@@ -60,17 +116,26 @@ export async function startFixtureServers() {
   });
   return {
     childUrl,
-    urlFor: name => `http://localhost:${parent.port}/${name}`,
-    close: async () => { await parent.close(); await child.close(); },
+    urlFor: (name) => `http://localhost:${parent.port}/${name}`,
+    close: async () => {
+      await parent.close();
+      await child.close();
+    },
   };
 }
 
-export async function launch() {
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  if (!binary) throw new Error("live test ran without a Chromium binary");
+  return binary;
+}
+
+export async function launch(): Promise<{ connection: Connection; cleanup(): Promise<void> }> {
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-oopif-test-"));
-  let connection;
+  let connection: Connection;
   try {
     connection = await connectPipe({
-      browserPath: SHELL,
+      browserPath: requireBinary(SHELL),
       browserArgs: ["--headless", "--no-first-run", "--site-per-process", `--user-data-dir=${ud}`],
       storageRoot: ud,
     });
@@ -89,52 +154,76 @@ export async function launch() {
 
 // State-driven wait: every attempt re-reads live state (most predicates make a CDP round
 // trip, which paces the loop); it resolves the moment the state holds, never on a timer.
-export async function waitUntil(predicate, { timeoutMs = 20_000, label = "condition" } = {}) {
+const field = (value: unknown, key: string): unknown =>
+  (typeof value === "object" && value !== null) || typeof value === "function" ? Reflect.get(value, key) : undefined;
+
+export async function waitUntil<T>(
+  predicate: () => Promise<T | null | undefined>,
+  { timeoutMs = 20_000, label = "condition" }: WaitOptions = {},
+): Promise<T> {
   const deadline = Date.now() + timeoutMs;
-  let lastError = null;
+  let lastError: unknown = null;
   for (;;) {
-    const value = await predicate().catch(error => { lastError = error; return null; });
+    const value = await predicate().catch((error: unknown) => {
+      lastError = error;
+      return null;
+    });
     if (value) return value;
-    if (Date.now() >= deadline) throw Error(`timed out waiting for ${label}${lastError ? ` (last error: ${lastError.message})` : ""}`);
-    await new Promise(resolve => setImmediate(resolve));
+    if (Date.now() >= deadline)
+      throw Error(`timed out waiting for ${label}${lastError ? ` (last error: ${field(lastError, "message")})` : ""}`);
+    await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
-export async function createRawTab(connection, url) {
-  const { targetId } = await connection.cdp.send("Target.createTarget", { url }, undefined, { capability: targetCreationCapability });
+export async function createRawTab(connection: Connection, url: string): Promise<string> {
+  const { targetId }: { targetId: string } = await connection.cdp.send("Target.createTarget", { url }, undefined, {
+    capability: targetCreationCapability,
+  });
   await connection.cdp.send("Target.activateTarget", { targetId }).catch(() => {});
   return targetId;
 }
 
-export async function listIframeTargets(connection) {
-  const { targetInfos } = await connection.cdp.send("Target.getTargets");
-  return targetInfos.filter(info => info.type === "iframe");
+export async function listIframeTargets(connection: Connection): Promise<TargetInfo[]> {
+  const { targetInfos }: { targetInfos: TargetInfo[] } = await connection.cdp.send("Target.getTargets");
+  return targetInfos.filter((info) => info.type === "iframe");
 }
 
-export function waitForChildTarget(connection, { label = "child iframe target" } = {}) {
-  return waitUntil(async () => (await listIframeTargets(connection)).find(info => info.url.endsWith("/child")) ?? null, { label });
+export function waitForChildTarget(
+  connection: Connection,
+  { label = "child iframe target" }: { label?: string } = {},
+): Promise<TargetInfo> {
+  return waitUntil(
+    async () => (await listIframeTargets(connection)).find((info) => info.url.endsWith("/child")) ?? null,
+    { label },
+  );
 }
 
-export function childFrameOf(page) {
-  return page.frames().find(frame => frame.url().endsWith("/child")) ?? null;
+export function childFrameOf(page: HarnessPage): Frame | null {
+  return page.frames().find((frame) => frame.url().endsWith("/child")) ?? null;
 }
 
 // The frame is usable once its isolated world answers a DOM query from inside the child
 // document; that is exactly the precondition core's per-frame snapshot needs.
-export function waitForChildContent(page, selector = "#inside") {
-  return waitUntil(async () => {
-    const frame = childFrameOf(page);
-    if (!frame) return null;
-    const found = await page.evaluateInFrame(frame.frameId, `document.querySelector(${JSON.stringify(selector)}) ? 1 : 0`);
-    return found === 1 ? frame : null;
-  }, { label: `child frame content ${selector}` });
+export function waitForChildContent(page: HarnessPage, selector = "#inside"): Promise<Frame> {
+  return waitUntil(
+    async () => {
+      const frame = childFrameOf(page);
+      if (!frame) return null;
+      const found = await page.evaluateInFrame(
+        frame.frameId,
+        `document.querySelector(${JSON.stringify(selector)}) ? 1 : 0`,
+      );
+      return found === 1 ? frame : null;
+    },
+    { label: `child frame content ${selector}` },
+  );
 }
 
 // Reproduces the state a missed Target.attachedToTarget leaves behind: the frame is gone
 // from FrameManager and the page holds no session for it. Auto-attach is switched off on
 // the page session first, otherwise the browser re-attaches the target and core onboards
 // it again on its own, which would hide whether reconcileFrames did the recovery.
-export async function forgetFrame(page, frameId) {
+export async function forgetFrame(page: HarnessPage, frameId: string): Promise<true> {
   const sessionId = page.frameManager.getFrame(frameId)?.sessionId;
   await page.cdp.send(
     "Target.setAutoAttach",
@@ -143,14 +232,17 @@ export async function forgetFrame(page, frameId) {
   );
   page.frameManager.frames.delete(frameId);
   if (sessionId) await page.cdp.send("Target.detachFromTarget", { sessionId }).catch(() => {});
-  return waitUntil(async () => {
-    page.frameManager.frames.delete(frameId);
-    await page.cdp.send("Target.getTargetInfo", { targetId: page.targetId });
-    return page.frameManager.frames.has(frameId) ? null : true;
-  }, { label: `frame ${frameId} forgotten`, timeoutMs: 10_000 });
+  return waitUntil(
+    async () => {
+      page.frameManager.frames.delete(frameId);
+      await page.cdp.send("Target.getTargetInfo", { targetId: page.targetId });
+      return page.frameManager.frames.has(frameId) ? null : true;
+    },
+    { label: `frame ${frameId} forgotten`, timeoutMs: 10_000 },
+  );
 }
 
-export function readChildAttribute(page, frameId, attribute) {
+export function readChildAttribute(page: HarnessPage, frameId: string, attribute: string): Promise<unknown> {
   return page.evaluateInFrame(frameId, `document.body.getAttribute(${JSON.stringify(attribute)})`);
 }
 
@@ -158,14 +250,20 @@ export function readChildAttribute(page, frameId, attribute) {
 // Until Chromium's hit-test data includes the surface of a freshly adopted out-of-process
 // frame, the browser hands the event to the embedder instead - the parent fixture records
 // that - so the click is re-dispatched, bounded, until the child observes it.
-export async function clickUntilChildObserves(page, ref, frameId, attribute, { attempts = 5 } = {}) {
-  let parentClick = null;
+export async function clickUntilChildObserves(
+  page: HarnessPage,
+  ref: string,
+  frameId: string,
+  attribute: string,
+  { attempts = 5 }: { attempts?: number } = {},
+): Promise<unknown> {
+  let parentClick: unknown = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
     await page.locator(ref).click();
-    const value = await waitUntil(
-      () => readChildAttribute(page, frameId, attribute),
-      { label: `child body[${attribute}]`, timeoutMs: 2_000 },
-    ).catch(() => null);
+    const value = await waitUntil(() => readChildAttribute(page, frameId, attribute), {
+      label: `child body[${attribute}]`,
+      timeoutMs: 2_000,
+    }).catch(() => null);
     if (value) return value;
     parentClick = await page.evaluate(() => document.body.getAttribute("data-parent-click")).catch(() => null);
   }

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { promisify } from "node:util";
-import { windowsSystemTool } from "../../src/owner-only.js";
+import { windowsSystemTool } from "../../src/owner-only.ts";
 
 const execFileAsync = promisify(execFile);
 const ROOT_EQUIVALENTS = new Set([
@@ -40,7 +40,20 @@ ConvertTo-Json -Compress -Depth 4 -InputObject ([pscustomobject]@{ user = $user;
 `;
 
 // entries: [path, "directory" | "file" | "inherited file"] pairs.
-export async function assertOwnerOnly(...entries) {
+type OwnerOnlyKind = "directory" | "file" | "inherited file";
+
+interface AclRule {
+  sid: string;
+  type: string;
+}
+
+interface AclReport {
+  path: string;
+  protected: boolean;
+  rules: AclRule[];
+}
+
+export async function assertOwnerOnly(...entries: Array<[string, OwnerOnlyKind]>) {
   if (process.platform !== "win32") {
     for (const [target, kind] of entries) {
       assert.equal((await stat(target)).mode & 0o777, kind === "directory" ? 0o700 : 0o600, target);
@@ -49,12 +62,18 @@ export async function assertOwnerOnly(...entries) {
   }
   const { stdout } = await execFileAsync(
     windowsSystemTool("WindowsPowerShell\\v1.0\\powershell.exe"),
-    ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(READ_ACLS, "utf16le").toString("base64")],
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-EncodedCommand",
+      Buffer.from(READ_ACLS, "utf16le").toString("base64"),
+    ],
     { env: { ...process.env, OWNER_ONLY_PATHS: JSON.stringify(entries.map(([target]) => target)) }, windowsHide: true },
   );
-  const { user, acls } = JSON.parse(stdout);
+  const { user, acls }: { user: string; acls: AclReport[] } = JSON.parse(stdout);
   for (const [index, acl] of acls.entries()) {
-    if (entries[index][1] === "inherited file") {
+    if (entries[index]?.[1] === "inherited file") {
       assert.equal(acl.protected, false, `${acl.path} carries a grant of its own`);
     } else {
       assert.equal(acl.protected, true, `${acl.path} still inherits its parent's ACL`);

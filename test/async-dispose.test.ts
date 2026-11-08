@@ -15,7 +15,10 @@ import { field } from "./fixtures/read-field.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME ?? "", "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      process.env.HOME ?? "",
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
   if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -35,9 +38,13 @@ const EXIT_BOUND_MS = 20_000;
 
 async function withBrowser(fn: (context: { url: string; ud: string }) => Promise<void>) {
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-dispose-"));
-  const browser = spawn(requireBinary(SHELL), ["--headless", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${ud}`, "about:blank"], {
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  const browser = spawn(
+    requireBinary(SHELL),
+    ["--headless", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${ud}`, "about:blank"],
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
   try {
     const wsUrl = await new Promise<string>((resolve, reject) => {
       let buffered = "";
@@ -46,7 +53,7 @@ async function withBrowser(fn: (context: { url: string; ud: string }) => Promise
         const match = /DevTools listening on (ws:\/\/\S+)/.exec(buffered);
         if (match) resolve(match[1] ?? "");
       });
-      browser.once("exit", code => reject(new Error(`chromium exited early (${code})`)));
+      browser.once("exit", (code) => reject(new Error(`chromium exited early (${code})`)));
     });
     await fn({ url: wsUrl.replace(/^ws:/, "http:").replace(/\/devtools\/.*$/, ""), ud });
   } finally {
@@ -65,11 +72,17 @@ async function runScript(ud: string, name: string, body: string) {
   const child = spawn(process.execPath, [file], { stdio: ["ignore", "pipe", "pipe"] });
   let stdout = "";
   let stderr = "";
-  child.stdout.setEncoding("utf8").on("data", chunk => { stdout += chunk; });
-  child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+  child.stdout.setEncoding("utf8").on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => {
+    stderr += chunk;
+  });
   const exited = once(child, "exit");
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const bound = new Promise<"bound">(resolve => { timer = setTimeout(resolve, EXIT_BOUND_MS, "bound"); });
+  const bound = new Promise<"bound">((resolve) => {
+    timer = setTimeout(resolve, EXIT_BOUND_MS, "bound");
+  });
   const outcome = await Promise.race([exited, bound]);
   clearTimeout(timer);
   if (outcome === "bound") {
@@ -85,54 +98,80 @@ async function targetIds(url: string) {
   return (await response.json()).map((target: { id: string }) => target.id);
 }
 
-test("a script that holds connect() with await using exits on its own and leaves its agent tab and the browser up", {
-  skip: !SHELL && "no chromium binary found",
-  timeout: 90_000,
-}, async () => {
-  await withBrowser(async ({ url, ud }) => {
-    const first = await runScript(ud, "first", `
+test(
+  "a script that holds connect() with await using exits on its own and leaves its agent tab and the browser up",
+  {
+    skip: !SHELL && "no chromium binary found",
+    timeout: 90_000,
+  },
+  async () => {
+    await withBrowser(async ({ url, ud }) => {
+      const first = await runScript(
+        ud,
+        "first",
+        `
       await using browser = await connect(${JSON.stringify(url)}, { storageRoot: ${JSON.stringify(ud)} });
       const tab = await createAgentTabs(browser).create("about:blank");
       console.log(JSON.stringify({ targetId: tab.targetId }));
-    `);
-    assert.equal(first.code, 0, `the script must exit by itself: ${first.stderr}`);
-    const { targetId } = JSON.parse(first.stdout.trim().split("\n").at(-1) ?? "");
-    assert.ok((await targetIds(url)).includes(targetId), "disposal keeps the agent tab open");
+    `,
+      );
+      assert.equal(first.code, 0, `the script must exit by itself: ${first.stderr}`);
+      const { targetId } = JSON.parse(first.stdout.trim().split("\n").at(-1) ?? "");
+      assert.ok((await targetIds(url)).includes(targetId), "disposal keeps the agent tab open");
 
-    const second = await runScript(ud, "second", `
+      const second = await runScript(
+        ud,
+        "second",
+        `
       await using browser = await connect(${JSON.stringify(url)}, { storageRoot: ${JSON.stringify(ud)} });
       const page = await browser.attachPage(${JSON.stringify(targetId)});
       console.log(JSON.stringify({ url: page.url() }));
-    `);
-    assert.equal(second.code, 0, `a later script attaches the tab and exits: ${second.stderr}`);
-    assert.equal(JSON.parse(second.stdout.trim().split("\n").at(-1) ?? "").url, "about:blank");
-  });
-});
+    `,
+      );
+      assert.equal(second.code, 0, `a later script attaches the tab and exits: ${second.stderr}`);
+      assert.equal(JSON.parse(second.stdout.trim().split("\n").at(-1) ?? "").url, "about:blank");
+    });
+  },
+);
 
-test("a script that throws inside the await using scope still exits", {
-  skip: !SHELL && "no chromium binary found",
-  timeout: 60_000,
-}, async () => {
-  await withBrowser(async ({ url, ud }) => {
-    const result = await runScript(ud, "throws", `
+test(
+  "a script that throws inside the await using scope still exits",
+  {
+    skip: !SHELL && "no chromium binary found",
+    timeout: 60_000,
+  },
+  async () => {
+    await withBrowser(async ({ url, ud }) => {
+      const result = await runScript(
+        ud,
+        "throws",
+        `
       await using browser = await connect(${JSON.stringify(url)}, { storageRoot: ${JSON.stringify(ud)} });
       await createAgentTabs(browser).create("about:blank");
       throw new Error("agent step failed");
-    `);
-    assert.notEqual(result.code, null, "the script must not hang after a throw");
-    assert.notEqual(result.code, 0);
-    assert.match(result.stderr, /agent step failed/);
-  });
-});
+    `,
+      );
+      assert.notEqual(result.code, null, "the script must not hang after a throw");
+      assert.notEqual(result.code, 0);
+      assert.match(result.stderr, /agent step failed/);
+    });
+  },
+);
 
 // connect(url) hands out leases on one shared connection (#76): disposing one
 // lease must release only that holder, never close the connection under another.
-test("disposing one shared connect() handle leaves the other holder connected", {
-  skip: !SHELL && "no chromium binary found",
-  timeout: 60_000,
-}, async () => {
-  await withBrowser(async ({ url, ud }) => {
-    const result = await runScript(ud, "shared", `
+test(
+  "disposing one shared connect() handle leaves the other holder connected",
+  {
+    skip: !SHELL && "no chromium binary found",
+    timeout: 60_000,
+  },
+  async () => {
+    await withBrowser(async ({ url, ud }) => {
+      const result = await runScript(
+        ud,
+        "shared",
+        `
       const options = { storageRoot: ${JSON.stringify(ud)} };
       const kept = await connect(${JSON.stringify(url)}, options);
       {
@@ -142,8 +181,10 @@ test("disposing one shared connect() handle leaves the other holder connected", 
       const version = await kept.cdp.send("Browser.getVersion");
       console.log(JSON.stringify({ product: version.product }));
       await kept.close();
-    `);
-    assert.equal(result.code, 0, result.stderr);
-    assert.match(JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "").product, /Chrome/);
-  });
-});
+    `,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "").product, /Chrome/);
+    });
+  },
+);

@@ -8,12 +8,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, existsSync, globSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectPipe, createAgentTabs, selectors } from "../src/index.js";
-import { removeTreeSync } from "./fixtures/remove-tree.mjs";
+import { connectPipe, createAgentTabs, selectors } from "../src/index.ts";
+import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      process.env.HOME ?? "",
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
   if (candidates.length > 0) return candidates.sort().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -22,11 +25,16 @@ function findHeadlessShell() {
 }
 
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  assert.ok(binary, "live test ran without a Chromium binary");
+  return binary;
+}
 
 // The same markup is rendered in the top document (ids prefixed "p-") and in a child frame ("f-"), so every container
 // must find exactly its own copy and never the other document's. `#form` holds one match per getter for the chained
 // cases; the closed shadow root holds values the open-root cases would also match if closed roots were searched.
-const markup = (prefix) => `
+const markup = (prefix: string) => `
 <input id="${prefix}search-docs" placeholder="Search the docs">
 <input id="${prefix}search" placeholder="Search">
 <input id="${prefix}next-step" placeholder="Next >> step">
@@ -61,8 +69,10 @@ ${markup("p-")}
 <iframe name="inner" srcdoc="${markup("f-").replaceAll('"', "&quot;")}<button id=&quot;f-ready&quot;>ready</button>"></iframe>
 </body></html>`)}`;
 
+type Getter = "getByPlaceholder" | "getByTestId" | "getByTitle" | "getByAltText" | "getByLabel";
+
 // [getter, argument, options, expected ids without the container prefix, in document order]
-const CASES = [
+const CASES: Array<[Getter, string | RegExp, { exact?: boolean }, string[]]> = [
   ["getByPlaceholder", "search", {}, ["search-docs", "search", "search-users"]],
   ["getByPlaceholder", "Search", { exact: true }, ["search"]],
   ["getByPlaceholder", /docs$/, {}, ["search-docs"]],
@@ -90,7 +100,7 @@ const CASES = [
 ];
 
 // [getter, argument, expected ids] chained from `locator("#form")`: only the match inside the form remains.
-const CHAINED = [
+const CHAINED: Array<[Getter, string | RegExp, string[]]> = [
   ["getByPlaceholder", "search", ["search-users"]],
   ["getByTestId", /^row/, ["row-2"]],
   ["getByTitle", "issues", ["issues"]],
@@ -100,10 +110,10 @@ const CHAINED = [
 
 async function launch() {
   const ud = mkdtempSync(path.join(tmpdir(), "omowright-getby-test-"));
-  let connection;
+  let connection: Awaited<ReturnType<typeof connectPipe>>;
   try {
     connection = await connectPipe({
-      browserPath: SHELL,
+      browserPath: requireBinary(SHELL),
       browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
       storageRoot: ud,
     });
@@ -111,73 +121,111 @@ async function launch() {
     removeTreeSync(ud);
     throw error;
   }
-  return { connection, cleanup: async () => { await connection.close(); removeTreeSync(ud); } };
+  return {
+    connection,
+    cleanup: async () => {
+      await connection.close();
+      removeTreeSync(ud);
+    },
+  };
 }
 
 // Each locator goes through count(), all() and single-element resolution (getAttribute on nth()), which run separate
 // in-page queries.
-async function idsOf(locator) {
+interface ProbeLocator {
+  count(): Promise<number>;
+  all(): Promise<Array<{ getAttribute(name: string): Promise<unknown> }>>;
+  nth(index: number): { getAttribute(name: string): Promise<unknown> };
+}
+
+async function idsOf(locator: ProbeLocator) {
   const count = await locator.count();
   const all = await locator.all();
   assert.equal(all.length, count, `${locator}.all() returns one locator per match`);
   const fromAll = await Promise.all(all.map((item) => item.getAttribute("id")));
-  const fromNth = [];
+  const fromNth: unknown[] = [];
   for (let index = 0; index < count; index++) fromNth.push(await locator.nth(index).getAttribute("id"));
   assert.deepEqual(fromAll, fromNth, `${locator} resolves the same elements through all() and nth()`);
   return fromNth;
 }
 
-test("getByPlaceholder/TestId/Title/AltText/Label match like Playwright on page, frame, frame locator and locator", { skip: !SHELL && "no chromium binary found", timeout: 120000 }, async () => {
-  const { connection, cleanup } = await launch();
-  try {
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    await page.goto(FIXTURE);
-    const frameLocator = page.frameLocator("iframe");
-    await frameLocator.locator("#f-ready").waitFor();
-    const frame = page.frames().find((candidate) => candidate.name() === "inner");
-    assert.ok(frame, "the child frame is listed");
-
-    const containers = [["page", page, "p-"], ["frame", frame, "f-"], ["frameLocator", frameLocator, "f-"]];
-    for (const [containerName, container, prefix] of containers) {
-      for (const [getter, argument, options, expected] of CASES) {
-        const label = `${containerName}.${getter}(${argument}, ${JSON.stringify(options)})`;
-        assert.deepEqual(await idsOf(container[getter](argument, options)), expected.map((id) => prefix + id), label);
-      }
-      const form = container.locator(`#${prefix}form`);
-      for (const [getter, argument, expected] of CHAINED) {
-        const label = `${containerName}.locator("#form").${getter}(${argument})`;
-        assert.deepEqual(await idsOf(form[getter](argument)), expected.map((id) => prefix + id), label);
-      }
-    }
-
-    await page.getByPlaceholder("Search", { exact: true }).fill("typed");
-    assert.equal(await page.evaluate("document.getElementById('p-search').value"), "typed", "actions resolve the getter's element");
-    await page.getByPlaceholder("shadow field").fill("typed in shadow");
-    assert.equal(
-      await page.evaluate("document.getElementById('p-shadow-host').shadowRoot.getElementById('p-shadow-field').value"),
-      "typed in shadow",
-      "actions reach an element inside an open shadow root",
-    );
-    await frameLocator.getByPlaceholder("users").fill("typed in frame");
-    assert.equal(await frameLocator.locator("#f-search-users").inputValue(), "typed in frame");
-
-    selectors.setTestIdAttribute("data-qa");
+test(
+  "getByPlaceholder/TestId/Title/AltText/Label match like Playwright on page, frame, frame locator and locator",
+  { skip: !SHELL && "no chromium binary found", timeout: 120000 },
+  async () => {
+    const { connection, cleanup } = await launch();
     try {
-      assert.deepEqual(await idsOf(page.getByTestId("row")), ["p-qa"], "a configured test id attribute replaces data-testid");
-      assert.deepEqual(await idsOf(frameLocator.getByTestId("row")), ["f-qa"]);
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+      await page.goto(FIXTURE);
+      const frameLocator = page.frameLocator("iframe");
+      await frameLocator.locator("#f-ready").waitFor();
+      const frame = page.frames().find((candidate) => candidate.name() === "inner");
+      assert.ok(frame, "the child frame is listed");
+
+      const containers = [
+        ["page", page, "p-"],
+        ["frame", frame, "f-"],
+        ["frameLocator", frameLocator, "f-"],
+      ] as const;
+      for (const [containerName, container, prefix] of containers) {
+        for (const [getter, argument, options, expected] of CASES) {
+          const label = `${containerName}.${getter}(${argument}, ${JSON.stringify(options)})`;
+          assert.deepEqual(
+            await idsOf(container[getter](argument, options)),
+            expected.map((id) => prefix + id),
+            label,
+          );
+        }
+        const form = container.locator(`#${prefix}form`);
+        for (const [getter, argument, expected] of CHAINED) {
+          const label = `${containerName}.locator("#form").${getter}(${argument})`;
+          assert.deepEqual(
+            await idsOf(form[getter](argument)),
+            expected.map((id) => prefix + id),
+            label,
+          );
+        }
+      }
+
+      await page.getByPlaceholder("Search", { exact: true }).fill("typed");
+      assert.equal(
+        await page.evaluate("document.getElementById('p-search').value"),
+        "typed",
+        "actions resolve the getter's element",
+      );
+      await page.getByPlaceholder("shadow field").fill("typed in shadow");
+      assert.equal(
+        await page.evaluate(
+          "document.getElementById('p-shadow-host').shadowRoot.getElementById('p-shadow-field').value",
+        ),
+        "typed in shadow",
+        "actions reach an element inside an open shadow root",
+      );
+      await frameLocator.getByPlaceholder("users").fill("typed in frame");
+      assert.equal(await frameLocator.locator("#f-search-users").inputValue(), "typed in frame");
+
+      selectors.setTestIdAttribute("data-qa");
+      try {
+        assert.deepEqual(
+          await idsOf(page.getByTestId("row")),
+          ["p-qa"],
+          "a configured test id attribute replaces data-testid",
+        );
+        assert.deepEqual(await idsOf(frameLocator.getByTestId("row")), ["f-qa"]);
+      } finally {
+        selectors.setTestIdAttribute("data-testid");
+      }
+      assert.deepEqual(await idsOf(page.getByTestId("row")), ["p-row"]);
     } finally {
-      selectors.setTestIdAttribute("data-testid");
+      await cleanup();
     }
-    assert.deepEqual(await idsOf(page.getByTestId("row")), ["p-row"]);
-  } finally {
-    await cleanup();
-  }
-});
+  },
+);
 
 // #219/#197/#202: real DOM tables protect matching and naming, not selector spelling.
 // The existing attribute table does not exercise text normalization, name precedence or chained labels.
 // A case-sensitive substring, textContent-based name, or missing scoped getter fails here without a test seam.
-const textMarkup = (prefix) => `
+const textMarkup = (prefix: string) => `
 <section id="${prefix}scope">
   <div id="${prefix}text">  Submit \n Order\u200b\u00ad </div>
   <div id="${prefix}text-long">Submit Order now</div>
@@ -205,7 +253,12 @@ const textMarkup = (prefix) => `
 <input id="${prefix}outside" aria-label="Account Name">
 <p>Enough visible text for the readiness probe to accept this document.</p>`;
 
-const TEXT_CASES = [
+type TextCase =
+  | ["getByText", [text: string | RegExp, options?: { exact?: boolean }], string[]]
+  | ["getByRole", [role: string, options?: { name?: string | RegExp; exact?: boolean }], string[]]
+  | ["getByLabel", [text: string | RegExp, options?: { exact?: boolean }], string[]];
+
+const TEXT_CASES: TextCase[] = [
   ["getByText", ["submit order"], ["text", "text-long"]],
   ["getByText", [" \nSubmit   Order ", { exact: true }], ["text"]],
   ["getByText", ["submit order", { exact: true }], []],
@@ -240,36 +293,53 @@ const TEXT_CASES = [
   ["getByLabel", ["shadow label"], ["shadow-field"]],
 ];
 
-test("text and accessible-name tables on page, frame, frame locator and locator", { skip: !SHELL && "no chromium binary found", timeout: 120000 }, async (t) => {
-  const { connection, cleanup } = await launch();
-  try {
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTYPE html><body>${textMarkup("p-")}<iframe name="matching" srcdoc="${textMarkup("f-").replaceAll('"', "&quot;")}"></iframe>`)}`);
-    const frameLocator = page.frameLocator("iframe");
-    await frameLocator.locator("#f-scope").waitFor();
-    const frame = page.frames().find((candidate) => candidate.name() === "matching");
-    assert.ok(frame);
-    for (const [name, container, prefix] of [["page", page, "p-"], ["frame", frame, "f-"], ["frame locator", frameLocator, "f-"], ["locator", page.locator("#p-scope"), "p-"]]) {
-      for (const getter of ["getByText", "getByRole", "getByLabel"]) {
-        await t.test(`${name}.${getter}`, async () => {
-          for (const [method, args, expected] of TEXT_CASES.filter(([method]) => method === getter)) {
-            const scopedExpected = name === "locator" ? expected.filter((id) => id !== "outside") : expected;
-            const locator = container[method](...args);
-            const count = await locator.count();
-            const ids = [];
-            for (let index = 0; index < count; index++) ids.push(await locator.nth(index).getAttribute("id"));
-            // Role locators intentionally search descendant frames in OmOWright.
-            const expectedIds = scopedExpected.map((id) => prefix + id);
-            if (name === "page" && method === "getByRole") expectedIds.push(...expected.map((id) => "f-" + id));
-            assert.deepEqual(ids, expectedIds, `${name}.${method}(${args})`);
-          }
-        });
+test(
+  "text and accessible-name tables on page, frame, frame locator and locator",
+  { skip: !SHELL && "no chromium binary found", timeout: 120000 },
+  async (t) => {
+    const { connection, cleanup } = await launch();
+    try {
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+      await page.goto(
+        `data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTYPE html><body>${textMarkup("p-")}<iframe name="matching" srcdoc="${textMarkup("f-").replaceAll('"', "&quot;")}"></iframe>`)}`,
+      );
+      const frameLocator = page.frameLocator("iframe");
+      await frameLocator.locator("#f-scope").waitFor();
+      const frame = page.frames().find((candidate) => candidate.name() === "matching");
+      assert.ok(frame);
+      for (const [name, container, prefix] of [
+        ["page", page, "p-"],
+        ["frame", frame, "f-"],
+        ["frame locator", frameLocator, "f-"],
+        ["locator", page.locator("#p-scope"), "p-"],
+      ] as const) {
+        for (const getter of ["getByText", "getByRole", "getByLabel"] as const) {
+          await t.test(`${name}.${getter}`, async () => {
+            for (const [method, args, expected] of TEXT_CASES.filter(([method]) => method === getter)) {
+              const scopedExpected = name === "locator" ? expected.filter((id) => id !== "outside") : expected;
+              // The three getters take different arguments; each row's args match its own getter.
+              const locator =
+                method === "getByText"
+                  ? container.getByText(...args)
+                  : method === "getByRole"
+                    ? container.getByRole(...args)
+                    : container.getByLabel(...args);
+              const count = await locator.count();
+              const ids: unknown[] = [];
+              for (let index = 0; index < count; index++) ids.push(await locator.nth(index).getAttribute("id"));
+              // Role locators intentionally search descendant frames in OmOWright.
+              const expectedIds = scopedExpected.map((id) => prefix + id);
+              if (name === "page" && method === "getByRole") expectedIds.push(...expected.map((id) => "f-" + id));
+              assert.deepEqual(ids, expectedIds, `${name}.${method}(${args})`);
+            }
+          });
+        }
       }
+    } finally {
+      await cleanup();
     }
-  } finally {
-    await cleanup();
-  }
-});
+  },
+);
 
 // getByRole (#171) skips what Playwright's isElementHiddenForAria hides: display:none (the `hidden` attribute's default
 // style included) or aria-hidden="true" on the element or any ancestor across shadow hosts, a computed visibility other
@@ -305,32 +375,43 @@ const ROLE_HIDDEN_FIXTURE = `data:text/html,${encodeURIComponent(`<!DOCTYPE html
 <p>Enough visible text for the readiness probe to accept this document.</p>
 </body></html>`)}`;
 
-test("getByRole skips elements hidden from the accessibility tree unless includeHidden is set", { skip: !SHELL && "no chromium binary found", timeout: 120000 }, async () => {
-  const { connection, cleanup } = await launch();
-  try {
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    await page.goto(ROLE_HIDDEN_FIXTURE);
-    const all = ROLE_HIDDEN_CASES.map(([id]) => id);
-    const exposed = ROLE_HIDDEN_CASES.filter(([, hidden]) => !hidden).map(([id]) => id);
-    for (const [locator, expected] of [
-      [page.getByRole("button", { name: "Go" }), exposed],
-      [page.getByRole("button", { name: "Go", includeHidden: true }), all],
-      [page.locator("#list").getByRole("button", { name: "Go" }), ["list-visible"]],
-      [page.locator("#list").getByRole("button", { name: "Go", includeHidden: true }), ["list-hidden", "list-visible"]],
-      [page.getByText("Go", { exact: true }), all],
-      [page.locator("button"), all],
-      [page.locator("#list").locator("button"), ["list-hidden", "list-visible"]],
-      [page.locator("#list").getByText("Go", { exact: true }), ["list-hidden", "list-visible"]],
-      [page.locator("button").filter({ hasText: "Go" }), all],
-      [page.getByRole("button", { name: "Go" }).filter({ hasNotText: "missing" }), exposed],
-      [page.getByRole("button", { name: "missing" }), []],
-      [page.getByText("missing", { exact: true }), []],
-      [page.locator(".missing"), []],
-    ]) {
-      assert.deepEqual(await idsOf(locator), expected);
+test(
+  "getByRole skips elements hidden from the accessibility tree unless includeHidden is set",
+  { skip: !SHELL && "no chromium binary found", timeout: 120000 },
+  async () => {
+    const { connection, cleanup } = await launch();
+    try {
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+      await page.goto(ROLE_HIDDEN_FIXTURE);
+      const all = ROLE_HIDDEN_CASES.map(([id]) => id);
+      const exposed = ROLE_HIDDEN_CASES.filter(([, hidden]) => !hidden).map(([id]) => id);
+      for (const [locator, expected] of [
+        [page.getByRole("button", { name: "Go" }), exposed],
+        [page.getByRole("button", { name: "Go", includeHidden: true }), all],
+        [page.locator("#list").getByRole("button", { name: "Go" }), ["list-visible"]],
+        [
+          page.locator("#list").getByRole("button", { name: "Go", includeHidden: true }),
+          ["list-hidden", "list-visible"],
+        ],
+        [page.getByText("Go", { exact: true }), all],
+        [page.locator("button"), all],
+        [page.locator("#list").locator("button"), ["list-hidden", "list-visible"]],
+        [page.locator("#list").getByText("Go", { exact: true }), ["list-hidden", "list-visible"]],
+        [page.locator("button").filter({ hasText: "Go" }), all],
+        [page.getByRole("button", { name: "Go" }).filter({ hasNotText: "missing" }), exposed],
+        [page.getByRole("button", { name: "missing" }), []],
+        [page.getByText("missing", { exact: true }), []],
+        [page.locator(".missing"), []],
+      ] as const) {
+        assert.deepEqual(await idsOf(locator), expected);
+      }
+      assert.equal(
+        await page.getByText("Go", { exact: true }).count(),
+        all.length,
+        "getByText has no includeHidden option and matches hidden elements",
+      );
+    } finally {
+      await cleanup();
     }
-    assert.equal(await page.getByText("Go", { exact: true }).count(), all.length, "getByText has no includeHidden option and matches hidden elements");
-  } finally {
-    await cleanup();
-  }
-});
+  },
+);

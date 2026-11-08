@@ -1,34 +1,22 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import {
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  rename,
-  unlink,
-} from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { profileDirFromArgs, terminateChild } from "./browser-process.js";
-import { openConnection } from "./connection.js";
-import { isPidAlive, unlinkIfPresent, withLock } from "./instance-lock.js";
-import {
-  assertLaunchedBrowser,
-  discoverLaunchedEndpoint,
-  snapshotActivePort,
-} from "./launch-endpoint.js";
-import { restrictToOwner } from "./owner-only.js";
-import { acquireSharedConnection } from "./shared-connections.js";
+import { profileDirFromArgs, terminateChild } from "./browser-process.ts";
+import { openConnection } from "./connection.ts";
+import type { BrowserConnection, ConnectOptions } from "./connection.ts";
+import type { DialogPolicy } from "./dialog-policy.ts";
+import { isPidAlive, unlinkIfPresent, withLock } from "./instance-lock.ts";
+import { assertLaunchedBrowser, discoverLaunchedEndpoint, snapshotActivePort } from "./launch-endpoint.ts";
+import { restrictToOwner } from "./owner-only.ts";
+import { readProperty } from "./read-property.ts";
+import { acquireSharedConnection } from "./shared-connections.ts";
 
 const RECORD_VERSION = 2;
-const DEFAULT_REGISTRY_ROOT = path.join(
-  os.homedir(),
-  ".local",
-  "share",
-  "omowright",
-  "instances",
-);
+const DEFAULT_REGISTRY_ROOT = path.join(os.homedir(), ".local", "share", "omowright", "instances");
 const DEFAULT_PROBE_TIMEOUT_MS = 1_000;
 const DEFAULT_LAUNCH_TIMEOUT_MS = 10_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
@@ -40,11 +28,70 @@ const LOCK_TIMEOUT_MARGIN_MS = 5_000;
 // Same sum the per-call resolver below computes, for callers with no overrides.
 const DEFAULT_LOCK_TIMEOUT_MS = resolveLockTimeoutMs({});
 
-function normalizeName(name) {
-  if (
-    typeof name !== "string" ||
-    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)
-  ) {
+/** The registry entry a named browser is published under (`<registryRoot>/<name>.json`). */
+export interface InstanceRecord {
+  version: number;
+  name: string;
+  pid: number;
+  endpoint: string;
+  webSocketDebuggerUrl: string;
+  profileDir: string | null;
+  browserPath: string;
+  startedAt: string;
+}
+
+export interface InstanceStatus extends InstanceRecord {
+  alive: boolean;
+  responsive: boolean;
+}
+
+export interface ListInstancesOptions {
+  registryRoot?: string | undefined;
+  probeTimeoutMs?: number | undefined;
+}
+
+interface TimeoutOptions {
+  probeTimeoutMs?: number | undefined;
+  connectTimeoutMs?: number | undefined;
+  launchTimeoutMs?: number | undefined;
+  lockTimeoutMs?: number | undefined;
+}
+
+export interface ConnectNamedOptions extends ListInstancesOptions, TimeoutOptions {
+  /** Required to launch: attaching to a healthy registered instance needs no browserPath. */
+  browserPath?: string | undefined;
+  browserArgs?: readonly string[] | undefined;
+  profileDir?: string | undefined;
+  /** Spawn options for the browser process; `stdio` is always owned by the registry. */
+  spawnOptions?: Omit<SpawnOptions, "stdio"> | undefined;
+  storageRoot?: string | undefined;
+  /** Base options for the CDP connection; `storageRoot`, `client` and `dialogPolicy` above override it. */
+  connectionOptions?: ConnectOptions | undefined;
+  client?: ConnectOptions["client"];
+  dialogPolicy?: DialogPolicy;
+}
+
+interface RegistryPaths {
+  root: string;
+  recordPath: string;
+  lockPath: string;
+}
+
+interface LoadedRecord {
+  exists: boolean;
+  record: InstanceRecord | null;
+}
+
+interface BrowserVersion {
+  webSocketDebuggerUrl: string;
+}
+
+function errorCode(error: unknown): unknown {
+  return error === null || error === undefined ? undefined : readProperty(error, "code");
+}
+
+function normalizeName(name: unknown): string {
+  if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
     throw new TypeError(
       "instance name must start with a letter or number and contain only letters, numbers, dots, dashes, or underscores",
     );
@@ -52,7 +99,7 @@ function normalizeName(name) {
   return name;
 }
 
-function registryPaths(registryRoot, name) {
+function registryPaths(registryRoot: string | undefined, name: string): RegistryPaths {
   const root = path.resolve(registryRoot ?? DEFAULT_REGISTRY_ROOT);
   return {
     root,
@@ -61,42 +108,48 @@ function registryPaths(registryRoot, name) {
   };
 }
 
-async function ensureRegistryRoot(root) {
+async function ensureRegistryRoot(root: string) {
   await mkdir(root, { recursive: true, mode: 0o700 });
   await restrictToOwner(root, "directory");
 }
 
-function isRecord(value, expectedName) {
+function isRecord(value: unknown, expectedName: string): value is InstanceRecord {
+  if (value === null || typeof value !== "object") return false;
+  const pid = readProperty(value, "pid");
+  const endpoint = readProperty(value, "endpoint");
+  const webSocketDebuggerUrl = readProperty(value, "webSocketDebuggerUrl");
+  const profileDir = readProperty(value, "profileDir");
+  const browserPath = readProperty(value, "browserPath");
+  const startedAt = readProperty(value, "startedAt");
   return (
-    value !== null &&
-    typeof value === "object" &&
-    value.version === RECORD_VERSION &&
-    value.name === expectedName &&
-    Number.isInteger(value.pid) &&
-    value.pid > 0 &&
-    typeof value.endpoint === "string" &&
-    value.endpoint.length > 0 &&
-    typeof value.webSocketDebuggerUrl === "string" &&
-    value.webSocketDebuggerUrl.length > 0 &&
-    (typeof value.profileDir === "string" || value.profileDir === null) &&
-    typeof value.browserPath === "string" &&
-    value.browserPath.length > 0 &&
-    typeof value.startedAt === "string" &&
-    !Number.isNaN(Date.parse(value.startedAt))
+    readProperty(value, "version") === RECORD_VERSION &&
+    readProperty(value, "name") === expectedName &&
+    typeof pid === "number" &&
+    Number.isInteger(pid) &&
+    pid > 0 &&
+    typeof endpoint === "string" &&
+    endpoint.length > 0 &&
+    typeof webSocketDebuggerUrl === "string" &&
+    webSocketDebuggerUrl.length > 0 &&
+    (typeof profileDir === "string" || profileDir === null) &&
+    typeof browserPath === "string" &&
+    browserPath.length > 0 &&
+    typeof startedAt === "string" &&
+    !Number.isNaN(Date.parse(startedAt))
   );
 }
 
-async function readRecord(recordPath, expectedName) {
+async function readRecord(recordPath: string, expectedName: string): Promise<LoadedRecord> {
   let text;
   try {
     text = await readFile(recordPath, "utf8");
   } catch (error) {
-    if (error?.code === "ENOENT") return { exists: false, record: null };
+    if (errorCode(error) === "ENOENT") return { exists: false, record: null };
     throw error;
   }
 
   try {
-    const record = JSON.parse(text);
+    const record: unknown = JSON.parse(text);
     return {
       exists: true,
       record: isRecord(record, expectedName) ? record : null,
@@ -106,12 +159,12 @@ async function readRecord(recordPath, expectedName) {
   }
 }
 
-async function writeRecordAtomic(root, recordPath, record) {
-  const tempPath = path.join(
-    root,
-    `.${record.name}.${process.pid}.${randomUUID()}.tmp`,
-  );
-  let handle;
+/** A record as launchNamed writes it: `pid` comes straight from the spawned child. */
+type LaunchedRecord = Omit<InstanceRecord, "pid"> & { pid: number | undefined };
+
+async function writeRecordAtomic(root: string, recordPath: string, record: LaunchedRecord) {
+  const tempPath = path.join(root, `.${record.name}.${process.pid}.${randomUUID()}.tmp`);
+  let handle: FileHandle | null | undefined;
   try {
     handle = await open(tempPath, "wx", 0o600);
     await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`, "utf8");
@@ -127,13 +180,14 @@ async function writeRecordAtomic(root, recordPath, record) {
   }
 }
 
-function isConnectionRefused(error) {
-  for (let cause = error; cause; cause = cause?.cause) {
+function isConnectionRefused(error: unknown) {
+  for (let cause: unknown = error; cause; cause = readProperty(cause, "cause")) {
+    const code = readProperty(cause, "code");
     if (
-      cause.code === "ECONNREFUSED" ||
-      cause.code === "ENOTFOUND" ||
+      code === "ECONNREFUSED" ||
+      code === "ENOTFOUND" ||
       // Bun's fetch reports refused connections with this code.
-      cause.code === "ConnectionRefused"
+      code === "ConnectionRefused"
     ) {
       return true;
     }
@@ -141,31 +195,32 @@ function isConnectionRefused(error) {
   return false;
 }
 
-async function probeEndpoint(endpoint, timeoutMs) {
+function isBrowserVersion(value: unknown): value is BrowserVersion {
+  if (value === null || value === undefined) return false;
+  const webSocketDebuggerUrl = readProperty(value, "webSocketDebuggerUrl");
+  return typeof webSocketDebuggerUrl === "string" && webSocketDebuggerUrl.length > 0;
+}
+
+async function probeEndpoint(endpoint: string, timeoutMs: number): Promise<BrowserVersion> {
   const versionUrl = new URL("/json/version", endpoint);
   const response = await fetch(versionUrl, {
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
-    throw new Error(
-      `CDP discovery request failed (${response.status} ${response.statusText})`,
-    );
+    throw new Error(`CDP discovery request failed (${response.status} ${response.statusText})`);
   }
-  const version = await response.json();
-  if (
-    typeof version?.webSocketDebuggerUrl !== "string" ||
-    version.webSocketDebuggerUrl.length === 0
-  ) {
+  const version: unknown = await response.json();
+  if (!isBrowserVersion(version)) {
     throw new Error("CDP discovery response lacks webSocketDebuggerUrl");
   }
   return version;
 }
 
-function resolveConnectTimeoutMs(options) {
+function resolveConnectTimeoutMs(options: TimeoutOptions) {
   return options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
 }
 
-function resolveLockTimeoutMs(options) {
+function resolveLockTimeoutMs(options: TimeoutOptions) {
   if (options.lockTimeoutMs !== undefined) return options.lockTimeoutMs;
   return (
     (options.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT_MS) +
@@ -175,7 +230,7 @@ function resolveLockTimeoutMs(options) {
   );
 }
 
-function nameLockOptions(options) {
+function nameLockOptions(options: TimeoutOptions) {
   return {
     timeoutMs: resolveLockTimeoutMs(options),
   };
@@ -183,20 +238,15 @@ function nameLockOptions(options) {
 
 // `/json/version` answering proves nothing about the WebSocket upgrade behind
 // it, so the session handshake carries its own bound.
-async function connectWithin(endpoint, options, timeoutMs) {
+async function connectWithin(endpoint: string, options: ConnectOptions, timeoutMs: number) {
   const pending = openConnection(endpoint, options);
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       pending,
-      new Promise((_, reject) => {
+      new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () =>
-            reject(
-              new Error(
-                `timed out after ${timeoutMs}ms opening a CDP session on ${endpoint}`,
-              ),
-            ),
+          () => reject(new Error(`timed out after ${timeoutMs}ms opening a CDP session on ${endpoint}`)),
           timeoutMs,
         );
       }),
@@ -213,14 +263,14 @@ async function connectWithin(endpoint, options, timeoutMs) {
   }
 }
 
-async function removeOwnedRecord(recordPath, name, pid) {
+async function removeOwnedRecord(recordPath: string, name: string, pid: number | undefined) {
   const loaded = await readRecord(recordPath, name);
   if (loaded.record?.pid !== pid) return;
   await unlinkIfPresent(recordPath);
 }
 
-function connectionOptions(options, profileDir) {
-  const result = { ...(options.connectionOptions ?? {}) };
+function connectionOptions(options: ConnectNamedOptions, profileDir: string | null | undefined): ConnectOptions {
+  const result: ConnectOptions = { ...(options.connectionOptions ?? {}) };
   if (options.storageRoot !== undefined) result.storageRoot = options.storageRoot;
   else if (result.storageRoot === undefined && profileDir) {
     result.storageRoot = profileDir;
@@ -246,52 +296,43 @@ function connectionOptions(options, profileDir) {
 // its auto-reconnect loop, which would keep the caller's process alive. Then,
 // like the pipe transport, the browser gets a bounded wait to exit before
 // terminateChild steps in.
-async function askBrowserToQuit(connection, child, disconnect) {
-  if (child.exitCode !== null || child.signalCode !== null || !connection.cdp.isConnected) {
+async function askBrowserToQuit(connection: BrowserConnection, child: ChildProcess, disconnect: () => Promise<void>) {
+  if (child.exitCode !== null || child.signalCode !== null || !readProperty(connection.cdp, "isConnected")) {
     await disconnect();
     return false;
   }
-  const exited = new Promise((resolve) => child.once("exit", resolve));
+  const exited = new Promise<unknown>((resolve) => child.once("exit", resolve));
   const quitRequested = await Promise.race([
-    connection.cdp
-      .send("Browser.close", undefined, undefined, { timeoutMs: BROWSER_CLOSE_TIMEOUT_MS })
-      .then(() => true, () => false),
+    connection.cdp.send("Browser.close", undefined, undefined, { timeoutMs: BROWSER_CLOSE_TIMEOUT_MS }).then(
+      () => true,
+      () => false,
+    ),
     exited.then(() => true),
   ]);
   await disconnect();
   if (child.exitCode === null && child.signalCode === null) {
-    let timer;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       exited,
-      new Promise((resolve) => { timer = setTimeout(resolve, BROWSER_CLOSE_TIMEOUT_MS); }),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, BROWSER_CLOSE_TIMEOUT_MS);
+      }),
     ]);
     clearTimeout(timer);
   }
   return quitRequested;
 }
 
-async function launchNamed(
-  name,
-  { root, recordPath, lockPath },
-  options,
-) {
+async function launchNamed(name: string, { root, recordPath, lockPath }: RegistryPaths, options: ConnectNamedOptions) {
   if (typeof options.browserPath !== "string" || options.browserPath.length === 0) {
-    throw new TypeError(
-      `connectNamed("${name}") requires browserPath when no healthy instance is registered`,
-    );
+    throw new TypeError(`connectNamed("${name}") requires browserPath when no healthy instance is registered`);
   }
   const browserArgs = [...(options.browserArgs ?? [])];
-  const profileDir = options.profileDir
-    ? path.resolve(options.profileDir)
-    : profileDirFromArgs(browserArgs);
+  const profileDir = options.profileDir ? path.resolve(options.profileDir) : profileDirFromArgs(browserArgs);
   const previousActivePort = await snapshotActivePort(profileDir);
   const child = spawn(
     options.browserPath,
-    [
-      ...browserArgs,
-      "--remote-debugging-address=127.0.0.1",
-      "--remote-debugging-port=0",
-    ],
+    [...browserArgs, "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0"],
     {
       // A named browser is shared through the registry, so it has to outlive
       // the process that launched it. On Windows libuv puts every non-detached
@@ -305,7 +346,7 @@ async function launchNamed(
     },
   );
 
-  let connection;
+  let connection: BrowserConnection | undefined;
   try {
     const launchTimeoutMs = options.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT_MS;
     const report = await discoverLaunchedEndpoint(child, {
@@ -313,21 +354,22 @@ async function launchNamed(
       timeoutMs: launchTimeoutMs,
       previousActivePort,
     });
+    // Only a falsy rejection value inside discovery resolves undefined; the JS
+    // original threw a TypeError destructuring it, and so does this check.
+    if (report === undefined) throw new TypeError("launch endpoint discovery settled without a report");
     const { endpoint } = report;
     // The browser's own WebSocket URL carries its GUID: recording it makes a
     // later attach prove it reached this browser and not whatever else ends up
     // on the port once this pid is gone.
-    const { webSocketDebuggerUrl } = await probeEndpoint(
-      endpoint,
-      launchTimeoutMs,
-    );
+    const { webSocketDebuggerUrl } = await probeEndpoint(endpoint, launchTimeoutMs);
     assertLaunchedBrowser(child, report, webSocketDebuggerUrl);
-    connection = await connectWithin(
+    const opened = await connectWithin(
       endpoint,
       connectionOptions(options, profileDir),
       resolveConnectTimeoutMs(options),
     );
-    const record = {
+    connection = opened;
+    const record: LaunchedRecord = {
       version: RECORD_VERSION,
       name,
       pid: child.pid,
@@ -338,11 +380,11 @@ async function launchNamed(
       startedAt: new Date().toISOString(),
     };
     await writeRecordAtomic(root, recordPath, record);
-    connection.browserProcess = child;
-    const disconnect = connection.close.bind(connection);
-    connection.close = async () => {
-      let failure;
-      const quitRequested = await askBrowserToQuit(connection, child, async () => {
+    opened.browserProcess = child;
+    const disconnect = opened.close.bind(opened);
+    opened.close = async () => {
+      let failure: unknown;
+      const quitRequested = await askBrowserToQuit(opened, child, async () => {
         try {
           await disconnect();
         } catch (error) {
@@ -353,15 +395,13 @@ async function launchNamed(
       // The browser this record points at is gone, so the record goes with it
       // instead of waiting for the next caller to clean it up.
       try {
-        await withLock(lockPath, nameLockOptions(options), () =>
-          removeOwnedRecord(recordPath, name, child.pid),
-        );
+        await withLock(lockPath, nameLockOptions(options), () => removeOwnedRecord(recordPath, name, child.pid));
       } catch (error) {
         failure ??= error;
       }
       if (failure) throw failure;
     };
-    return connection;
+    return opened;
   } catch (error) {
     await connection?.close().catch(() => {});
     await terminateChild(child);
@@ -369,36 +409,35 @@ async function launchNamed(
   }
 }
 
-export async function withEngineLock(registryRoot, engineKey, run) {
+export async function withEngineLock<T>(
+  registryRoot: string | undefined,
+  engineKey: string,
+  run: () => Promise<T>,
+): Promise<T> {
   const root = path.resolve(registryRoot ?? DEFAULT_REGISTRY_ROOT);
   await ensureRegistryRoot(root);
-  const digest = createHash("sha256")
-    .update(path.resolve(engineKey))
-    .digest("hex")
-    .slice(0, 16);
+  const digest = createHash("sha256").update(path.resolve(engineKey)).digest("hex").slice(0, 16);
   const lockPath = path.join(root, `_engine-${digest}.flock`);
-  return withLock(
-    lockPath,
-    { timeoutMs: DEFAULT_LOCK_TIMEOUT_MS },
-    run,
-  );
+  return withLock(lockPath, { timeoutMs: DEFAULT_LOCK_TIMEOUT_MS }, run);
 }
 
-export async function connectNamed(name, options = {}) {
+export async function connectNamed(name: string, options: ConnectNamedOptions = {}): Promise<BrowserConnection> {
   const normalizedName = normalizeName(name);
   const paths = registryPaths(options.registryRoot, normalizedName);
   await ensureRegistryRoot(paths.root);
-  return withLock(paths.lockPath, nameLockOptions(options), () =>
-    attachOrLaunch(normalizedName, paths, options),
-  );
+  return withLock(paths.lockPath, nameLockOptions(options), () => attachOrLaunch(normalizedName, paths, options));
 }
 
-async function attachOrLaunch(normalizedName, paths, options) {
+async function attachOrLaunch(
+  normalizedName: string,
+  paths: RegistryPaths,
+  options: ConnectNamedOptions,
+): Promise<BrowserConnection> {
   const loaded = await readRecord(paths.recordPath, normalizedName);
   if (loaded.record) {
     await restrictToOwner(paths.recordPath, "file");
     if (isPidAlive(loaded.record.pid)) {
-      let version = null;
+      let version: BrowserVersion | null = null;
       try {
         version = await probeEndpoint(
           loaded.record.endpoint,
@@ -409,7 +448,7 @@ async function attachOrLaunch(normalizedName, paths, options) {
       } catch (error) {
         if (!isConnectionRefused(error)) {
           throw new Error(
-            `unresponsive holder "${normalizedName}" pid ${loaded.record.pid} endpoint ${loaded.record.endpoint}: ${error.message}`,
+            `unresponsive holder "${normalizedName}" pid ${loaded.record.pid} endpoint ${loaded.record.endpoint}: ${readProperty(error, "message")}`,
             { cause: error },
           );
         }
@@ -421,9 +460,7 @@ async function attachOrLaunch(normalizedName, paths, options) {
       // not an identity. Only the recorded WebSocket URL (it carries the
       // browser GUID) says this is our browser; anything else answering
       // there is a stranger, so the record is stale, not a holder.
-      if (
-        version?.webSocketDebuggerUrl === loaded.record.webSocketDebuggerUrl
-      ) {
+      if (version?.webSocketDebuggerUrl === loaded.record.webSocketDebuggerUrl) {
         // Connecting to the recorded GUID URL, not the port, keeps the shared
         // connection's auto-reconnect from landing on a different browser.
         const { webSocketDebuggerUrl } = loaded.record;
@@ -433,14 +470,13 @@ async function attachOrLaunch(normalizedName, paths, options) {
             webSocketDebuggerUrl,
             connectionOptions(options, loaded.record.profileDir),
             {
-              open: (shared) =>
-                connectWithin(webSocketDebuggerUrl, shared, timeoutMs),
+              open: (shared) => connectWithin(webSocketDebuggerUrl, shared, timeoutMs),
               timeoutMs,
             },
           );
         } catch (error) {
           throw new Error(
-            `unresponsive holder "${normalizedName}" pid ${loaded.record.pid} endpoint ${loaded.record.endpoint}: ${error.message}`,
+            `unresponsive holder "${normalizedName}" pid ${loaded.record.pid} endpoint ${loaded.record.endpoint}: ${readProperty(error, "message")}`,
             { cause: error },
           );
         }
@@ -449,39 +485,35 @@ async function attachOrLaunch(normalizedName, paths, options) {
   }
 
   if (loaded.exists) {
-    await unlink(paths.recordPath).catch((error) => {
-      if (error?.code !== "ENOENT") throw error;
+    await unlink(paths.recordPath).catch((error: unknown) => {
+      if (errorCode(error) !== "ENOENT") throw error;
     });
   }
   return await launchNamed(normalizedName, paths, options);
 }
 
-export async function listInstances(options = {}) {
+export async function listInstances(options: ListInstancesOptions = {}): Promise<InstanceStatus[]> {
   const root = path.resolve(options.registryRoot ?? DEFAULT_REGISTRY_ROOT);
   await ensureRegistryRoot(root);
   const entries = await readdir(root, { withFileTypes: true });
   const records = await Promise.all(
     entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-      .map(async (entry) => {
+      .map(async (entry): Promise<InstanceStatus | null> => {
         const expectedName = entry.name.slice(0, -".json".length);
         const recordPath = path.join(root, entry.name);
-        const loaded = await readRecord(recordPath, expectedName);
-        if (!loaded.record) return null;
+        const { record } = await readRecord(recordPath, expectedName);
+        if (!record) return null;
         await restrictToOwner(recordPath, "file");
-        const alive = isPidAlive(loaded.record.pid);
+        const alive = isPidAlive(record.pid);
         let responsive = false;
         if (alive) {
-          responsive = await probeEndpoint(
-            loaded.record.endpoint,
-            options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,
-          ).then(
-            (version) =>
-              version.webSocketDebuggerUrl === loaded.record.webSocketDebuggerUrl,
+          responsive = await probeEndpoint(record.endpoint, options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS).then(
+            (version) => version.webSocketDebuggerUrl === record.webSocketDebuggerUrl,
             () => false,
           );
         }
-        return { ...loaded.record, alive, responsive };
+        return { ...record, alive, responsive };
       }),
   );
   return records

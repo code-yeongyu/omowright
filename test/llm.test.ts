@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactSnapshot, snapshotTokens, toolSchemas } from "../src/llm.js";
+import { compactSnapshot, snapshotTokens, toolSchemas } from "../src/llm.ts";
 
 const GITHUB_LIKE = JSON.stringify({
   tree: '- heading "Example Domain" [level=1]\n- text: "sample"\n- paragraph:\n  - link "Learn more" [ref=e1]',
@@ -9,12 +9,15 @@ const GITHUB_LIKE = JSON.stringify({
 
 test("compactSnapshot returns the raw tree from a JSON string", () => {
   const tree = compactSnapshot(GITHUB_LIKE);
-  assert.equal(tree, '- heading "Example Domain" [level=1]\n- text: "sample"\n- paragraph:\n  - link "Learn more" [ref=e1]');
+  assert.equal(
+    tree,
+    '- heading "Example Domain" [level=1]\n- text: "sample"\n- paragraph:\n  - link "Learn more" [ref=e1]',
+  );
 });
 
 test("compactSnapshot accepts an already-parsed object", () => {
   const tree = compactSnapshot(JSON.parse(GITHUB_LIKE));
-  assert.ok(tree.includes('[ref=e1]'));
+  assert.ok(tree.includes("[ref=e1]"));
   assert.ok(!tree.includes("nthAmongSameSignature"));
 });
 
@@ -30,28 +33,41 @@ test("compactSnapshot rejects malformed input", () => {
 });
 
 test("compactSnapshot renders delta entries and frame-local removed ranges", () => {
-  const snapshot = { full: false, diff: {
-    added: [{ ref: "e8", tree: 'textbox "Extra" [ref=e8]' }],
-    changed: [{ ref: "e1", tree: 'textbox "Name" [ref=e1]: "Ada"' }],
-    removed: ["e2", "e3", "e4", "e7", "f1e2", "f1e3", "f2e1"],
-    focused: "e1",
-  } };
-  assert.equal(compactSnapshot(snapshot), [
-    '+ textbox "Extra" [ref=e8]',
-    '~ textbox "Name" [ref=e1]: "Ada"',
-    '- e2-e4, e7, f1e2-f1e3, f2e1',
-    '@focused e1',
-  ].join("\n"));
+  const snapshot = {
+    full: false,
+    diff: {
+      added: [{ ref: "e8", tree: 'textbox "Extra" [ref=e8]' }],
+      changed: [{ ref: "e1", tree: 'textbox "Name" [ref=e1]: "Ada"' }],
+      removed: ["e2", "e3", "e4", "e7", "f1e2", "f1e3", "f2e1"],
+      focused: "e1",
+    },
+  };
+  assert.equal(
+    compactSnapshot(snapshot),
+    [
+      '+ textbox "Extra" [ref=e8]',
+      '~ textbox "Name" [ref=e1]: "Ada"',
+      "- e2-e4, e7, f1e2-f1e3, f2e1",
+      "@focused e1",
+    ].join("\n"),
+  );
   assert.equal(compactSnapshot(JSON.stringify(snapshot)), compactSnapshot(snapshot));
 });
 
 // Protects the public compactSnapshot rendering of a snapshot({ find }) result: without the
 // header a model cannot tell a filtered view (or an empty search) from a whole page.
 test("compactSnapshot labels find results with their match count", () => {
-  const found = { tree: '- button "Pay" [ref=e4]\n...\n- link "Pay later" [ref=e9]', refs: {}, find: { query: "pay", matches: 2 } };
+  const found = {
+    tree: '- button "Pay" [ref=e4]\n...\n- link "Pay later" [ref=e9]',
+    refs: {},
+    find: { query: "pay", matches: 2 },
+  };
   assert.equal(compactSnapshot(found), `2 matching lines for pay:\n${found.tree}`);
   assert.equal(compactSnapshot(JSON.stringify(found)), compactSnapshot(found));
-  assert.equal(compactSnapshot({ tree: "", refs: {}, find: { query: "/zzz/i", matches: 0 } }), "0 matching lines for /zzz/i");
+  assert.equal(
+    compactSnapshot({ tree: "", refs: {}, find: { query: "/zzz/i", matches: 0 } }),
+    "0 matching lines for /zzz/i",
+  );
 });
 
 test("snapshotTokens reports bytes and token estimate", () => {
@@ -70,15 +86,32 @@ test("toolSchemas are complete and lean", () => {
     assert.equal(typeof schema.parameters, "object");
     assert.equal(schema.parameters.type, "object", `${schema.name} parameters.type`);
   }
-  const names = toolSchemas.map(s => s.name);
+  const names = new Set(toolSchemas.map((s) => s.name));
   for (const required of [
-    "page.snapshot", "page.locator", "page.goto", "compactSnapshot",
-    "createNetworkSnoop", "snoop.waitFor", "snoop.popJson", "snoop.summary",
-    "collectWhileScrolling", "createTrace", "trace.step", "trace.stop",
-    "reconcileFrames", "snapshotWithFrames", "connectPipe.dialogPolicy",
-    "requestHuman", "describeLayers", "snapshotWithLayers", "emulate",
-    "createRoutes", "route.continue", "route.fulfill", "route.abort",
+    "page.snapshot",
+    "page.locator",
+    "page.goto",
+    "compactSnapshot",
+    "createNetworkSnoop",
+    "snoop.waitFor",
+    "snoop.popJson",
+    "snoop.summary",
+    "collectWhileScrolling",
+    "createTrace",
+    "trace.step",
+    "trace.stop",
+    "reconcileFrames",
+    "snapshotWithFrames",
+    "connectPipe.dialogPolicy",
+    "requestHuman",
+    "describeLayers",
+    "snapshotWithLayers",
+    "emulate",
+    "createRoutes",
+    "route.continue",
+    "route.fulfill",
+    "route.abort",
   ]) {
-    assert.ok(names.includes(required), `missing schema: ${required}`);
+    assert.ok(names.has(required), `missing schema: ${required}`);
   }
 });

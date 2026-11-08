@@ -1,1 +1,1 @@
-window.fromFile = 19;
+Reflect.set(window, "fromFile", 19);

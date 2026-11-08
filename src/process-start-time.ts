@@ -5,12 +5,12 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const WINDOWS_START_TIME_TIMEOUT_MS = 15_000;
-let ownStartTime;
+let ownStartTime: Promise<string | null> | undefined;
 
 // When the process holding `pid` started, in a form that only has to compare
 // equal to itself on this machine; null when the platform cannot say. A dead
 // holder's pid can be reused, and pid plus start time is what stays unique.
-export async function processStartTime(pid) {
+export async function processStartTime(pid: number): Promise<string | null> {
   if (process.platform === "win32") {
     if (!Number.isInteger(pid) || pid <= 0) return null;
     // Win32_Process.CreationDate is readable for every process, not only the

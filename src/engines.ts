@@ -1,7 +1,7 @@
-import { connectAside } from "./aside/session.js";
-import { connectEgo } from "./ego/client.js";
-import { connectBrowserSkill } from "./bsk/connect.js";
-import { connectCloakProfile } from "./cloak-profile.js";
+import { connectAside } from "./aside/session.ts";
+import { connectEgo } from "./ego/client.ts";
+import { connectBrowserSkill } from "./bsk/connect.ts";
+import { connectCloakProfile } from "./cloak-profile.ts";
 
 // Most-preferred first: the user's own agent browser (Aside, Ego Lite), then the user's
 // local browser through BrowserSkill, then omowright's owned CloakBrowser profile.

@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AsideReplError, connectAside } from "../src/index.js";
+import { AsideReplError, connectAside } from "../src/index.ts";
+import { field } from "./fixtures/read-field.ts";
 
-const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-aside-repl.mjs");
+const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-aside-repl.ts");
 const asideCommand = [process.execPath, FAKE];
 
 // The Aside engine's public contract over the REPL protocol: one child keeps state across
@@ -16,7 +17,9 @@ test("connectAside keeps one REPL session and returns each call's value apart fr
     assert.equal(aside.engine, "aside");
     assert.equal(aside.account, "u1");
     assert.equal(await aside.run("globalThis.omowCount = 41;\nreturn null;"), null);
-    const { value, logs } = await aside.runWithLogs('console.log("from the page");\nreturn { next: globalThis.omowCount + 1 };');
+    const { value, logs } = await aside.runWithLogs(
+      'console.log("from the page");\nreturn { next: globalThis.omowCount + 1 };',
+    );
     assert.deepEqual(value, { next: 42 });
     assert.deepEqual(logs, ["from the page"]);
   } finally {
@@ -36,7 +39,10 @@ test("a failing call rejects with AsideReplError and the session keeps working",
       return true;
     });
     assert.equal(await aside.run("return 7"), 7);
-    await assert.rejects(aside.run("return () => 1"), (error) => error instanceof AsideReplError && error.code === "repl_unserializable");
+    await assert.rejects(
+      aside.run("return () => 1"),
+      (error) => error instanceof AsideReplError && error.code === "repl_unserializable",
+    );
     assert.equal(await aside.run("return 8"), 8);
   } finally {
     await aside.close();
@@ -49,10 +55,13 @@ test("open and snapshot with find narrow Aside's tree to the matching lines", as
   const aside = await connectAside({ asideCommand });
   try {
     await assert.rejects(aside.snapshot(), /no current page/);
-    assert.deepEqual(await aside.open("https://example.com/"), { url: "https://example.com/", title: "Title of https://example.com/" });
+    assert.deepEqual(await aside.open("https://example.com/"), {
+      url: "https://example.com/",
+      title: "Title of https://example.com/",
+    });
     const full = await aside.snapshot();
-    assert.equal(full.tree.split("\n").length, 4);
-    assert.equal(full.diff, "");
+    assert.equal(String(field(full, "tree")).split("\n").length, 4);
+    assert.equal(field(full, "diff"), "");
     assert.deepEqual(await aside.snapshot({ find: "pay", context: 0 }), {
       tree: '- link "Pay later" [ref=e1]\n...\n- button "Pay now" [ref=e2]',
       find: { query: "pay", matches: 2 },
@@ -87,11 +96,20 @@ test("output that contains the prompt text and arrives split keeps calls in step
 // it with a timeout and refuse later calls instead of reading a stale answer.
 test("a call past its timeout fails and closes the session", async () => {
   const aside = await connectAside({ asideCommand, callTimeoutMs: 300 });
-  await assert.rejects(aside.run("await new Promise(() => {});\nreturn 1;"), (error) => error instanceof AsideReplError && error.code === "repl_timeout");
-  await assert.rejects(aside.run("return 1"), (error) => error instanceof AsideReplError && error.code === "repl_closed");
+  await assert.rejects(
+    aside.run("await new Promise(() => {});\nreturn 1;"),
+    (error) => error instanceof AsideReplError && error.code === "repl_timeout",
+  );
+  await assert.rejects(
+    aside.run("return 1"),
+    (error) => error instanceof AsideReplError && error.code === "repl_closed",
+  );
   await aside.close();
 });
 
 test("connectAside names the missing CLI instead of failing to spawn", async () => {
-  await assert.rejects(connectAside({ autoSetup: false, env: { PATH: "" }, home: "/nonexistent" }), (error) => error instanceof AsideReplError && error.code === "aside_not_found");
+  await assert.rejects(
+    connectAside({ autoSetup: false, env: { PATH: "" }, home: "/nonexistent" }),
+    (error) => error instanceof AsideReplError && error.code === "aside_not_found",
+  );
 });

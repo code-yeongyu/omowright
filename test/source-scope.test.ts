@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { analyzeScopes } from "./source-scope.mjs";
+import { analyzeScopes } from "./source-scope.ts";
 
 // Package contract: shipped modules and injected browser code must not depend
 // on undeclared bundle bindings. Imports alone do not exercise lazy API paths.
 // Explicit standard globals cover the Node host and the browser realm into
 // which evaluate callbacks and page-bundle.js are injected, not runner globals.
-const globals = new Set(`
+const globals = new Set(
+  `
   undefined Infinity NaN globalThis
   Object Function Boolean Symbol Error AggregateError EvalError RangeError
   ReferenceError SyntaxError TypeError URIError Number BigInt Math Date String
@@ -25,12 +26,19 @@ const globals = new Set(`
   window document location navigator Element HTMLElement HTMLInputElement
   HTMLTextAreaElement Node NodeFilter ShadowRoot MouseEvent WheelEvent
   getComputedStyle innerWidth innerHeight scrollTo MutationObserver
-`.trim().split(/\s+/));
+`
+    .trim()
+    .split(/\s+/),
+);
 
-const freeNames = source => analyzeScopes(source).free.map(ref => ref.name).sort();
+const freeNames = (source: string) =>
+  analyzeScopes(source)
+    .free.map((ref) => ref.name)
+    .toSorted();
 
 test("scope walk distinguishes bindings, property keys, and undeclared reads and writes", () => {
-  assert.deepEqual(freeNames(`
+  assert.deepEqual(
+    freeNames(`
     import { value as imported } from "module";
     const { [key]: local = fallback, ...rest } = imported;
     function outer({ parameter = initial }) {
@@ -46,25 +54,33 @@ test("scope walk distinguishes bindings, property keys, and undeclared reads and
       ({ target: assigned } = object);
       return () => arguments[0];
     }
-  `), ["assigned", "caught", "computed", "fallback", "hidden", "index", "initial", "key", "missing"]);
-  assert.deepEqual(freeNames(`
+  `),
+    ["assigned", "caught", "computed", "fallback", "hidden", "index", "initial", "key", "missing"],
+  );
+  assert.deepEqual(
+    freeNames(`
     const Constructor = class Named { method() { return Named; } };
     Named;
     const recursive = function named() { return named; };
     named;
     class Child extends Constructor { #field; method() { return this.#field; } }
     outer: for (;;) { break outer; }
-  `), ["Named", "named"]);
+  `),
+    ["Named", "named"],
+  );
   assert.deepEqual(freeNames("function f(value = bodyOnly) { var bodyOnly; return value; }"), ["bodyOnly"]);
 });
 
 test("shipped source has no undeclared identifiers", () => {
   const directory = new URL("../src/", import.meta.url);
-  const offenders = [];
-  for (const file of readdirSync(directory).filter(file => file.endsWith(".js")).sort()) {
+  const offenders: string[] = [];
+  for (const file of readdirSync(directory)
+    .filter((name) => name.endsWith(".js"))
+    .toSorted()) {
     const { free } = analyzeScopes(readFileSync(new URL(file, directory), "utf8"));
     for (const { name, node } of free) {
-      if (!globals.has(name)) offenders.push(`${file}:${node.loc.start.line}:${node.loc.start.column + 1} ${name}`);
+      if (!globals.has(name))
+        offenders.push(`${file}:${node.loc?.start.line}:${Number(node.loc?.start.column) + 1} ${name}`);
     }
   }
   assert.deepEqual(offenders, [], "Package source contains unresolved identifiers:\n" + offenders.join("\n"));

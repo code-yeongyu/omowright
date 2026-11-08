@@ -5,10 +5,82 @@
  * defenses can fingerprint. Keep interception off by default and scope
  * patterns tightly.
  */
+import type { CdpEventMeta, CdpEventPayload, CdpTransport, CdpUnsubscribe } from "./cdp-protocol.ts";
 
-const controllers = new WeakMap();
+/** What a route handler and a match predicate see of a paused request. */
+export interface RouteRequest {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  postData: string | undefined;
+  resourceType: string;
+}
 
-function globToRegExp(glob) {
+export type RouteMatchPredicate = (request: Pick<RouteRequest, "url" | "method" | "resourceType" | "headers">) => unknown;
+/** A glob (`*`, `?`), a substring, a RegExp, or a predicate. */
+export type RouteMatch = string | RegExp | RouteMatchPredicate;
+
+/** Headers as a name/value list or a record; every name and value is stringified. */
+export type RouteHeaders = Array<{ name: unknown; value?: unknown }> | Record<string, unknown>;
+
+export interface RouteContinueOverrides {
+  url?: string | undefined;
+  method?: string | undefined;
+  headers?: RouteHeaders | undefined;
+  postData?: unknown;
+}
+
+export interface RouteFulfillOptions {
+  status?: number | undefined;
+  headers?: RouteHeaders | undefined;
+  contentType?: unknown;
+  body?: unknown;
+}
+
+export interface Route {
+  request: RouteRequest;
+  continue(overrides?: RouteContinueOverrides): Promise<unknown>;
+  fulfill(options?: RouteFulfillOptions): Promise<unknown>;
+  abort(errorReason?: string): Promise<unknown>;
+  fallback(): Promise<void>;
+}
+
+export type RouteHandler = (route: Route) => unknown;
+
+export interface RouteOptions {
+  times?: number | undefined;
+  prepend?: boolean | undefined;
+}
+
+export interface RoutesController {
+  route(match: RouteMatch, handler: RouteHandler, options?: RouteOptions): Promise<void>;
+  unroute(match?: RouteMatch, handler?: RouteHandler): Promise<void>;
+  dispose(): Promise<void>;
+  readonly enabled: boolean;
+}
+
+/** The page surface routes need: its CDP transport and its session id. */
+export interface RoutesPage {
+  cdp: Pick<CdpTransport, "send" | "on">;
+  resolveSessionId(): Promise<string>;
+}
+
+interface RouteEntry {
+  match: RouteMatch;
+  handler: RouteHandler;
+  remaining: number;
+}
+
+interface HeaderEntry {
+  name: string;
+  value: string;
+}
+
+type FetchSettleMethod = "Fetch.continueRequest" | "Fetch.fulfillRequest" | "Fetch.failRequest";
+
+const controllers = new WeakMap<RoutesPage, RoutesController>();
+
+function globToRegExp(glob: string) {
   let source = "";
   for (const char of glob) {
     if (char === "*") source += ".*";
@@ -19,11 +91,11 @@ function globToRegExp(glob) {
   return new RegExp(`^${source}$`);
 }
 
-function hasGlobChars(value) {
+function hasGlobChars(value: string) {
   return value.includes("*") || value.includes("?");
 }
 
-function matches(match, request) {
+function matches(match: RouteMatch, request: RouteRequest) {
   if (typeof match === "function") {
     return Boolean(match({
       url: request.url,
@@ -40,13 +112,13 @@ function matches(match, request) {
   return false;
 }
 
-function sameMatch(left, right) {
+function sameMatch(left: RouteMatch | undefined, right: RouteMatch) {
   if (left === right) return true;
   if (left instanceof RegExp && right instanceof RegExp) return left.source === right.source && left.flags === right.flags;
   return false;
 }
 
-function toHeaderEntries(headers) {
+function toHeaderEntries(headers: RouteHeaders | null | undefined): HeaderEntry[] {
   if (!headers) return [];
   if (Array.isArray(headers)) {
     return headers.map(header => ({ name: String(header.name), value: String(header.value ?? "") }));
@@ -54,15 +126,15 @@ function toHeaderEntries(headers) {
   return Object.entries(headers).map(([name, value]) => ({ name, value: String(value ?? "") }));
 }
 
-function encodeBody(body) {
+function encodeBody(body: unknown) {
   if (body == null) return "";
   if (Buffer.isBuffer(body)) return body.toString("base64");
   if (body instanceof Uint8Array) return Buffer.from(body).toString("base64");
   return Buffer.from(String(body)).toString("base64");
 }
 
-function buildContinue(requestId, { url, method, headers, postData } = {}) {
-  const params = { requestId };
+function buildContinue(requestId: string, { url, method, headers, postData }: RouteContinueOverrides = {}) {
+  const params: { requestId: string; url?: string; method?: string; headers?: HeaderEntry[]; postData?: string } = { requestId };
   if (url !== undefined) params.url = url;
   if (method !== undefined) params.method = method;
   if (headers !== undefined) params.headers = toHeaderEntries(headers);
@@ -70,7 +142,7 @@ function buildContinue(requestId, { url, method, headers, postData } = {}) {
   return params;
 }
 
-function buildFulfill(requestId, { status = 200, headers = {}, contentType, body = "" } = {}) {
+function buildFulfill(requestId: string, { status = 200, headers = {}, contentType, body = "" }: RouteFulfillOptions = {}) {
   const responseHeaders = toHeaderEntries(headers);
   if (contentType != null && String(contentType).length > 0) {
     const hasType = responseHeaders.some(header => header.name.toLowerCase() === "content-type");
@@ -84,20 +156,21 @@ function buildFulfill(requestId, { status = 200, headers = {}, contentType, body
   };
 }
 
-export function createRoutes(page) {
+export function createRoutes(page: RoutesPage): RoutesController {
   if (!page?.cdp) throw new TypeError("createRoutes requires a page with cdp");
-  if (controllers.has(page)) return controllers.get(page);
+  const existing = controllers.get(page);
+  if (existing) return existing;
 
-  const entries = [];
-  const warned = new WeakSet();
-  const settledIds = new Set();
+  const entries: RouteEntry[] = [];
+  const warned = new WeakSet<RouteHandler>();
+  const settledIds = new Set<string>();
   let enabled = false;
-  let sessionId;
-  let unsubscribe = null;
+  let sessionId: string | undefined;
+  let unsubscribe: CdpUnsubscribe | null = null;
   let lifecycle = Promise.resolve();
   let activeRequests = 0;
 
-  function warnOnce(handler, error) {
+  function warnOnce(handler: RouteHandler | undefined, error?: unknown) {
     if (typeof handler === "function") {
       if (warned.has(handler)) return;
       warned.add(handler);
@@ -106,14 +179,14 @@ export function createRoutes(page) {
     else console.warn("[routes] route handler did not settle the request; continuing");
   }
 
-  async function handlePaused(params, meta) {
+  async function handlePaused(params: CdpEventPayload<"Fetch.requestPaused">, meta: CdpEventMeta) {
     if (!sessionId || meta?.sessionId !== sessionId) return;
     const requestId = params?.requestId;
     if (!requestId || settledIds.has(requestId)) return;
     settledIds.add(requestId);
     activeRequests += 1;
 
-    const request = {
+    const request: RouteRequest = {
       url: params.request?.url ?? "",
       method: params.request?.method ?? "GET",
       headers: params.request?.headers ?? {},
@@ -122,7 +195,7 @@ export function createRoutes(page) {
     };
 
     let settled = false;
-    const settle = (method, cdpParams) => {
+    const settle = (method: FetchSettleMethod, cdpParams: object): Promise<unknown> => {
       if (settled) return Promise.resolve();
       settled = true;
       settledIds.add(requestId);
@@ -131,14 +204,16 @@ export function createRoutes(page) {
 
     const candidates = entries.slice();
     let index = 0;
-    async function dispatch() {
+    async function dispatch(): Promise<void> {
       while (index < candidates.length) {
         const entry = candidates[index++];
+        // index < candidates.length was just checked.
+        if (entry === undefined) break;
         if (!entries.includes(entry) || !matches(entry.match, request)) continue;
         if (--entry.remaining === 0) entries.splice(entries.indexOf(entry), 1);
         let acted = false;
-        let fallbackPromise;
-        const route = {
+        let fallbackPromise: Promise<void> | undefined;
+        const route: Route = {
           request,
           continue(overrides = {}) {
             acted = true;
@@ -181,13 +256,13 @@ export function createRoutes(page) {
     }
   }
 
-  function onPaused(params, meta) {
-    void handlePaused(params, meta).catch(error => {
+  function onPaused(params: CdpEventPayload<"Fetch.requestPaused">, meta: CdpEventMeta) {
+    void handlePaused(params, meta).catch((error: unknown) => {
       console.warn("[routes] requestPaused handling failed", error);
     });
   }
 
-  function syncFetch() {
+  function syncFetch(): Promise<void> {
     const operation = lifecycle.then(async () => {
       if (entries.length > 0) {
         if (enabled) return;
@@ -196,7 +271,7 @@ export function createRoutes(page) {
         try {
           await page.cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] }, sessionId);
         } catch (error) {
-          unsubscribe();
+          unsubscribe?.();
           unsubscribe = null;
           throw error;
         }
@@ -204,7 +279,8 @@ export function createRoutes(page) {
       } else if (enabled) {
         await page.cdp.send("Fetch.disable", {}, sessionId);
         enabled = false;
-        unsubscribe();
+        // enabled is only ever true while a subscription is held.
+        unsubscribe?.();
         unsubscribe = null;
         settledIds.clear();
       }
@@ -213,10 +289,10 @@ export function createRoutes(page) {
     return operation;
   }
 
-  async function route(match, handler, { times = Infinity, prepend = false } = {}) {
+  async function route(match: RouteMatch, handler: RouteHandler, { times = Infinity, prepend = false }: RouteOptions = {}) {
     if (typeof handler !== "function") throw new TypeError("handler must be a function");
     if (times !== Infinity && (!Number.isInteger(times) || times < 1)) throw new TypeError("times must be a positive integer");
-    const entry = { match, handler, remaining: times };
+    const entry: RouteEntry = { match, handler, remaining: times };
     if (prepend) entries.unshift(entry);
     else entries.push(entry);
     try {
@@ -228,11 +304,11 @@ export function createRoutes(page) {
     }
   }
 
-  async function unroute(match, handler) {
+  async function unroute(match?: RouteMatch, handler?: RouteHandler) {
     if (match === undefined) entries.length = 0;
     else {
       for (let index = entries.length - 1; index >= 0; index -= 1) {
-        if (sameMatch(entries[index].match, match) && (handler === undefined || entries[index].handler === handler)) entries.splice(index, 1);
+        if (sameMatch(entries[index]?.match, match) && (handler === undefined || entries[index]?.handler === handler)) entries.splice(index, 1);
       }
     }
     await syncFetch();
@@ -243,7 +319,7 @@ export function createRoutes(page) {
     await syncFetch();
   }
 
-  const controller = {
+  const controller: RoutesController = {
     route,
     unroute,
     dispose,

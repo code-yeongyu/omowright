@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
+import type { Server } from "node:http";
 import {
   chmodSync,
   existsSync,
@@ -15,13 +16,27 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import * as omowright from "../src/index.js";
-import { restrictNewFileToOwner, restrictToOwner, windowsSystemTool } from "../src/owner-only.js";
-import { assertOwnerOnly } from "./fixtures/owner-only.mjs";
+import * as omowright from "../src/index.ts";
+import { restrictNewFileToOwner, restrictToOwner, windowsSystemTool } from "../src/owner-only.ts";
+import { assertOwnerOnly } from "./fixtures/owner-only.ts";
 
-const fakePipeBrowser = fileURLToPath(
-  new URL("./fixtures/fake-pipe-browser.mjs", import.meta.url),
-);
+interface SpawnCall {
+  file: string;
+  args: readonly string[];
+}
+interface SpawnerOptions {
+  whoami?: string;
+  icacls?: Error;
+  sddl?: string;
+}
+
+function portOf(server: Server) {
+  const address = server.address();
+  assert.ok(address !== null && typeof address === "object", "the server is not listening on a TCP port");
+  return address.port;
+}
+
+const fakePipeBrowser = fileURLToPath(new URL("./fixtures/fake-pipe-browser.ts", import.meta.url));
 
 // The owner-only check reads ACLs through PowerShell on Windows, which takes
 // seconds on a CI runner, hence the explicit budgets below.
@@ -82,11 +97,12 @@ test("buildCloakBrowserArgs rejects every identity override form", () => {
     ["--user-data-dir", "/tmp/other-profile"],
   ]) {
     assert.throws(
-      () => omowright.buildCloakBrowserArgs({
-        profileDir: "/tmp/profile",
-        fingerprintSeed: 31415,
-        extraArgs,
-      }),
+      () =>
+        omowright.buildCloakBrowserArgs({
+          profileDir: "/tmp/profile",
+          fingerprintSeed: 31415,
+          extraArgs,
+        }),
       /override fixed profile identity/i,
     );
   }
@@ -124,13 +140,7 @@ test("anonymous connectCloakProfile creates no registry artifacts", { timeout: 1
   const homeDir = mkdtempSync(path.join(tmpdir(), "omowright-cloak-anon-"));
   const profileDir = path.join(homeDir, "cloak-profile");
   const registryRoot = path.join(homeDir, "instances-registry");
-  const defaultRegistryRoot = path.join(
-    homeDir,
-    ".local",
-    "share",
-    "omowright",
-    "instances",
-  );
+  const defaultRegistryRoot = path.join(homeDir, ".local", "share", "omowright", "instances");
   const fakeBrowserPath = path.join(
     homeDir,
     process.platform === "win32" ? "fake-cloak-browser.exe" : "fake-cloak-browser",
@@ -144,9 +154,7 @@ test("anonymous connectCloakProfile creates no registry artifacts", { timeout: 1
     );
     chmodSync(fakeBrowserPath, 0o755);
   }
-  const entryPoint = pathToFileURL(
-    fileURLToPath(new URL("../src/index.js", import.meta.url)),
-  ).href;
+  const entryPoint = pathToFileURL(fileURLToPath(new URL("../src/index.js", import.meta.url))).href;
   const childPath = path.join(homeDir, "anon-child.mjs");
   writeFileSync(
     childPath,
@@ -180,12 +188,16 @@ test("anonymous connectCloakProfile creates no registry artifacts", { timeout: 1
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
     child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
     const killGroup = () => {
       try {
-        process.kill(-child.pid, "SIGKILL");
+        process.kill(-Number(child.pid), "SIGKILL");
       } catch {
         child.kill("SIGKILL");
       }
@@ -202,10 +214,7 @@ test("anonymous connectCloakProfile creates no registry artifacts", { timeout: 1
     assert.equal(code, 0, `anonymous connect child failed:\n${stderr}`);
     assert.match(stdout, /ANON_CONNECT_OK/);
     // The connect really ran: the profile seed metadata was written.
-    assert.equal(
-      existsSync(path.join(profileDir, ".omowright-cloak.json")),
-      true,
-    );
+    assert.equal(existsSync(path.join(profileDir, ".omowright-cloak.json")), true);
     // No registry artifacts anywhere: neither the caller-supplied root nor the
     // default ~/.local/share/omowright/instances under the temp HOME exists.
     assert.equal(existsSync(registryRoot), false);
@@ -215,29 +224,25 @@ test("anonymous connectCloakProfile creates no registry artifacts", { timeout: 1
   }
 });
 
-const fakeNamedBrowser = fileURLToPath(
-  new URL("./fixtures/fake-named-browser.mjs", import.meta.url),
-);
+const fakeNamedBrowser = fileURLToPath(new URL("./fixtures/fake-named-browser.ts", import.meta.url));
 
 async function startFakeNamedBrowser() {
   const child = spawn(process.execPath, [fakeNamedBrowser], {
     stdio: ["ignore", "ignore", "pipe"],
   });
-  const webSocketDebuggerUrl = await new Promise((resolve, reject) => {
+  const webSocketDebuggerUrl = await new Promise<string>((resolve, reject) => {
     let buffered = "";
     child.stderr.on("data", (chunk) => {
       buffered += chunk;
       const match = /DevTools listening on (ws:\/\/\S+)/.exec(buffered);
-      if (match) resolve(match[1]);
+      if (match) resolve(match[1] ?? "");
     });
     child.once("exit", (code) => reject(new Error(`fake browser exited (${code})`)));
   });
   return {
     child,
     webSocketDebuggerUrl,
-    endpoint: webSocketDebuggerUrl
-      .replace(/^ws:/, "http:")
-      .replace(/\/devtools\/.*$/, ""),
+    endpoint: webSocketDebuggerUrl.replace(/^ws:/, "http:").replace(/\/devtools\/.*$/, ""),
   };
 }
 
@@ -287,6 +292,7 @@ test("named cloak launch names a healthy different-profile holder", async () => 
         legacyProbeUrl: "http://127.0.0.1:1",
       }),
       (error) =>
+        error instanceof Error &&
         error.message.includes('"holder"') &&
         error.message.includes(`pid ${process.pid}`) &&
         error.message.includes(otherDir),
@@ -306,8 +312,8 @@ test("named cloak launch detects an unregistered holder on the legacy port", asy
     res.writeHead(200, { "content-type": "application/json" });
     res.end("{}");
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const legacyProbeUrl = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const legacyProbeUrl = `http://127.0.0.1:${portOf(server)}`;
   try {
     await assert.rejects(
       omowright.connectCloakProfile({
@@ -319,6 +325,7 @@ test("named cloak launch detects an unregistered holder on the legacy port", asy
         legacyProbeUrl,
       }),
       (error) =>
+        error instanceof Error &&
         error.message.includes("unregistered CloakBrowser") &&
         error.message.includes(legacyProbeUrl),
     );
@@ -346,39 +353,43 @@ const defaultPortBound = await new Promise((resolve) => {
 });
 defaultPortListener.unref();
 
-test("a named cloak launch dials 127.0.0.1:9242 only when legacyProbeUrl names it", {
-  skip: !defaultPortBound && `127.0.0.1:${DEFAULT_CLOAK_PORT} is held by another process`,
-}, async () => {
-  const registryRoot = mkdtempSync(path.join(tmpdir(), "nir-registry-"));
-  const mineDir = mkdtempSync(path.join(tmpdir(), "nir-mine-"));
-  let accepted = 0;
-  defaultPortListener.on("connection", () => {
-    accepted += 1;
-  });
-  const launch = (options) =>
-    assert.rejects(
-      omowright.connectCloakProfile({
-        name: "not a valid name",
-        browserPath: process.execPath,
-        profileDir: mineDir,
-        fingerprintSeed: 12345,
-        registryRoot,
-        ...options,
-      }),
-      (error) => error instanceof TypeError && /instance name/.test(error.message),
-    );
-  try {
-    await launch({});
-    assert.equal(accepted, 0, `connections accepted on 127.0.0.1:${DEFAULT_CLOAK_PORT} without legacyProbeUrl`);
-    await launch({ legacyProbeUrl: `http://127.0.0.1:${DEFAULT_CLOAK_PORT}` });
-    assert.ok(accepted > 0, "a launch whose legacyProbeUrl names the port reaches it");
-  } finally {
-    defaultPortListener.closeAllConnections();
-    await new Promise((resolve) => defaultPortListener.close(resolve));
-    rmSync(registryRoot, { recursive: true, force: true });
-    rmSync(mineDir, { recursive: true, force: true });
-  }
-});
+test(
+  "a named cloak launch dials 127.0.0.1:9242 only when legacyProbeUrl names it",
+  {
+    skip: !defaultPortBound && `127.0.0.1:${DEFAULT_CLOAK_PORT} is held by another process`,
+  },
+  async () => {
+    const registryRoot = mkdtempSync(path.join(tmpdir(), "nir-registry-"));
+    const mineDir = mkdtempSync(path.join(tmpdir(), "nir-mine-"));
+    let accepted = 0;
+    defaultPortListener.on("connection", () => {
+      accepted += 1;
+    });
+    const launch = (options: { legacyProbeUrl?: string }) =>
+      assert.rejects(
+        omowright.connectCloakProfile({
+          name: "not a valid name",
+          browserPath: process.execPath,
+          profileDir: mineDir,
+          fingerprintSeed: 12345,
+          registryRoot,
+          ...options,
+        }),
+        (error) => error instanceof TypeError && /instance name/.test(error.message),
+      );
+    try {
+      await launch({});
+      assert.equal(accepted, 0, `connections accepted on 127.0.0.1:${DEFAULT_CLOAK_PORT} without legacyProbeUrl`);
+      await launch({ legacyProbeUrl: `http://127.0.0.1:${DEFAULT_CLOAK_PORT}` });
+      assert.ok(accepted > 0, "a launch whose legacyProbeUrl names the port reaches it");
+    } finally {
+      defaultPortListener.closeAllConnections();
+      await new Promise((resolve) => defaultPortListener.close(resolve));
+      rmSync(registryRoot, { recursive: true, force: true });
+      rmSync(mineDir, { recursive: true, force: true });
+    }
+  },
+);
 
 // Contract owner: the Windows owner-only hardening (security contract). The
 // Windows tools run by absolute System32 path, so a cwd another user can write
@@ -390,19 +401,27 @@ const SID = "S-1-5-21-1-2-3-1001";
 
 // `sddl` is the DACL `icacls /save` reports for a directory, written as UTF-16
 // like the real tool writes it; the default is a fresh, inheriting directory.
-function spawner({ whoami = `"host\\me","${SID}"\r\n`, icacls, sddl = "D:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)" } = {}) {
-  const calls = [];
-  const run = async (file, args) => {
+function spawner({
+  whoami = `"host\\me","${SID}"\r\n`,
+  icacls,
+  sddl = "D:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)",
+}: SpawnerOptions = {}) {
+  const calls: SpawnCall[] = [];
+  const run = async (file: string, args: readonly string[]) => {
     calls.push({ file, args });
     if (file.endsWith("whoami.exe")) return { stdout: whoami, stderr: "" };
     if (icacls) throw icacls;
-    if (args[1] === "/save") writeFileSync(args[2], `profile\r\n${sddl}\r\n`, "utf16le");
+    if (args[1] === "/save") {
+      const savePath = args[2];
+      assert.ok(savePath !== undefined, "icacls /save names no output file");
+      writeFileSync(savePath, `profile\r\n${sddl}\r\n`, "utf16le");
+    }
     return { stdout: "", stderr: "" };
   };
   return { calls, run };
 }
 
-const grants = (calls) => calls.filter(({ args }) => args.includes("/grant:r")).map(({ args }) => args[0]);
+const grants = (calls: SpawnCall[]) => calls.filter(({ args }) => args.includes("/grant:r")).map(({ args }) => args[0]);
 
 test("windowsSystemTool resolves under SystemRoot, then windir, then C:\\Windows", () => {
   assert.equal(windowsSystemTool("icacls.exe", { SystemRoot: "D:\\Win" }), "D:\\Win\\System32\\icacls.exe");
@@ -416,7 +435,9 @@ test("restrictToOwner on win32 runs whoami and icacls by absolute path with an o
   await restrictToOwner("C:\\data\\profile\\seed.json", "file", { platform: "win32", run });
   for (const { file } of calls) assert.ok(path.win32.isAbsolute(file), `${file} is not an absolute path`);
   assert.deepEqual(
-    calls.filter(({ file, args }) => file === windowsSystemTool("icacls.exe") && args.includes("/grant:r")).map(({ args }) => args),
+    calls
+      .filter(({ file, args }) => file === windowsSystemTool("icacls.exe") && args.includes("/grant:r"))
+      .map(({ args }) => args),
     [
       ["C:\\data\\profile", "/inheritance:r", "/grant:r", `*${SID}:(OI)(CI)F`, "/Q"],
       ["C:\\data\\profile\\seed.json", "/inheritance:r", "/grant:r", `*${SID}:F`, "/Q"],
@@ -437,7 +458,7 @@ test("restrictToOwner on win32 runs whoami and icacls by absolute path with an o
 test("restrictToOwner on win32 leaves an already owner-only directory alone", async () => {
   const TRUSTED_INSTALLER = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
   // [label, DACL, directories granted, removal argv, user SID]
-  const cases = [
+  const cases: Array<[string, string, string[], string[][], string?]> = [
     ["protected, user granted (OI)(CI)F", `D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;${SID})`, [], []],
     ["protected, the built-in Administrator account as LA", "D:PAI(A;OICI;FA;;;LA)", [], [], "S-1-5-21-1-2-3-500"],
     [
@@ -471,7 +492,11 @@ test("restrictToOwner on win32 leaves an already owner-only directory alone", as
     const { calls, run } = spawner({ sddl, whoami: `"host\\me","${sid}"\r\n` });
     await restrictToOwner("C:\\d", "directory", { platform: "win32", run });
     assert.deepEqual(grants(calls), expected, label);
-    assert.deepEqual(calls.filter(({ args }) => args[1] === "/remove:g").map(({ args }) => args), removals, label);
+    assert.deepEqual(
+      calls.filter(({ args }) => args[1] === "/remove:g").map(({ args }) => args),
+      removals,
+      label,
+    );
     assert.equal(calls.filter(({ args }) => args[1] === "/save").length, 1, label);
   }
 });
@@ -482,7 +507,11 @@ test("restrictToOwner on win32 leaves an already owner-only directory alone", as
 test("restrictNewFileToOwner on win32 relies on the grant only inside the directory restrictToOwner handled", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "omowright-acl-memo-"));
   try {
-    const [owned, other, replacement] = ["owned", "other", "replacement"].map((name) => path.join(root, name));
+    const [owned, other, replacement] = [
+      path.join(root, "owned"),
+      path.join(root, "other"),
+      path.join(root, "replacement"),
+    ];
     for (const dir of [owned, other, replacement]) mkdirSync(dir);
     const { calls, run } = spawner();
     await restrictToOwner(owned, "directory", { platform: "win32", run });
@@ -516,57 +545,77 @@ const CASE_SENSITIVE_DIRS = (() => {
 })();
 
 // On a case-sensitive directory (NTFS can have them too) two names that differ only in case are two directories.
-test("restrictNewFileToOwner on win32 tells apart directories whose names differ only in case", {
-  skip: !CASE_SENSITIVE_DIRS && "no case-sensitive directory available on this host",
-}, async () => {
-  const root = caseSensitiveTempDir();
-  try {
-    const [lower, upper] = ["state", "STATE"].map((name) => path.join(root, name));
-    for (const dir of [lower, upper]) mkdirSync(dir);
-    const { calls, run } = spawner();
-    await restrictToOwner(lower, "directory", { platform: "win32", run });
-    await restrictNewFileToOwner(path.join(upper, "a.lock.tmp"), { platform: "win32", run });
-    assert.deepEqual(grants(calls), [lower, path.join(upper, "a.lock.tmp")]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+test(
+  "restrictNewFileToOwner on win32 tells apart directories whose names differ only in case",
+  {
+    skip: !CASE_SENSITIVE_DIRS && "no case-sensitive directory available on this host",
+  },
+  async () => {
+    const root = caseSensitiveTempDir();
+    assert.ok(root, "no case-sensitive directory could be made");
+    try {
+      const [lower, upper] = [path.join(root, "state"), path.join(root, "STATE")];
+      for (const dir of [lower, upper]) mkdirSync(dir);
+      const { calls, run } = spawner();
+      await restrictToOwner(lower, "directory", { platform: "win32", run });
+      await restrictNewFileToOwner(path.join(upper, "a.lock.tmp"), { platform: "win32", run });
+      assert.deepEqual(grants(calls), [lower, path.join(upper, "a.lock.tmp")]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 // The same contract against the real icacls output on a Windows host.
-test("restrictToOwner on Windows re-reads an owner-only directory instead of re-granting it", { skip: process.platform !== "win32", timeout: 60_000 }, async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "omowright-acl-"));
-  const calls = [];
-  const run = (file, args, options) => {
-    calls.push({ file, args });
-    return new Promise((resolve, reject) => {
-      execFile(file, args, options, (error, stdout, stderr) => (error ? reject(error) : resolve({ stdout, stderr })));
-    });
-  };
-  try {
-    await restrictToOwner(dir, "directory", { run });
-    assert.deepEqual(grants(calls), [dir]);
-    calls.length = 0;
-    await restrictToOwner(dir, "directory", { run });
-    assert.deepEqual(grants(calls), []);
-    await assertOwnerOnly([dir, "directory"]);
-    // An explicit grant to Everyone keeps the DACL protected, but it is no longer owner-only: the directory is
-    // granted again and the extra grant removed (icacls /save names Everyone by its SDDL alias WD).
-    execFileSync(windowsSystemTool("icacls.exe"), [dir, "/grant", "*S-1-1-0:(OI)(CI)RX", "/Q"], { windowsHide: true });
-    calls.length = 0;
-    await restrictToOwner(dir, "directory", { run });
-    assert.deepEqual(grants(calls), [dir]);
-    await assertOwnerOnly([dir, "directory"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+test(
+  "restrictToOwner on Windows re-reads an owner-only directory instead of re-granting it",
+  { skip: process.platform !== "win32", timeout: 60_000 },
+  async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "omowright-acl-"));
+    const calls: SpawnCall[] = [];
+    const run = (file: string, args: readonly string[], options: { timeout: number; windowsHide: boolean }) => {
+      calls.push({ file, args });
+      return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        execFile(file, args, options, (error, stdout, stderr) => (error ? reject(error) : resolve({ stdout, stderr })));
+      });
+    };
+    try {
+      await restrictToOwner(dir, "directory", { run });
+      assert.deepEqual(grants(calls), [dir]);
+      calls.length = 0;
+      await restrictToOwner(dir, "directory", { run });
+      assert.deepEqual(grants(calls), []);
+      await assertOwnerOnly([dir, "directory"]);
+      // An explicit grant to Everyone keeps the DACL protected, but it is no longer owner-only: the directory is
+      // granted again and the extra grant removed (icacls /save names Everyone by its SDDL alias WD).
+      execFileSync(windowsSystemTool("icacls.exe"), [dir, "/grant", "*S-1-1-0:(OI)(CI)RX", "/Q"], {
+        windowsHide: true,
+      });
+      calls.length = 0;
+      await restrictToOwner(dir, "directory", { run });
+      assert.deepEqual(grants(calls), [dir]);
+      await assertOwnerOnly([dir, "directory"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 test("restrictToOwner on win32 fails closed when a tool is missing, fails, or names no SID", async () => {
   const missing = Object.assign(new Error("spawn icacls.exe ENOENT"), { code: "ENOENT" });
-  await assert.rejects(restrictToOwner("C:\\p", "file", { platform: "win32", run: spawner({ icacls: missing }).run }), /ENOENT/);
+  await assert.rejects(
+    restrictToOwner("C:\\p", "file", { platform: "win32", run: spawner({ icacls: missing }).run }),
+    /ENOENT/,
+  );
   const exited = Object.assign(new Error("Command failed: icacls.exe"), { code: 5 });
-  await assert.rejects(restrictToOwner("C:\\p", "file", { platform: "win32", run: spawner({ icacls: exited }).run }), /Command failed/);
+  await assert.rejects(
+    restrictToOwner("C:\\p", "file", { platform: "win32", run: spawner({ icacls: exited }).run }),
+    /Command failed/,
+  );
   const noSid = spawner({ whoami: "INFO: no user\r\n" });
   await assert.rejects(restrictToOwner("C:\\p", "file", { platform: "win32", run: noSid.run }), /SID/);
-  assert.equal(noSid.calls.some(({ file }) => file.endsWith("icacls.exe")), false);
+  assert.equal(
+    noSid.calls.some(({ file }) => file.endsWith("icacls.exe")),
+    false,
+  );
 });

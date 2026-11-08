@@ -4,16 +4,19 @@ import { mkdtempSync, existsSync, globSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { connectPipe } from "../src/index.js";
-import { buildSnapshotExpression, bskSnapshot } from "../src/bsk/snapshot.js";
-import type { BskSnapshot } from "../src/bsk/snapshot.js";
+import { connectPipe } from "../src/index.ts";
+import { buildSnapshotExpression, bskSnapshot } from "../src/bsk/snapshot.ts";
+import type { BskSnapshot } from "../src/bsk/snapshot.ts";
 import { field } from "./fixtures/read-field.ts";
 import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function findHeadlessShell() {
   const home = process.env.HOME ?? "";
   const candidates = globSync(
-    path.join(home, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      home,
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
   if (candidates.length > 0) return candidates.toSorted().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -64,7 +67,11 @@ async function withPage(fn: (context: { page: Page; mainWorldEvaluate: MainWorld
     const page = await browser.newTab(FIXTURE);
     const sessionId = await page.resolveSessionId();
     const mainWorldEvaluate: MainWorldEvaluate = async (expression) => {
-      const reply = await page.cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
+      const reply = await page.cdp.send(
+        "Runtime.evaluate",
+        { expression, returnByValue: true, awaitPromise: true },
+        sessionId,
+      );
       if (reply.exceptionDetails) return { ok: false, error: { text: reply.exceptionDetails.text } };
       return { ok: true, value: reply.result.value };
     };
@@ -75,53 +82,72 @@ async function withPage(fn: (context: { page: Page; mainWorldEvaluate: MainWorld
   }
 }
 
-test("bskSnapshot through a main-world Runtime.evaluate leaves no global and no DOM mutation, and its css paths resolve", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
-  await withPage(async ({ mainWorldEvaluate }) => {
-    const settled = await mainWorldEvaluate("({ count: window.__fixtureMutations, log: window.__fixtureMutationLog })");
-    assert.ok(Array.isArray(field(settled.value, "log")), "fixture observer is armed");
-    await mainWorldEvaluate("window.__fixtureMutations = 0; window.__fixtureMutationLog.length = 0; true");
+test(
+  "bskSnapshot through a main-world Runtime.evaluate leaves no global and no DOM mutation, and its css paths resolve",
+  { skip: !SHELL && "no chromium binary found", timeout: 60_000 },
+  async () => {
+    await withPage(async ({ mainWorldEvaluate }) => {
+      const settled = await mainWorldEvaluate(
+        "({ count: window.__fixtureMutations, log: window.__fixtureMutationLog })",
+      );
+      assert.ok(Array.isArray(field(settled.value, "log")), "fixture observer is armed");
+      await mainWorldEvaluate("window.__fixtureMutations = 0; window.__fixtureMutationLog.length = 0; true");
 
-    const fakeSession = { evaluate: (expression: string, opts?: unknown) => mainWorldEvaluate(expression, opts) };
-    const snap = await bskSnapshot(fakeSession, { interactive: true });
+      const fakeSession = { evaluate: (expression: string, opts?: unknown) => mainWorldEvaluate(expression, opts) };
+      const snap = await bskSnapshot(fakeSession, { interactive: true });
 
-    assert.equal(typeof snap.tree, "string");
-    assert.match(snap.tree, /link "Home" \[ref=e\d+\]/);
-    assert.match(snap.tree, /textbox "Search" \[ref=e\d+\]/);
-    assert.ok(Object.keys(refsOf(snap)).length >= 6, `expected refs, got ${Object.keys(refsOf(snap))}`);
-    assert.deepEqual(Object.keys(cssOf(snap)).toSorted(), Object.keys(refsOf(snap)).toSorted(), "one css entry per ref");
+      assert.equal(typeof snap.tree, "string");
+      assert.match(snap.tree, /link "Home" \[ref=e\d+\]/);
+      assert.match(snap.tree, /textbox "Search" \[ref=e\d+\]/);
+      assert.ok(Object.keys(refsOf(snap)).length >= 6, `expected refs, got ${Object.keys(refsOf(snap))}`);
+      assert.deepEqual(
+        Object.keys(cssOf(snap)).toSorted(),
+        Object.keys(refsOf(snap)).toSorted(),
+        "one css entry per ref",
+      );
 
-    const leak = await mainWorldEvaluate('({ global: "__omowright" in window, mutations: window.__fixtureMutations, log: window.__fixtureMutationLog })');
-    assert.deepEqual(leak.value, { global: false, mutations: 0, log: [] });
+      const leak = await mainWorldEvaluate(
+        '({ global: "__omowright" in window, mutations: window.__fixtureMutations, log: window.__fixtureMutationLog })',
+      );
+      assert.deepEqual(leak.value, { global: false, mutations: 0, log: [] });
 
-    const checks = Object.entries(cssOf(snap)).map(([ref, css]) => ({ ref, css, meta: refsOf(snap)[ref] }));
-    const shadowRefs = checks.filter((c) => field(c.meta, "name") === "Inside shadow");
-    assert.equal(shadowRefs.length, 1, "the shadow button is in the tree");
-    assert.equal(shadowRefs[0]?.css, null, "shadow DOM elements have no light-DOM css path");
+      const checks = Object.entries(cssOf(snap)).map(([ref, css]) => ({ ref, css, meta: refsOf(snap)[ref] }));
+      const shadowRefs = checks.filter((c) => field(c.meta, "name") === "Inside shadow");
+      assert.equal(shadowRefs.length, 1, "the shadow button is in the tree");
+      assert.equal(shadowRefs[0]?.css, null, "shadow DOM elements have no light-DOM css path");
 
-    const lightRefs = checks.filter((c) => c.css !== null);
-    assert.ok(lightRefs.length >= 5);
-    for (const { ref, css, meta } of lightRefs) {
-      const probe = await mainWorldEvaluate(`(() => {
+      const lightRefs = checks.filter((c) => c.css !== null);
+      assert.ok(lightRefs.length >= 5);
+      for (const { ref, css, meta } of lightRefs) {
+        const probe = await mainWorldEvaluate(`(() => {
         const list = document.querySelectorAll(${JSON.stringify(css)});
         if (list.length !== 1) return { count: list.length };
         const el = list[0];
         return { count: 1, tag: el.tagName, text: (el.getAttribute("aria-label") || el.placeholder || el.textContent || "").trim() };
       })()`);
-      assert.equal(field(probe.value, "count"), 1, `${ref} ${css} must match exactly one element`);
-      assert.equal(field(probe.value, "tag"), field(meta, "tagName"), `${ref} ${css} resolves to the same tag`);
-    }
-    const duplicateGo = checks.filter((c) => field(c.meta, "name") === "Go").map((c) => c.css);
-    assert.equal(duplicateGo.length, 2);
-    assert.notEqual(duplicateGo[0], duplicateGo[1], "identical siblings get distinct paths");
+        assert.equal(field(probe.value, "count"), 1, `${ref} ${css} must match exactly one element`);
+        assert.equal(field(probe.value, "tag"), field(meta, "tagName"), `${ref} ${css} resolves to the same tag`);
+      }
+      const duplicateGo = checks.filter((c) => field(c.meta, "name") === "Go").map((c) => c.css);
+      assert.equal(duplicateGo.length, 2);
+      assert.notEqual(duplicateGo[0], duplicateGo[1], "identical siblings get distinct paths");
 
-    const goCss = duplicateGo[1];
-    const clicked = await mainWorldEvaluate(`(() => { document.querySelector(${JSON.stringify(goCss)}).click(); return window.__fixtureClicks; })()`);
-    assert.deepEqual(clicked.value, ["Go"]);
-  });
-});
+      const goCss = duplicateGo[1];
+      const clicked = await mainWorldEvaluate(
+        `(() => { document.querySelector(${JSON.stringify(goCss)}).click(); return window.__fixtureClicks; })()`,
+      );
+      assert.deepEqual(clicked.value, ["Go"]);
+    });
+  },
+);
 
 test("bskSnapshot surfaces an in-page failure as an error instead of a partial result", async () => {
-  const failing = { evaluate: async () => ({ ok: false, error: { text: "ReferenceError: document is not defined", line: 1, column: 1 } }) };
+  const failing = {
+    evaluate: async () => ({
+      ok: false,
+      error: { text: "ReferenceError: document is not defined", line: 1, column: 1 },
+    }),
+  };
   await assert.rejects(bskSnapshot(failing), /document is not defined/);
 });
 
@@ -152,42 +178,83 @@ async function refsInside(mainWorldEvaluate: MainWorldEvaluate, snap: BskSnapsho
   return reply.value;
 }
 
-test("interactive snapshots keep the label of a clickable or scrollable element whatever its children are", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
-  await withPage(async ({ mainWorldEvaluate }) => {
-    const fakeSession = { evaluate: (expression: string, opts?: unknown) => mainWorldEvaluate(expression, opts) };
-    const snap = await bskSnapshot(fakeSession, { interactive: true });
-    const owners = {
-      "Nested pointer card": "#nested-pointer-card",
-      "Invoice 42 Due Friday": "#invoice-card",
-      "Open menu": "#open-menu",
-      "Span tile": "#span-tile",
-      "Settings": "#settings-tile",
-      "Option alpha": "#option-alpha",
-      "Option beta": "#option-beta",
-    };
-    for (const [label, css] of Object.entries(owners)) {
-      assert.match(String(cssOf(snap)[ownerRef(snap.tree, label)] ?? ""), new RegExp(`${css}$`), `${label} is carried by the ref of ${css}:\n${snap.tree}`);
-    }
-    for (const label of ["Card tile", "Icon tile", "SVG tile"]) {
-      assert.match(String(cssOf(snap)[ownerRef(snap.tree, label)] ?? ""), /#pointer-generics$/, `${label} is clicked through its pointer container:\n${snap.tree}`);
-    }
-    const longLine = snap.tree.split("\n").find((line) => line.includes("Long card start"));
-    assert.ok(longLine, `a long clickable card keeps the start of its label:\n${snap.tree}`);
-    assert.match(String(cssOf(snap)[ownerRef(snap.tree, "Long card start")] ?? ""), /#long-card$/);
-    assert.ok(!snap.tree.includes("LONG_CARD_TAIL"), `a long label is capped, not copied whole:\n${longLine}`);
-    assert.match(String(cssOf(snap)[ownerRef(snap.tree, "Scroll box line one")] ?? ""), /#scroll-box$/, `a scrollable box keeps its ref and the start of its text:\n${snap.tree}`);
-    assert.ok(!snap.tree.includes("This page watches itself"), "free-standing body prose stays out of the interactive read");
-  });
-});
+test(
+  "interactive snapshots keep the label of a clickable or scrollable element whatever its children are",
+  { skip: !SHELL && "no chromium binary found", timeout: 60_000 },
+  async () => {
+    await withPage(async ({ mainWorldEvaluate }) => {
+      const fakeSession = { evaluate: (expression: string, opts?: unknown) => mainWorldEvaluate(expression, opts) };
+      const snap = await bskSnapshot(fakeSession, { interactive: true });
+      const owners = {
+        "Nested pointer card": "#nested-pointer-card",
+        "Invoice 42 Due Friday": "#invoice-card",
+        "Open menu": "#open-menu",
+        "Span tile": "#span-tile",
+        Settings: "#settings-tile",
+        "Option alpha": "#option-alpha",
+        "Option beta": "#option-beta",
+      };
+      for (const [label, css] of Object.entries(owners)) {
+        assert.match(
+          String(cssOf(snap)[ownerRef(snap.tree, label)] ?? ""),
+          new RegExp(`${css}$`),
+          `${label} is carried by the ref of ${css}:\n${snap.tree}`,
+        );
+      }
+      for (const label of ["Card tile", "Icon tile", "SVG tile"]) {
+        assert.match(
+          String(cssOf(snap)[ownerRef(snap.tree, label)] ?? ""),
+          /#pointer-generics$/,
+          `${label} is clicked through its pointer container:\n${snap.tree}`,
+        );
+      }
+      const longLine = snap.tree.split("\n").find((line) => line.includes("Long card start"));
+      assert.ok(longLine, `a long clickable card keeps the start of its label:\n${snap.tree}`);
+      assert.match(String(cssOf(snap)[ownerRef(snap.tree, "Long card start")] ?? ""), /#long-card$/);
+      assert.ok(!snap.tree.includes("LONG_CARD_TAIL"), `a long label is capped, not copied whole:\n${longLine}`);
+      assert.match(
+        String(cssOf(snap)[ownerRef(snap.tree, "Scroll box line one")] ?? ""),
+        /#scroll-box$/,
+        `a scrollable box keeps its ref and the start of its text:\n${snap.tree}`,
+      );
+      assert.ok(
+        !snap.tree.includes("This page watches itself"),
+        "free-standing body prose stays out of the interactive read",
+      );
+    });
+  },
+);
 
-test("a pointer container keeps one ref however deep its children nest", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
-  await withPage(async ({ mainWorldEvaluate }) => {
-    const fakeSession = { evaluate: (expression: string, opts?: unknown) => mainWorldEvaluate(expression, opts) };
-    for (const interactive of [false, true]) {
-      const snap = await bskSnapshot(fakeSession, { interactive });
-      const counts = await refsInside(mainWorldEvaluate, snap, ["pointer-section", "js-card", "link-card", "nested-pointer-card", "span-tile", "pointer-generics"]);
-      assert.deepEqual(counts, { "pointer-section": 1, "js-card": 1, "link-card": 1, "nested-pointer-card": 1, "span-tile": 1, "pointer-generics": 2 }, `interactive=${interactive}:\n${snap.tree}`);
-      assert.match(snap.tree, /"Pro plan new\$20\/mo"/, "inline price text is not split by per-span refs");
-    }
-  });
-});
+test(
+  "a pointer container keeps one ref however deep its children nest",
+  { skip: !SHELL && "no chromium binary found", timeout: 60_000 },
+  async () => {
+    await withPage(async ({ mainWorldEvaluate }) => {
+      const fakeSession = { evaluate: (expression: string, opts?: unknown) => mainWorldEvaluate(expression, opts) };
+      for (const interactive of [false, true]) {
+        const snap = await bskSnapshot(fakeSession, { interactive });
+        const counts = await refsInside(mainWorldEvaluate, snap, [
+          "pointer-section",
+          "js-card",
+          "link-card",
+          "nested-pointer-card",
+          "span-tile",
+          "pointer-generics",
+        ]);
+        assert.deepEqual(
+          counts,
+          {
+            "pointer-section": 1,
+            "js-card": 1,
+            "link-card": 1,
+            "nested-pointer-card": 1,
+            "span-tile": 1,
+            "pointer-generics": 2,
+          },
+          `interactive=${interactive}:\n${snap.tree}`,
+        );
+        assert.match(snap.tree, /"Pro plan new\$20\/mo"/, "inline price text is not split by per-span refs");
+      }
+    });
+  },
+);

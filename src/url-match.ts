@@ -3,15 +3,15 @@
 // predicates written for Playwright match the same URLs here. OmOWright has no baseURL option, so
 // globs resolve the way Playwright resolves them without one.
 
-const escapedChars = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
+const escapedChars: ReadonlySet<string> = new Set(["$", "^", "+", ".", "*", "(", ")", "|", "\\", "?", "{", "}", "[", "]"]);
 
-function globToRegexPattern(glob) {
+function globToRegexPattern(glob: string) {
   const tokens = ["^"];
   let inGroup = false;
   for (let i = 0; i < glob.length; ++i) {
-    const c = glob[i];
+    const c = glob.charAt(i);
     if (c === "\\" && i + 1 < glob.length) {
-      const char = glob[++i];
+      const char = glob.charAt(++i);
       tokens.push(escapedChars.has(char) ? "\\" + char : char);
       continue;
     }
@@ -65,10 +65,10 @@ function globToRegexPattern(glob) {
   return tokens.join("");
 }
 
-function resolveGlob(match) {
+function resolveGlob(match: string) {
   if (match.startsWith("*")) return match;
-  const tokenMap = new Map();
-  function mapToken(original, replacement) {
+  const tokenMap = new Map<string, string>();
+  function mapToken(original: string, replacement: string) {
     if (original.length === 0) return "";
     tokenMap.set(replacement, original);
     return replacement;
@@ -108,7 +108,7 @@ function resolveGlob(match) {
   return resolved;
 }
 
-function resolveURL(givenURL) {
+function resolveURL(givenURL: string): { resolved: string; caseInsensitivePart?: string } {
   try {
     const url = new URL(givenURL);
     // Scheme and host are case-insensitive.
@@ -118,7 +118,7 @@ function resolveURL(givenURL) {
   }
 }
 
-function parseURL(url) {
+function parseURL(url: string) {
   try {
     return new URL(url);
   } catch {
@@ -126,7 +126,7 @@ function parseURL(url) {
   }
 }
 
-function isRegExp(value) {
+function isRegExp(value: unknown): value is RegExp {
   return value instanceof RegExp || Object.prototype.toString.call(value) === "[object RegExp]";
 }
 
@@ -134,7 +134,10 @@ function isRegExp(value) {
  * Playwright's URL match: a glob string, a RegExp, or a predicate receiving a URL object.
  * An empty or missing match accepts every URL; an invalid glob throws.
  */
-export async function urlMatches(urlString, match) {
+/** A glob string, a RegExp, or a predicate over the parsed URL. */
+export type UrlMatch = string | RegExp | ((url: URL) => unknown);
+
+export async function urlMatches(urlString: string, match?: UrlMatch): Promise<boolean> {
   if (match === undefined || match === "") return true;
   if (typeof match === "string") match = new RegExp(globToRegexPattern(resolveGlob(match)));
   if (isRegExp(match)) {

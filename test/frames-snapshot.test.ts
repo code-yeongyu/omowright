@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createAgentTabs } from "../src/index.js";
-import { reconcileFrames, snapshotWithFrames } from "../src/frames-snapshot.js";
+import { createAgentTabs } from "../src/index.ts";
+import { reconcileFrames, snapshotWithFrames } from "../src/frames-snapshot.ts";
 import {
   SHELL,
   childFrameOf,
@@ -10,7 +10,8 @@ import {
   startFixtureServers,
   waitForChildContent,
   waitUntil,
-} from "./fixtures/oopif-harness.mjs";
+} from "./fixtures/oopif-harness.ts";
+import { field } from "./fixtures/read-field.ts";
 
 const live = { skip: !SHELL && "no chromium binary found", timeout: 60_000 };
 
@@ -23,16 +24,16 @@ test("navigation drops the previous document's iframe before resolving roles", l
     const { page } = await createAgentTabs(connection).create("about:blank");
     const url = fixtures.urlFor("oopif-parent.html").replace("localhost", "127.0.0.1");
     await page.goto(url, { waitUntil: "load" });
-    await Promise.all(page.frames().map(frame => page.frameManager.ensureInjected(frame.frameId)));
+    await Promise.all(page.frames().map((frame) => page.frameManager.ensureInjected(frame.frameId)));
     assert.equal(await page.getByRole("button", { name: "Inside", exact: true }).count(), 1);
-    const previous = page.frames().find(frame => frame.url() === fixtures.childUrl);
+    const previous = page.frames().find((frame) => frame.url() === fixtures.childUrl);
     assert.ok(previous);
 
     await page.goto(`${url}?second`, { waitUntil: "load" });
-    await Promise.all(page.frames().map(frame => page.frameManager.ensureInjected(frame.frameId)));
+    await Promise.all(page.frames().map((frame) => page.frameManager.ensureInjected(frame.frameId)));
     assert.equal(await page.getByRole("button", { name: "Inside", exact: true }).count(), 1);
     assert.equal(page.frames().length, 2);
-    assert.ok(!page.frames().some(frame => frame.frameId === previous.frameId));
+    assert.ok(!page.frames().some((frame) => frame.frameId === previous.frameId));
   } finally {
     await launched?.cleanup();
     await fixtures.close();
@@ -86,13 +87,13 @@ test("open shadow roots are pierced, closed shadow roots stay opaque", live, asy
     assert.ok(!snapshot.tree.includes("Closed"), snapshot.tree);
     assert.equal(childFrameOf(page), null);
 
-    const shadowRef = Object.entries(snapshot.refs).find(([, meta]) => meta.name === "Shadow")?.[0];
+    const shadowRef = Object.entries(snapshot.refs).find(([, meta]) => field(meta, "name") === "Shadow")?.[0];
     assert.ok(shadowRef, JSON.stringify(snapshot.refs));
     await page.locator(shadowRef).click();
-    const clicked = await waitUntil(
-      () => page.evaluate(() => document.body.getAttribute("data-shadow-clicked")),
-      { label: "body[data-shadow-clicked]", timeoutMs: 10_000 },
-    );
+    const clicked = await waitUntil(() => page.evaluate(() => document.body.getAttribute("data-shadow-clicked")), {
+      label: "body[data-shadow-clicked]",
+      timeoutMs: 10_000,
+    });
     assert.equal(clicked, "1");
   } finally {
     await launched?.cleanup();

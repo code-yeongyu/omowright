@@ -1,4 +1,20 @@
 import { isDeepStrictEqual } from "node:util";
+import type { BrowserConnection, ConnectOptions } from "./connection.ts";
+import type { DialogPolicy } from "./dialog-policy.ts";
+import { readProperty } from "./read-property.ts";
+
+type Unsubscribe = () => void;
+
+interface SharedEntry {
+  options: Readonly<ConnectOptions>;
+  refs: number;
+  ready: Promise<BrowserConnection>;
+}
+
+export interface SharedConnectionHooks {
+  open: (options: Readonly<ConnectOptions>) => Promise<BrowserConnection>;
+  timeoutMs?: number | undefined;
+}
 
 // One CDP connection per browser per process (#68). Chrome asks the user to
 // allow remote debugging once per WebSocket connection to their own profile,
@@ -7,19 +23,19 @@ import { isDeepStrictEqual } from "node:util";
 // browser GUID, so a restarted or different browser never gets a cached
 // connection. Each caller gets a lease whose close() is a release; the last
 // release disconnects, because an open socket keeps the process alive.
-const shared = new Map();
+const shared = new Map<string, SharedEntry>();
 
-function withinTimeout(pending, timeoutMs, message) {
-  let timer;
+function withinTimeout<T>(pending: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     pending,
-    new Promise((_, reject) => {
+    new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(message)), timeoutMs);
     }),
   ]).finally(() => clearTimeout(timer));
 }
 
-function release(key, entry) {
+function release(key: string, entry: SharedEntry): Promise<void> {
   entry.refs -= 1;
   if (entry.refs > 0) return Promise.resolve();
   if (shared.get(key) === entry) shared.delete(key);
@@ -29,13 +45,15 @@ function release(key, entry) {
   );
 }
 
-function bindTo(target, value) {
+function bindTo(target: object, value: unknown): unknown {
   return typeof value === "function" ? value.bind(target) : value;
 }
 
 // Thrown when a holder tries to change a setting every other holder of the
 // connection shares. Opening with that setting gives the holder its own.
 export class SharedConnectionError extends Error {
+  declare code: string;
+
   constructor() {
     super("this browser connection is shared; pass dialogPolicy to connect()/connectNamed() so this holder gets its own connection");
     this.name = "SharedConnectionError";
@@ -44,10 +62,10 @@ export class SharedConnectionError extends Error {
 }
 
 // Members the lease itself provides; a handle can't replace them.
-const RESERVED = new Set(["cdp", "close", "setDialogPolicy"]);
+const RESERVED: ReadonlySet<PropertyKey> = new Set(["cdp", "close", "setDialogPolicy"]);
 
-function refuse(what) {
-  return (_target, property) => {
+function refuse(what: string) {
+  return (_target: object, property: PropertyKey): never => {
     throw new TypeError(`cannot change ${String(property)} on ${what} through a handle: every holder of this connection uses it`);
   };
 }
@@ -64,29 +82,29 @@ function refuse(what) {
 //   lease.cdp.close() releases only this lease.
 // - After close() the lease refuses every use, so a stale handle can never
 //   reopen a connection nobody owns.
-function lease(key, entry, connection) {
-  let closed;
-  const overlay = Object.create(null);
-  const subscriptions = new Set();
-  const transportSubscriptions = new Set();
-  const unsubscribeAll = (set) => {
+function lease(key: string, entry: SharedEntry, connection: BrowserConnection): BrowserConnection {
+  let closed: Promise<void> | undefined;
+  const overlay: Record<PropertyKey, unknown> = Object.create(null);
+  const subscriptions = new Set<Unsubscribe>();
+  const transportSubscriptions = new Set<Unsubscribe>();
+  const unsubscribeAll = (set: Set<Unsubscribe>) => {
     for (const unsubscribe of [...set]) unsubscribe();
   };
   // Symbols and `then` stay readable, so inspecting or resolving a closed
   // handle doesn't throw; every named member does.
-  const ensureOpen = (property) => {
+  const ensureOpen = (property: PropertyKey) => {
     if (closed && typeof property === "string" && property !== "then") {
       throw new Error("this browser connection handle was closed");
     }
   };
-  const close = () => {
+  const close = (): Promise<void> | undefined => {
     if (!closed) {
       unsubscribeAll(subscriptions);
       closed = release(key, entry);
     }
     return closed;
   };
-  const setDialogPolicy = (policy) => {
+  const setDialogPolicy = (policy: DialogPolicy) => {
     ensureOpen("setDialogPolicy");
     if (entry.refs > 1) throw new SharedConnectionError();
     if (shared.get(key) === entry) shared.delete(key);
@@ -96,7 +114,9 @@ function lease(key, entry, connection) {
   // unsubscribes keeps nothing, and close() or clearListeners() never runs a
   // spent unsubscribe that would remove the same function registered since by
   // another holder (#82).
-  const tracked = (subscribe, ...sets) => (...args) => {
+  const tracked =
+    <A extends unknown[]>(subscribe: (...args: A) => Unsubscribe, ...sets: Set<Unsubscribe>[]) =>
+    (...args: A) => {
     const remove = subscribe(...args);
     let removed = false;
     const unsubscribe = () => {
@@ -108,22 +128,25 @@ function lease(key, entry, connection) {
     for (const set of sets) set.add(unsubscribe);
     return unsubscribe;
   };
-  const readOnly = (what, get) => ({
+  const readOnly = <T extends object>(what: string, get: NonNullable<ProxyHandler<T>["get"]>): ProxyHandler<T> => ({
     get,
     set: refuse(what),
     defineProperty: refuse(what),
     deleteProperty: refuse(what),
   });
   const client = connection.cdp;
+  // `new Proxy` over a missing transportEvents threw this TypeError in the JS original too.
+  const sharedTransportEvents = client.transportEvents;
+  if (sharedTransportEvents === undefined) throw new TypeError("Cannot create proxy with a non-object as target or handler");
   // Transport events reach every holder: through a handle, clearListeners
   // removes only that handle's listeners and emit is refused. The emitter keys
   // listeners by function, so each registration gets a function of its own:
   // two holders adding the same function never share one entry that either
   // could remove (#140).
-  const transportEvents = new Proxy(client.transportEvents, readOnly("the shared transport events", (target, property) => {
+  const transportEvents = new Proxy(sharedTransportEvents, readOnly("the shared transport events", (target, property) => {
     ensureOpen(property);
     if (property === "on") {
-      const on = (name, listener) => target.on(name, (event) => listener(event));
+      const on = (name: string, listener: (event?: unknown) => unknown) => target.on(name, (event?: unknown) => listener(event));
       return tracked(on, subscriptions, transportSubscriptions);
     }
     if (property === "clearListeners") return () => unsubscribeAll(transportSubscriptions);
@@ -189,7 +212,7 @@ function lease(key, entry, connection) {
 // a class instance (an authorizer keeping its token in a private field), a
 // symbol or non-enumerable key, an accessor or a cycle makes them unshareable.
 // Functions compare by identity, which is exact.
-function isPlainData(value, path = new Set()) {
+function isPlainData(value: unknown, path = new Set<object>()): boolean {
   if (typeof value === "function" || value === null || typeof value !== "object") return true;
   if (path.has(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -203,7 +226,8 @@ function isPlainData(value, path = new Set()) {
       if (isArray && key === "length") continue;
       if (typeof key === "symbol") return false;
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor.enumerable || !("value" in descriptor)) return false;
+      // readProperty throws the TypeError the JS original hit on a missing descriptor.
+      if (!readProperty(descriptor, "enumerable") || descriptor === undefined || !("value" in descriptor)) return false;
       if (!isPlainData(descriptor.value, path)) return false;
     }
     return true;
@@ -217,13 +241,15 @@ function isPlainData(value, path = new Set()) {
 // is opened with and compared against this copy, so a caller mutating its
 // options object after attaching changes neither the live connection nor which
 // later attaches share it, and a handle can't change the policy in place (#81).
-function frozenCopy(value) {
+// The declared signature states what the copy preserves: the same shape, read-only.
+function frozenCopy<T>(value: T): Readonly<T>;
+function frozenCopy(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
-  const copy = Array.isArray(value)
+  const copy: object = Array.isArray(value)
     ? new Array(value.length)
     : Object.create(Object.getPrototypeOf(value));
   for (const key of Object.keys(value)) {
-    Object.defineProperty(copy, key, { value: frozenCopy(value[key]), enumerable: true });
+    Object.defineProperty(copy, key, { value: frozenCopy(readProperty(value, key)), enumerable: true });
   }
   return Object.freeze(copy);
 }
@@ -233,14 +259,14 @@ function frozenCopy(value) {
 // can change the live policy in place through handle.cdp.dialogPolicy (#81).
 // The snapshot itself stays the sharing key, so an attach that names no policy
 // still differs from one that asks for { accept: true }.
-function openingOptions(snapshot) {
+function openingOptions(snapshot: Readonly<ConnectOptions>): Readonly<ConnectOptions> {
   if (snapshot?.dialogPolicy != null || snapshot?.client?.dialogPolicy != null) return snapshot;
   return Object.freeze({ ...snapshot, dialogPolicy: Object.freeze({ accept: true }) });
 }
 
 // An authorizer is a credential: two callers never share one connection
 // through it, even with the same authorizer object (#79 review).
-export function canShareConnection(options) {
+export function canShareConnection(options: ConnectOptions | undefined) {
   return options?.client?.authorizer === undefined && isPlainData(options);
 }
 
@@ -249,10 +275,10 @@ export function canShareConnection(options) {
 // connection's (dialogPolicy included) gets a connection of its own rather
 // than someone else's storage root or dialog policy.
 export async function acquireSharedConnection(
-  webSocketDebuggerUrl,
-  options,
-  { open, timeoutMs },
-) {
+  webSocketDebuggerUrl: string,
+  options: ConnectOptions,
+  { open, timeoutMs }: SharedConnectionHooks,
+): Promise<BrowserConnection> {
   if (!canShareConnection(options)) return open(options);
   const snapshot = frozenCopy(options);
   let entry = shared.get(webSocketDebuggerUrl);

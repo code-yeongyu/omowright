@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 import { mkdtempSync, existsSync, globSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectPipe, createAgentTabs } from "../src/index.js";
-import { DEVICE_PRESETS, emulate } from "../src/emulate.js";
-import { removeTreeSync } from "./fixtures/remove-tree.mjs";
+import { connectPipe, createAgentTabs } from "../src/index.ts";
+import { DEVICE_PRESETS, emulate } from "../src/emulate.ts";
+import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      process.env.HOME ?? "",
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
   if (candidates.length > 0) return candidates.sort().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -19,16 +22,25 @@ function findHeadlessShell() {
 
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
 
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  assert.ok(binary, "live test ran without a Chromium binary");
+  return binary;
+}
+
 // FakeCdp pattern from events.test.mjs
+type FakeListener = (params: unknown, meta: unknown) => void;
+type FakeCall = { method: string; params?: Record<string, unknown>; sessionId?: string; options?: unknown };
+
 class FakeEmitter {
-  #listeners = new Map();
-  on(method, listener) {
+  #listeners = new Map<string, Set<FakeListener>>();
+  on(method: string, listener: FakeListener) {
     const set = this.#listeners.get(method) ?? new Set();
     set.add(listener);
     this.#listeners.set(method, set);
     return () => set.delete(listener);
   }
-  emit(method, params, meta = {}) {
+  emit(method: string, params: unknown, meta = {}) {
     for (const listener of [...(this.#listeners.get(method) ?? [])]) {
       listener(params, meta);
     }
@@ -36,17 +48,25 @@ class FakeEmitter {
 }
 
 class FakeCdp {
+  declare calls: FakeCall[];
+  declare events: FakeEmitter;
   constructor() {
     this.calls = [];
     this.events = new FakeEmitter();
   }
-  async send(method, params, sessionId, options) {
+  async send(method: string, params?: Record<string, unknown>, sessionId?: string, options?: unknown) {
     this.calls.push({ method, params, sessionId, options });
     return {};
   }
-  on(method, listener) {
+  on(method: string, listener: FakeListener) {
     return this.events.on(method, listener);
   }
+}
+
+// The fake page reports a fixed original UA whatever the page function; the overload is EmulatePage's evaluate contract.
+function evaluateOriginalUserAgent<T>(pageFunction: () => T): Promise<T>;
+async function evaluateOriginalUserAgent(): Promise<unknown> {
+  return "OrigUA";
 }
 
 // Unit tests with fake page
@@ -55,7 +75,7 @@ test("DEVICE_PRESETS has required keys", () => {
   assert(DEVICE_PRESETS["pixel-7"], "pixel-7 preset missing");
   assert(DEVICE_PRESETS["ipad-air"], "ipad-air preset missing");
   assert(DEVICE_PRESETS["desktop-1440"], "desktop-1440 preset missing");
-  
+
   const ip14 = DEVICE_PRESETS["iphone-14"];
   assert.equal(ip14.width, 390);
   assert.equal(ip14.height, 844);
@@ -97,16 +117,16 @@ test("emulate(page, 'iphone-14') sends correct CDP calls", async () => {
   const page = {
     cdp,
     resolveSessionId: async () => "s1",
-    evaluate: async () => "OrigUA",
+    evaluate: evaluateOriginalUserAgent,
     refreshViewportSize: async () => {},
   };
 
   const preset = await emulate(page, "iphone-14");
-  
-  assert.equal(preset.width, 390);
-  assert.equal(preset.height, 844);
-  
-  const metrics = cdp.calls.find(c => c.method === "Emulation.setDeviceMetricsOverride");
+
+  assert.equal(preset?.width, 390);
+  assert.equal(preset?.height, 844);
+
+  const metrics = cdp.calls.find((c) => c.method === "Emulation.setDeviceMetricsOverride");
   assert(metrics, "setDeviceMetricsOverride not called");
   assert.deepEqual(metrics.params, {
     width: 390,
@@ -118,15 +138,15 @@ test("emulate(page, 'iphone-14') sends correct CDP calls", async () => {
   });
   assert.equal(metrics.sessionId, "s1");
 
-  const touch = cdp.calls.find(c => c.method === "Emulation.setTouchEmulationEnabled");
+  const touch = cdp.calls.find((c) => c.method === "Emulation.setTouchEmulationEnabled");
   assert(touch, "setTouchEmulationEnabled not called");
   assert.deepEqual(touch.params, { enabled: true, maxTouchPoints: 5 });
   assert.equal(touch.sessionId, "s1");
 
-  const ua = cdp.calls.find(c => c.method === "Emulation.setUserAgentOverride");
+  const ua = cdp.calls.find((c) => c.method === "Emulation.setUserAgentOverride");
   assert(ua, "setUserAgentOverride not called");
-  assert(ua.params.userAgent.includes("iPhone"));
-  assert.equal(ua.params.platform, "iPhone");
+  assert(String(ua.params?.userAgent).includes("iPhone"));
+  assert.equal(ua.params?.platform, "iPhone");
   assert.equal(ua.sessionId, "s1");
 });
 
@@ -135,7 +155,7 @@ test("emulate(page, null) restores original UA", async () => {
   const page = {
     cdp,
     resolveSessionId: async () => "s1",
-    evaluate: async () => "OrigUA",
+    evaluate: evaluateOriginalUserAgent,
     refreshViewportSize: async () => {},
   };
 
@@ -146,18 +166,18 @@ test("emulate(page, null) restores original UA", async () => {
   // Now restore
   await emulate(page, null);
 
-  const clearMetrics = cdp.calls.find(c => c.method === "Emulation.clearDeviceMetricsOverride");
+  const clearMetrics = cdp.calls.find((c) => c.method === "Emulation.clearDeviceMetricsOverride");
   assert(clearMetrics, "clearDeviceMetricsOverride not called");
   assert.equal(clearMetrics.sessionId, "s1");
 
-  const restoreTouchDisabled = cdp.calls.find(c => c.method === "Emulation.setTouchEmulationEnabled");
+  const restoreTouchDisabled = cdp.calls.find((c) => c.method === "Emulation.setTouchEmulationEnabled");
   assert(restoreTouchDisabled, "setTouchEmulationEnabled not called on restore");
   assert.deepEqual(restoreTouchDisabled.params, { enabled: false });
   assert.equal(restoreTouchDisabled.sessionId, "s1");
 
-  const restoreUA = cdp.calls.find(c => c.method === "Emulation.setUserAgentOverride");
+  const restoreUA = cdp.calls.find((c) => c.method === "Emulation.setUserAgentOverride");
   assert(restoreUA, "setUserAgentOverride not called on restore");
-  assert.equal(restoreUA.params.userAgent, "OrigUA");
+  assert.equal(restoreUA.params?.userAgent, "OrigUA");
   assert.equal(restoreUA.sessionId, "s1");
 });
 
@@ -166,85 +186,85 @@ test("emulate() throws on unknown preset", async () => {
   const page = {
     cdp,
     resolveSessionId: async () => "s1",
-    evaluate: async () => "OrigUA",
+    evaluate: evaluateOriginalUserAgent,
     refreshViewportSize: async () => {},
   };
 
-  await assert.rejects(
-    emulate(page, "unknown-device"),
-    /unknown device preset: unknown-device/
-  );
+  await assert.rejects(emulate(page, "unknown-device"), /unknown device preset: unknown-device/);
 });
 
 // Integration tests with real headless shell
-test("emulate(page, 'iphone-14') live test", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
+test(
+  "emulate(page, 'iphone-14') live test",
+  { skip: !SHELL && "no chromium binary found", timeout: 60_000 },
+  async () => {
+    let connection;
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-emulate-test-"));
+    try {
+      connection = await connectPipe({
+        browserPath: requireBinary(SHELL),
+        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
 
-  let connection;
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-emulate-test-"));
-  try {
-    connection = await connectPipe({
-      browserPath: SHELL,
-      browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-      storageRoot: ud,
-    });
-    
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    
-    // Emulate iPhone-14
-    const preset = await emulate(page, "iphone-14");
-    
-    // Verify preset was returned
-    assert.equal(preset.width, 390, "preset should be iphone-14");
-    
-    // Check UA and touch points (UA should change regardless of navigation)
-    const result = await page.evaluate(() => [
-      navigator.userAgent,
-      navigator.maxTouchPoints,
-    ]);
-    
-    assert(result[0].includes("iPhone"), `UA should contain "iPhone", got: ${result[0]}`);
-    assert.equal(result[1], 5, "maxTouchPoints should be 5");
-    
-    await page.close();
-  } finally {
-    if (connection) await connection.close();
-    removeTreeSync(ud);
-  }
-});
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
 
-test("emulate(page, null) live restore test", { skip: !SHELL && "no chromium binary found", timeout: 60_000 }, async () => {
+      // Emulate iPhone-14
+      const preset = await emulate(page, "iphone-14");
 
-  let connection;
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-emulate-restore-test-"));
-  try {
-    connection = await connectPipe({
-      browserPath: SHELL,
-      browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-      storageRoot: ud,
-    });
-    
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    
-    // First check the original UA
-    const origUA = await page.evaluate(() => navigator.userAgent);
-    
-    // Emulate iPhone-14
-    await emulate(page, "iphone-14");
-    
-    // Check that UA changed to iPhone
-    const iphoneUA = await page.evaluate(() => navigator.userAgent);
-    assert(iphoneUA.includes("iPhone"), `UA should contain "iPhone" after emulation`);
-    
-    // Restore
-    await emulate(page, null);
-    
-    // Check that UA is back to original
-    const restoredUA = await page.evaluate(() => navigator.userAgent);
-    assert.equal(restoredUA, origUA, "UA should be restored to original");
-    
-    await page.close();
-  } finally {
-    if (connection) await connection.close();
-    removeTreeSync(ud);
-  }
-});
+      // Verify preset was returned
+      assert.equal(preset?.width, 390, "preset should be iphone-14");
+
+      // Check UA and touch points (UA should change regardless of navigation)
+      const result = await page.evaluate((): [string, number] => [navigator.userAgent, navigator.maxTouchPoints]);
+
+      assert(result[0].includes("iPhone"), `UA should contain "iPhone", got: ${result[0]}`);
+      assert.equal(result[1], 5, "maxTouchPoints should be 5");
+
+      await page.close();
+    } finally {
+      if (connection) await connection.close();
+      removeTreeSync(ud);
+    }
+  },
+);
+
+test(
+  "emulate(page, null) live restore test",
+  { skip: !SHELL && "no chromium binary found", timeout: 60_000 },
+  async () => {
+    let connection;
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-emulate-restore-test-"));
+    try {
+      connection = await connectPipe({
+        browserPath: requireBinary(SHELL),
+        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
+
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+
+      // First check the original UA
+      const origUA = await page.evaluate(() => navigator.userAgent);
+
+      // Emulate iPhone-14
+      await emulate(page, "iphone-14");
+
+      // Check that UA changed to iPhone
+      const iphoneUA = await page.evaluate(() => navigator.userAgent);
+      assert(iphoneUA.includes("iPhone"), `UA should contain "iPhone" after emulation`);
+
+      // Restore
+      await emulate(page, null);
+
+      // Check that UA is back to original
+      const restoredUA = await page.evaluate(() => navigator.userAgent);
+      assert.equal(restoredUA, origUA, "UA should be restored to original");
+
+      await page.close();
+    } finally {
+      if (connection) await connection.close();
+      removeTreeSync(ud);
+    }
+  },
+);

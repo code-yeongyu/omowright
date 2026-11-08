@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { compactSnapshot } from "./llm.ts";
+import type { SnapshotResult } from "./llm.ts";
 import { waitForCaptcha } from "./captcha-wait.ts";
 import type { CaptchaWaitOptions } from "./captcha-wait.ts";
 
@@ -19,7 +20,7 @@ export interface CaptchaBounds extends CaptchaPoint {
 export type CaptchaOcr = (png: Buffer) => unknown;
 
 export interface CaptchaPage {
-  snapshot(): Promise<unknown>;
+  snapshot(): Promise<string | SnapshotResult>;
   mouse: {
     move(x: number, y: number, options?: { steps?: number }): Promise<unknown>;
     click(x: number, y: number): Promise<unknown>;

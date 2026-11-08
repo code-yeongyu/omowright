@@ -5,12 +5,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { connectPipe, createAgentTabs, createChromeApi, UnsupportedOperationError } from "../src/index.js";
-import { removeTreeSync } from "./fixtures/remove-tree.mjs";
+import { connectPipe, createAgentTabs, createChromeApi, UnsupportedOperationError } from "../src/index.ts";
+import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function findHeadlessShell() {
   const candidates = globSync(
-    path.join(process.env.HOME, "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell"),
+    path.join(
+      process.env.HOME ?? "",
+      "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    ),
   );
   if (candidates.length > 0) return candidates.sort().at(-1);
   const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -19,30 +22,52 @@ function findHeadlessShell() {
 }
 
 const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+// Live tests are skipped without a binary; inside them the path is required.
+function requireBinary(binary: string | null | undefined): string {
+  assert.ok(binary, "live test ran without a Chromium binary");
+  return binary;
+}
 const CHROME_EPOCH_OFFSET_MS = 11_644_473_600_000;
-const msToChromeTime = ms => BigInt(Math.floor((ms + CHROME_EPOCH_OFFSET_MS) * 1000));
+const msToChromeTime = (ms: number) => BigInt(Math.floor((ms + CHROME_EPOCH_OFFSET_MS) * 1000));
 
 function makeProfileFixture() {
   const root = mkdtempSync(path.join(tmpdir(), "omowright-profile-"));
   mkdirSync(path.join(root, "Default"), { recursive: true });
 
-  writeFileSync(path.join(root, "Default", "Bookmarks"), JSON.stringify({
-    checksum: "fixture",
-    roots: {
-      bookmark_bar: {
-        id: "1", name: "Bookmarks bar", type: "folder",
-        children: [
-          { id: "10", name: "Example", type: "url", url: "https://example.com/", date_added: "13300000000000000" },
-          { id: "11", name: "Docs", type: "folder", children: [
-            { id: "12", name: "MDN", type: "url", url: "https://developer.mozilla.org/", date_added: "13400000000000000" },
-          ], date_added: "13350000000000000" },
-        ],
+  writeFileSync(
+    path.join(root, "Default", "Bookmarks"),
+    JSON.stringify({
+      checksum: "fixture",
+      roots: {
+        bookmark_bar: {
+          id: "1",
+          name: "Bookmarks bar",
+          type: "folder",
+          children: [
+            { id: "10", name: "Example", type: "url", url: "https://example.com/", date_added: "13300000000000000" },
+            {
+              id: "11",
+              name: "Docs",
+              type: "folder",
+              children: [
+                {
+                  id: "12",
+                  name: "MDN",
+                  type: "url",
+                  url: "https://developer.mozilla.org/",
+                  date_added: "13400000000000000",
+                },
+              ],
+              date_added: "13350000000000000",
+            },
+          ],
+        },
+        other: { id: "2", name: "Other bookmarks", type: "folder", children: [] },
+        synced: { id: "3", name: "Mobile bookmarks", type: "folder", children: [] },
       },
-      other: { id: "2", name: "Other bookmarks", type: "folder", children: [] },
-      synced: { id: "3", name: "Mobile bookmarks", type: "folder", children: [] },
-    },
-    version: 1,
-  }));
+      version: 1,
+    }),
+  );
 
   const historyDb = new DatabaseSync(path.join(root, "Default", "History"));
   historyDb.exec(`
@@ -68,152 +93,181 @@ function makeProfileFixture() {
   return root;
 }
 
-test("chrome.tabs and chrome.windows expose CDP target and window state", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-chrome-test-"));
-  let connection;
-  try {
-    connection = await connectPipe({
-      browserPath: SHELL,
-      browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-      storageRoot: ud,
+test(
+  "chrome.tabs and chrome.windows expose CDP target and window state",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-chrome-test-"));
+    let connection;
+    try {
+      connection = await connectPipe({
+        browserPath: requireBinary(SHELL),
+        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
+      const chrome = createChromeApi(connection);
+      const page = (await createAgentTabs(connection).create("about:blank")).page;
+      await page.goto("https://example.com");
+
+      const all = await chrome.tabs.query({});
+      assert.ok(all.length >= 1, "at least one tab");
+      const tab = all.find((item) => item.url.includes("example.com"));
+      assert.ok(tab, "example.com tab present");
+      assert.equal(tab.title, "Example Domain");
+      assert.equal(typeof tab.windowId, "number");
+
+      const filtered = await chrome.tabs.query({ url: "*://example.com/*" });
+      assert.equal(filtered.length, 1);
+      const byTitle = await chrome.tabs.query({ title: "Example" });
+      assert.equal(byTitle.length, 1);
+
+      assert.ok(tab.id !== undefined, "example.com tab has an id");
+      const got = await chrome.tabs.get(tab.id);
+      assert.equal(got.url, tab.url);
+
+      const wins = await chrome.windows.getAll({ populate: true });
+      assert.equal(wins.length, 1);
+      const firstWindow = wins[0];
+      assert.ok(firstWindow, "one window is listed");
+      assert.ok(firstWindow.tabs?.some((item) => item.url.includes("example.com")));
+      // #122 (public API contract): CDP has no window-focus state and document.hasFocus()
+      // is forced true by the focus emulation OmOWright enables on attach, so the only
+      // window here (a background agent window) must not be reported as focused.
+      assert.ok(
+        wins.every((win) => !("focused" in win)),
+        "windows carry no guessed focused flag",
+      );
+      await assert.rejects(() => chrome.windows.getLastFocused(), UnsupportedOperationError);
+      const current = await chrome.windows.getCurrent();
+      assert.equal(current?.id, firstWindow.id);
+      const single = await chrome.windows.get(firstWindow.id);
+      assert.equal(single.id, firstWindow.id);
+    } finally {
+      await connection?.close();
+      removeTreeSync(ud);
+    }
+  },
+);
+
+test(
+  "chrome.bookmarks, history, and topSites read real Chrome profile formats",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const profileRoot = makeProfileFixture();
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-chrome-prof-"));
+    let connection;
+    try {
+      connection = await connectPipe({
+        browserPath: requireBinary(SHELL),
+        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
+      const chrome = createChromeApi(connection, { profilePath: profileRoot });
+
+      const tree = await chrome.bookmarks.getTree();
+      assert.equal(tree.length, 3);
+      const bar = tree.find((node) => node.title === "Bookmarks bar");
+      assert.equal(bar?.children?.length, 2);
+
+      const hits = await chrome.bookmarks.search("mdn");
+      assert.equal(hits.length, 1);
+      assert.equal(hits[0]?.url, "https://developer.mozilla.org/");
+
+      const recent = await chrome.bookmarks.getRecent(1);
+      assert.equal(recent[0]?.title, "MDN");
+
+      const children = await chrome.bookmarks.getChildren("11");
+      assert.equal(children[0]?.title, "MDN");
+
+      const historyHits = await chrome.history.search({ text: "example" });
+      assert.equal(historyHits.length, 1);
+      assert.equal(historyHits[0]?.visitCount, 3);
+      assert.equal(historyHits[0]?.lastVisitTime, Date.parse("2026-08-20T12:00:00Z"));
+
+      const visits = await chrome.history.getVisits({ url: "https://example.com/" });
+      assert.equal(visits.length, 1);
+      assert.equal(visits[0]?.visitTime, Date.parse("2026-08-20T12:00:00Z"));
+
+      const tops = await chrome.topSites.get();
+      assert.deepEqual(
+        tops.map((site) => site.url),
+        ["https://example.com/", "https://github.com/"],
+      );
+
+      const dls = await chrome.downloads.search({});
+      assert.equal(dls.length, 1);
+      assert.equal(dls[0]?.state, "complete");
+      assert.equal(dls[0]?.url, "https://files.example.com/old-file.zip");
+    } finally {
+      await connection?.close();
+      removeTreeSync(ud);
+      removeTreeSync(profileRoot);
+    }
+  },
+);
+
+test(
+  "chrome.downloads.download saves a file through a real server",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const payload = Buffer.from([0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4]);
+    const server = createServer((req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": 'attachment; filename="server-file.bin"',
+      });
+      res.end(payload);
     });
-    const chrome = createChromeApi(connection);
-    const page = (await createAgentTabs(connection).create("about:blank")).page;
-    await page.goto("https://example.com");
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address !== null ? address.port : undefined;
 
-    const all = await chrome.tabs.query({});
-    assert.ok(all.length >= 1, "at least one tab");
-    const tab = all.find(item => item.url.includes("example.com"));
-    assert.ok(tab, "example.com tab present");
-    assert.equal(tab.title, "Example Domain");
-    assert.equal(typeof tab.windowId, "number");
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-dl-test-"));
+    const downloadDir = mkdtempSync(path.join(tmpdir(), "omowright-dl-dir-"));
+    let connection;
+    try {
+      connection = await connectPipe({
+        browserPath: requireBinary(SHELL),
+        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
+      const chrome = createChromeApi(connection, { downloadDir });
+      const result = await chrome.downloads.download({ url: `http://127.0.0.1:${port}/file` });
+      assert.equal(result.state, "complete");
+      assert.ok(result.filename.endsWith("server-file.bin"));
+      assert.deepEqual(readFileSync(result.filename), payload);
+    } finally {
+      await connection?.close();
+      server.close();
+      removeTreeSync(ud);
+      removeTreeSync(downloadDir);
+    }
+  },
+);
 
-    const filtered = await chrome.tabs.query({ url: "*://example.com/*" });
-    assert.equal(filtered.length, 1);
-    const byTitle = await chrome.tabs.query({ title: "Example" });
-    assert.equal(byTitle.length, 1);
-
-    const got = await chrome.tabs.get(tab.id);
-    assert.equal(got.url, tab.url);
-
-    const wins = await chrome.windows.getAll({ populate: true });
-    assert.equal(wins.length, 1);
-    assert.ok(wins[0].tabs.some(item => item.url.includes("example.com")));
-    // #122 (public API contract): CDP has no window-focus state and document.hasFocus()
-    // is forced true by the focus emulation OmOWright enables on attach, so the only
-    // window here (a background agent window) must not be reported as focused.
-    assert.ok(wins.every(win => !("focused" in win)), "windows carry no guessed focused flag");
-    await assert.rejects(() => chrome.windows.getLastFocused(), UnsupportedOperationError);
-    const current = await chrome.windows.getCurrent();
-    assert.equal(current.id, wins[0].id);
-    const single = await chrome.windows.get(wins[0].id);
-    assert.equal(single.id, wins[0].id);
-  } finally {
-    await connection?.close();
-    removeTreeSync(ud);
-  }
-});
-
-test("chrome.bookmarks, history, and topSites read real Chrome profile formats", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const profileRoot = makeProfileFixture();
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-chrome-prof-"));
-  let connection;
-  try {
-    connection = await connectPipe({
-      browserPath: SHELL,
-      browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-      storageRoot: ud,
-    });
-    const chrome = createChromeApi(connection, { profilePath: profileRoot });
-
-    const tree = await chrome.bookmarks.getTree();
-    assert.equal(tree.length, 3);
-    const bar = tree.find(node => node.title === "Bookmarks bar");
-    assert.equal(bar.children.length, 2);
-
-    const hits = await chrome.bookmarks.search("mdn");
-    assert.equal(hits.length, 1);
-    assert.equal(hits[0].url, "https://developer.mozilla.org/");
-
-    const recent = await chrome.bookmarks.getRecent(1);
-    assert.equal(recent[0].title, "MDN");
-
-    const children = await chrome.bookmarks.getChildren("11");
-    assert.equal(children[0].title, "MDN");
-
-    const historyHits = await chrome.history.search({ text: "example" });
-    assert.equal(historyHits.length, 1);
-    assert.equal(historyHits[0].visitCount, 3);
-    assert.equal(historyHits[0].lastVisitTime, Date.parse("2026-08-20T12:00:00Z"));
-
-    const visits = await chrome.history.getVisits({ url: "https://example.com/" });
-    assert.equal(visits.length, 1);
-    assert.equal(visits[0].visitTime, Date.parse("2026-08-20T12:00:00Z"));
-
-    const tops = await chrome.topSites.get();
-    assert.deepEqual(tops.map(site => site.url), ["https://example.com/", "https://github.com/"]);
-
-    const dls = await chrome.downloads.search({});
-    assert.equal(dls.length, 1);
-    assert.equal(dls[0].state, "complete");
-    assert.equal(dls[0].url, "https://files.example.com/old-file.zip");
-  } finally {
-    await connection?.close();
-    removeTreeSync(ud);
-    removeTreeSync(profileRoot);
-  }
-});
-
-test("chrome.downloads.download saves a file through a real server", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const payload = Buffer.from([0xde, 0xad, 0xbe, 0xef, 1, 2, 3, 4]);
-  const server = createServer((req, res) => {
-    res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
-      "Content-Disposition": 'attachment; filename="server-file.bin"',
-    });
-    res.end(payload);
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const port = server.address().port;
-
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-dl-test-"));
-  const downloadDir = mkdtempSync(path.join(tmpdir(), "omowright-dl-dir-"));
-  let connection;
-  try {
-    connection = await connectPipe({
-      browserPath: SHELL,
-      browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-      storageRoot: ud,
-    });
-    const chrome = createChromeApi(connection, { downloadDir });
-    const result = await chrome.downloads.download({ url: `http://127.0.0.1:${port}/file` });
-    assert.equal(result.state, "complete");
-    assert.ok(result.filename.endsWith("server-file.bin"));
-    assert.deepEqual(readFileSync(result.filename), payload);
-  } finally {
-    await connection?.close();
-    server.close();
-    removeTreeSync(ud);
-    removeTreeSync(downloadDir);
-  }
-});
-
-test("extension-bridge-only chrome methods throw UnsupportedOperationError", { skip: !SHELL && "no chromium binary found", timeout: 60000 }, async () => {
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-chrome-unsup-"));
-  let connection;
-  try {
-    connection = await connectPipe({
-      browserPath: SHELL,
-      browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-      storageRoot: ud,
-    });
-    const chrome = createChromeApi(connection);
-    await assert.rejects(() => chrome.bookmarks.create({ title: "x", url: "https://x.com" }), UnsupportedOperationError);
-    await assert.rejects(() => chrome.history.addUrl({ url: "https://x.com" }), UnsupportedOperationError);
-    await assert.rejects(() => chrome.downloads.cancel(1), UnsupportedOperationError);
-    await assert.rejects(() => chrome.bookmarks.getTree(), UnsupportedOperationError);
-  } finally {
-    await connection?.close();
-    removeTreeSync(ud);
-  }
-});
+test(
+  "extension-bridge-only chrome methods throw UnsupportedOperationError",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-chrome-unsup-"));
+    let connection;
+    try {
+      connection = await connectPipe({
+        browserPath: requireBinary(SHELL),
+        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
+      const chrome = createChromeApi(connection);
+      await assert.rejects(
+        () => chrome.bookmarks.create({ title: "x", url: "https://x.com" }),
+        UnsupportedOperationError,
+      );
+      await assert.rejects(() => chrome.history.addUrl({ url: "https://x.com" }), UnsupportedOperationError);
+      await assert.rejects(() => chrome.downloads.cancel(1), UnsupportedOperationError);
+      await assert.rejects(() => chrome.bookmarks.getTree(), UnsupportedOperationError);
+    } finally {
+      await connection?.close();
+      removeTreeSync(ud);
+    }
+  },
+);

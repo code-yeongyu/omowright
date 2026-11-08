@@ -3,11 +3,13 @@
 // it quits cleanly, so nothing here sends SIGKILL before a quit request and a
 // bounded grace window (omo#12067). On POSIX the request is SIGTERM; on Windows
 // it is the CDP Browser.close the caller sends first (see terminateChild).
+import type { ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { isPidAlive } from "./instance-lock.js";
-import { ownProcessStartTime, processStartTime } from "./process-start-time.js";
+import { isPidAlive } from "./instance-lock.ts";
+import { ownProcessStartTime, processStartTime } from "./process-start-time.ts";
+import { readProperty } from "./read-property.ts";
 
 export const TERM_GRACE_MS = 5_000;
 const PID_FILE_NAME = "omowright-browser.pid";
@@ -19,10 +21,10 @@ const REAP_POLL_MS = 50;
 // groups to escape, and `detached` there would open a console window.
 export const browserSpawnDetached = process.platform !== "win32";
 
-export function profileDirFromArgs(browserArgs) {
-  for (let index = 0; index < browserArgs.length; index += 1) {
-    const argument = browserArgs[index];
-    if (argument === "--user-data-dir" && browserArgs[index + 1]) return path.resolve(browserArgs[index + 1]);
+export function profileDirFromArgs(browserArgs: readonly string[]): string | null {
+  for (const [index, argument] of browserArgs.entries()) {
+    const next = browserArgs[index + 1];
+    if (argument === "--user-data-dir" && next) return path.resolve(next);
     if (argument.startsWith("--user-data-dir=")) return path.resolve(argument.slice("--user-data-dir=".length));
   }
   return null;
@@ -34,19 +36,19 @@ export function profileDirFromArgs(browserArgs) {
 // runs only when one was sent.
 const signalsCanAskToQuit = process.platform !== "win32";
 
-export async function terminateChild(child, { quitRequested = false } = {}) {
+export async function terminateChild(child: ChildProcess, { quitRequested = false }: { quitRequested?: boolean } = {}) {
   // No pid means the spawn itself failed (e.g. ENOENT): there is no process to
   // end. Neither runtime emits "exit" for such a child; node at least sets a
   // negative exitCode, but bun leaves it null, so the wait below would hang
   // forever (#154).
   if (child.pid === undefined) return;
   if (child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise((resolve) => child.once("exit", resolve));
+  const exited = new Promise<unknown>((resolve) => child.once("exit", resolve));
   if (signalsCanAskToQuit) {
     try { child.kill("SIGTERM"); } catch {}
   }
   if (signalsCanAskToQuit || quitRequested) {
-    let timer;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const graceOver = new Promise((resolve) => { timer = setTimeout(resolve, TERM_GRACE_MS); });
     await Promise.race([exited, graceOver]);
     clearTimeout(timer);
@@ -57,14 +59,14 @@ export async function terminateChild(child, { quitRequested = false } = {}) {
   }
 }
 
-function pidFilePath(profileDir) {
+function pidFilePath(profileDir: string) {
   return path.join(profileDir, PID_FILE_NAME);
 }
 
 // Records the browser and the caller that owns it. The profile dir is created
 // first: the pidfile is written right after spawn, before Chrome has made its
 // --user-data-dir (Chrome itself is happy with a dir that already exists).
-export async function writeBrowserPidFile(profileDir, pid) {
+export async function writeBrowserPidFile(profileDir: string | null | undefined, pid: number | undefined) {
   if (!profileDir || !pid) return;
   const [start, ownerStart] = await Promise.all([processStartTime(pid), ownProcessStartTime()]);
   mkdirSync(profileDir, { recursive: true });
@@ -72,11 +74,11 @@ export async function writeBrowserPidFile(profileDir, pid) {
   writeFileSync(pidFilePath(profileDir), `${JSON.stringify(record)}\n`, { mode: 0o600 });
 }
 
-export function removeBrowserPidFile(profileDir, pid) {
+export function removeBrowserPidFile(profileDir: string | null | undefined, pid: number) {
   if (!profileDir) return;
   try {
-    const recorded = JSON.parse(readFileSync(pidFilePath(profileDir), "utf8"));
-    if (recorded.pid !== pid) return;
+    const recorded: unknown = JSON.parse(readFileSync(pidFilePath(profileDir), "utf8"));
+    if (readProperty(recorded, "pid") !== pid) return;
   } catch {
     return;
   }
@@ -86,8 +88,8 @@ export function removeBrowserPidFile(profileDir, pid) {
 // Same process as when recorded: alive, and (when a start time was recorded and
 // can be read now) the same start time, so a recycled pid does not count.
 // Returns null when the answer cannot be determined.
-async function sameProcessAlive(pid, start) {
-  if (!Number.isInteger(pid) || pid <= 0) return null;
+async function sameProcessAlive(pid: unknown, start: unknown) {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
   if (!isPidAlive(pid)) return false;
   if (start === null || start === undefined) return null;
   const now = await processStartTime(pid);
@@ -100,22 +102,31 @@ async function sameProcessAlive(pid, start) {
 // profile. Every doubt fails toward keeping the browser: it is reaped only when
 // it is provably the recorded process AND its recorded caller is provably gone,
 // so a live client's browser on the same profile is never touched.
-export async function reapOrphanedBrowser(profileDir) {
+export async function reapOrphanedBrowser(profileDir: string | null | undefined) {
   if (!profileDir) return;
-  let recorded;
+  let recorded: unknown;
   try {
     recorded = JSON.parse(readFileSync(pidFilePath(profileDir), "utf8"));
   } catch {
     return;
   }
-  const { pid, start, owner } = recorded;
-  const browserAlive = Number.isInteger(pid) && pid > 0 ? await sameProcessAlive(pid, start) : false;
+  const pid = readProperty(recorded, "pid");
+  const start = readProperty(recorded, "start");
+  const owner = readProperty(recorded, "owner");
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
+    rmSync(pidFilePath(profileDir), { force: true });
+    return;
+  }
+  const browserAlive = await sameProcessAlive(pid, start);
   if (browserAlive === false) {
     rmSync(pidFilePath(profileDir), { force: true });
     return;
   }
   if (browserAlive === null || pid === process.pid) return;
-  const ownerAlive = await sameProcessAlive(owner?.pid, owner?.start);
+  const ownerAlive =
+    owner === null || owner === undefined
+      ? await sameProcessAlive(undefined, undefined)
+      : await sameProcessAlive(readProperty(owner, "pid"), readProperty(owner, "start"));
   if (ownerAlive !== false) return;
   try { process.kill(pid, "SIGTERM"); } catch {}
   const deadline = Date.now() + TERM_GRACE_MS;

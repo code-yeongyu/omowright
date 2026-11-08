@@ -4,13 +4,13 @@
 // one copy of each byte. Re-copying the pending bytes on every chunk made a
 // large reply quadratic in its size (#237).
 export class NulFrameReader {
-  #parts = [];
+  #parts: Buffer[] = [];
 
   // Returns the frames that chunk completes, decoded as UTF-8, empty ones included.
-  push(chunk) {
-    const frames = [];
+  push(chunk: Buffer): string[] {
+    const frames: string[] = [];
     let start = 0;
-    let end;
+    let end: number;
     while ((end = chunk.indexOf(0, start)) !== -1) {
       const tail = chunk.subarray(start, end);
       let frame = tail;

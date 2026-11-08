@@ -3,20 +3,24 @@ import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
 import { Socket } from "node:net";
 
-const input = typeof Bun === "undefined"
-  ? new Socket({ fd: 3, readable: true, writable: false })
-  : createReadStream(null, { fd: 3 });
-const output = createWriteStream(null, { fd: 4 });
-const write = message => output.write(JSON.stringify(message) + "\0");
+const input =
+  typeof Bun === "undefined" ? new Socket({ fd: 3, readable: true, writable: false }) : createReadStream("", { fd: 3 });
+const output = createWriteStream("", { fd: 4 });
+const write = (message: object) => output.write(JSON.stringify(message) + "\0");
 const held = new Map();
 let buffer = Buffer.alloc(0);
 process.on("SIGTERM", () => process.exit(0));
 
-input.on("data", chunk => {
+input.on("data", (chunk: Buffer) => {
   buffer = Buffer.concat([buffer, chunk]);
   let index;
   while ((index = buffer.indexOf(0)) !== -1) {
-    const message = JSON.parse(buffer.subarray(0, index).toString("utf8"));
+    const message: {
+      id?: unknown;
+      method?: string;
+      params: { targetId?: string; sessionId?: string; method?: string; bytes: number };
+      sessionId?: string;
+    } = JSON.parse(buffer.subarray(0, index).toString("utf8"));
     buffer = buffer.subarray(index + 1);
     const { id, method, params, sessionId } = message;
     switch (method) {

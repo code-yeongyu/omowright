@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { startDaemonWithCli, windowsDaemonTaskName } from "../src/bsk/daemon-info.js";
-import { windowsSystemTool } from "../src/owner-only.js";
+import { startDaemonWithCli, windowsDaemonTaskName } from "../src/bsk/daemon-info.ts";
+import { windowsSystemTool } from "../src/owner-only.ts";
 
 // Platform contract: when bsk cannot detach its daemon from the caller's Job Object, the start
 // must still succeed through a scheduled task that opens no console window, whatever the home path holds.
@@ -27,27 +27,38 @@ writeFileSync(marker + ".tmp", args.join(" "));
 renameSync(marker + ".tmp", marker);
 `;
 
-let dir;
-let bskBin;
-const registered = new Set();
+let dir = "";
+let bskBin = "";
+const registered = new Set<string>();
 
-function powershell(command) {
-  return execFileSync(windowsSystemTool("WindowsPowerShell\\v1.0\\powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8" }).trim();
+function powershell(command: string) {
+  return execFileSync(
+    windowsSystemTool("WindowsPowerShell\\v1.0\\powershell.exe"),
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { encoding: "utf8" },
+  ).trim();
 }
 
-function unregister(tasks) {
+function unregister(tasks: string[]) {
   if (tasks.length === 0) return;
-  powershell(`${tasks.map((task) => `Unregister-ScheduledTask -TaskName '${task}' -Confirm:$false -ErrorAction SilentlyContinue`).join("; ")}; exit 0`);
+  powershell(
+    `${tasks.map((task) => `Unregister-ScheduledTask -TaskName '${task}' -Confirm:$false -ErrorAction SilentlyContinue`).join("; ")}; exit 0`,
+  );
 }
 
-async function waitForMarker(marker, timeoutMs) {
+async function waitForMarker(marker: string, timeoutMs: number) {
   if (existsSync(marker)) return;
   const watcher = watch(path.dirname(marker));
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await new Promise((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error(`the scheduled task wrote no marker at ${marker} within ${timeoutMs / 1000} s`)), timeoutMs);
-      watcher.on("change", () => { if (existsSync(marker)) resolve(); });
+    await new Promise<void>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`the scheduled task wrote no marker at ${marker} within ${timeoutMs / 1000} s`)),
+        timeoutMs,
+      );
+      watcher.on("change", () => {
+        if (existsSync(marker)) resolve();
+      });
       watcher.on("error", reject);
       if (existsSync(marker)) resolve();
     });
@@ -81,9 +92,14 @@ for (const name of ["Tom&Jerry (x) ^ ;", "100% %PATH% home", "O'Brien", "O\u2019
     registered.add(task);
     try {
       await startDaemonWithCli({ home, bskBin });
-      const [execute, args] = powershell(`$a = (Get-ScheduledTask -TaskName '${task}').Actions[0]; $a.Execute + '|' + $a.Arguments`).split("|");
+      const [execute = "", args = ""] = powershell(
+        `$a = (Get-ScheduledTask -TaskName '${task}').Actions[0]; $a.Execute + '|' + $a.Arguments`,
+      ).split("|");
       assert.match(execute, /\\conhost\.exe$/i);
-      assert.match(args, /^--headless "[A-Z]:\\[^"]*\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/);
+      assert.match(
+        args,
+        /^--headless "[A-Z]:\\[^"]*\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe" -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/,
+      );
       const marker = path.join(home, "started.txt");
       await waitForMarker(marker, 15_000);
       assert.equal(readFileSync(marker, "utf8"), "daemon start --foreground");
