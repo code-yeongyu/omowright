@@ -125,9 +125,10 @@ function buildBin(): void {
 }
 
 /**
- * Split, not a single file: the Windows lock backend imports `bun:ffi`, and a bundle
- * hoists that import to the entry, where Node cannot resolve it. The chunk loads only
- * on Windows under Bun, which is the branch that asks for it.
+ * Split, so the Windows lock backend stays in a chunk that loads only on Windows under
+ * Bun, the branch that asks for it. The backend imports `bun:ffi` dynamically on first
+ * use, so a single-file bundle (what consumers build) loads under Node as well;
+ * `test/bundle-runtime-imports.test.ts` pins that.
  */
 function buildJs(): void {
   run(["bun", "build", JS_ENTRY, "--target=node", "--splitting", `--outdir=${STAGE}`], "bun build");

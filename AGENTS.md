@@ -11,7 +11,7 @@
 ## Build and publish
 
 - `bun run build` writes `dist/` and swaps it in only when every step passed: the bundle plus its lazy chunks, `page-bundle.js` (read at runtime beside the module), `bin/omowright-cloak.js` and the declarations. `package.json` `exports` and `bin` point at `dist/`, and `prepack` runs the build, so a tarball packed without it ships nothing importable.
-- The bundle is split because the Windows lock backend imports `bun:ffi`; a single-file bundle hoists that to the entry and Node cannot resolve it, so the chunk must stay lazy.
+- Never import a `bun:*` module statically: a single-file bundle hoists it to the entry and Node cannot resolve it, and consumers (oh-my-openagent's browser skill) build exactly that bundle. The Windows lock backend imports `bun:ffi` on its first lock attempt and opens ntdll once; `test/bundle-runtime-imports.test.ts` counts static `bun:` imports on a built single-file bundle. The published bundle is still split so the Windows backend stays in a lazy chunk.
 - Declarations come from `typescript-5` (`node_modules/typescript-5/lib/tsc.js`) via `tsconfig.build.json`. TypeScript 7 stays the type gate; it cannot emit them here (TS4094 on the anonymous class `createOmOPageClass` returns).
 
 ## Test authoring gate
