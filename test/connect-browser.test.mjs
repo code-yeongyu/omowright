@@ -78,13 +78,15 @@ test("allow and prefer shape the order, and an all-failed run throws with every 
 // crossCheck keeps going after the primary: every allowed engine that attaches comes back as a
 // separate handle for comparison, attached lists all of them, and an engine that fails keeps
 // its reason. The primary stays the first in priority order.
-test("crossCheck attaches the remaining allowed engines and keeps every failure's reason", async () => {
-  const { engine, handle, attempts, attached, crossCheck } = await connectBrowser({
+test("crossCheck attaches the remaining allowed engines, keeps every failure's reason, and closeAll closes them all", async () => {
+  const bsk = bskWithBrowser();
+  const result = await connectBrowser({
     crossCheck: true,
     allow: ["aside", "ego", "bsk"],
     aside: { asideCommand: [process.execPath, FAKE_ASIDE] },
-    bsk: { client: bskWithBrowser() },
+    bsk: { client: bsk },
   });
+  const { engine, handle, attempts, attached, crossCheck } = result;
   try {
     assert.equal(engine, "aside");
     assert.ok(handle instanceof AsideSession);
@@ -96,6 +98,8 @@ test("crossCheck attaches the remaining allowed engines and keeps every failure'
     assert.match(attempts[1].reason, /ego-browser nodejs/);
     assert.equal(attempts[3].reason, "not allowed by the caller");
   } finally {
-    await handle.close();
+    await result.closeAll();
   }
+  assert.ok(bsk.calls.some((call) => call.method === "session.stop" && call.params.session_id === "s1"));
+  await assert.rejects(handle.run("return 1"), (error) => error.code === "repl_closed");
 });

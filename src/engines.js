@@ -56,7 +56,7 @@ const ENGINES = {
   },
   cloak: async (options) => {
     const handle = await connectCloakProfile(options);
-    return { handle, verified: `CDP listed ${await targetCount(handle)} targets over the browser pipe` };
+    return { handle, verified: `CDP listed ${await targetCount(handle)} targets in the CloakBrowser profile` };
   },
 };
 
@@ -102,7 +102,12 @@ export async function connectBrowser({ prefer, allow = ENGINE_ORDER, crossCheck 
     }
   }
   if (!primary) throw new NoBrowserEngineError(attempts);
+  const opened = [primary, ...extra];
   return {
+    // Closes the primary and every crossCheck handle: a BrowserSkill session stops, the rest close.
+    closeAll: async () => {
+      await Promise.all(opened.map(({ handle }) => (typeof handle.stop === "function" ? handle.stop() : handle.close()).catch(() => {})));
+    },
     engine: primary.engine,
     handle: primary.handle,
     attempts,
