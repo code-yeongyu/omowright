@@ -131,12 +131,16 @@ test("nothing reachable reports every engine it tried, in rank order", async () 
 });
 
 test("the rank-0 probe reports the installation state before it reports the rank", async () => {
-  const missing = await BROWSER_ENGINE_ADAPTERS.aside.probe({ exists: () => false, envPath: "" });
+  // The macOS layout, pinned: ASIDE_LINK is a POSIX suffix, so a runner whose own platform is win32 would otherwise
+  // look for it in a Windows layout and never find it.
+  const darwin = { platform: "darwin", home: "/h" };
+  const missing = await BROWSER_ENGINE_ADAPTERS.aside.probe({ ...darwin, exists: () => false, envPath: "" });
   assert.equal(missing.available, false);
   assert.equal(missing.state, "absent");
   assert.match(missing.reason, /aside install: absent/);
 
   const signedOut = await BROWSER_ENGINE_ADAPTERS.aside.probe({
+    ...darwin,
     envPath: "",
     exists: (candidate) => candidate.endsWith(ASIDE_LINK),
     runProcess: async () => ({ code: 0, signal: null, timedOut: false, stdout: "not signed in\n[error | 9ms]", stderr: "" }),
@@ -145,6 +149,7 @@ test("the rank-0 probe reports the installation state before it reports the rank
   assert.equal(signedOut.needsSignIn, true);
 
   const usable = await BROWSER_ENGINE_ADAPTERS.aside.probe({
+    ...darwin,
     envPath: "",
     exists: (candidate) => candidate.endsWith(ASIDE_LINK),
     runProcess: async () => ({ code: 0, signal: null, timedOut: false, stdout: "Example Domain\n[ok | 2317ms]", stderr: "" }),
