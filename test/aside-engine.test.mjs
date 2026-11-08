@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn as spawnChild } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AsideReplError, connectAside, findAsideBinary } from "../src/index.js";
@@ -120,6 +121,58 @@ test("a CLI with no usable REPL protocol fails with a typed error naming its ver
     assert.match(error.message, /1\.26\.916\.1741/);
     return true;
   });
+});
+
+// JSON-RPC protocol contract: `aside mcp` may send requests of its own, and its id space is its own,
+// so a server `ping` can carry the id of the pending call. Only a response settles a call; a ping
+// gets an empty result and any other server request gets method-not-found.
+test("aside mcp server requests are answered and never settle the pending call", async () => {
+  const aside = await connectAside({ asideCommand, env: cliEnv({ FAKE_ASIDE_CLI: "1.26.1107.24", FAKE_ASIDE_MCP_SERVER_REQUESTS: "1" }) });
+  try {
+    assert.equal(await aside.run("return 3"), 3);
+    assert.equal(await aside.run("return 4"), 4);
+  } finally {
+    await aside.close();
+  }
+});
+
+// close() must not leave an `aside mcp` running, even one that ignores SIGTERM after a call timed out.
+test("close() after a call timeout ends an aside mcp that ignores SIGTERM", { timeout: 15_000 }, async () => {
+  const children = [];
+  const spawn = (command, args, options) => {
+    const child = spawnChild(command, args, options);
+    if (args.at(-1) === "mcp") children.push(child);
+    return child;
+  };
+  const aside = await connectAside({ asideCommand, env: cliEnv({ FAKE_ASIDE_CLI: "1.26.1107.24", FAKE_ASIDE_STUBBORN: "1" }), callTimeoutMs: 300, spawn });
+  const [child] = children;
+  try {
+    await assert.rejects(aside.run("await new Promise(() => {});\nreturn 1;"), (error) => error instanceof AsideReplError && error.code === "repl_timeout");
+    await aside.close();
+    assert.throws(() => process.kill(child.pid, 0), { code: "ESRCH" });
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  }
+});
+
+// The `aside repl --help` probe has its own short budget, so a CLI whose help never answers costs a
+// few seconds, not the whole start budget twice. On a probe timeout the transport is `aside mcp` when
+// `aside mcp --help` lists a repl tool, else the line protocol.
+test("a hung help probe falls back within its own budget, to mcp only when aside mcp lists a repl tool", { timeout: 15_000 }, async () => {
+  const started = Date.now();
+  const [mcp, line] = await Promise.all([
+    connectAside({ asideCommand, env: cliEnv({ FAKE_ASIDE_CLI: "1.26.1107.24", FAKE_ASIDE_HELP_HANG: "1" }), startTimeoutMs: 30_000 }),
+    connectAside({ asideCommand, env: cliEnv({ FAKE_ASIDE_HELP_HANG: "1" }), startTimeoutMs: 30_000 }),
+  ]);
+  try {
+    assert.ok(Date.now() - started < 12_000);
+    assert.equal(await mcp.run("globalThis.omowKept = 5;\nreturn 1;"), 1);
+    assert.equal(await mcp.run("return globalThis.omowKept"), 5);
+    assert.equal(await line.run("return 6"), 6);
+    assert.equal(line.sessionDir, "~/.aside/u/0/sessions/fake");
+  } finally {
+    await Promise.all([mcp.close(), line.close()]);
+  }
 });
 
 test("connectAside names the missing CLI instead of failing to spawn", async () => {

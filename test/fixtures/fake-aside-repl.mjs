@@ -7,6 +7,10 @@
 //   server on stdio whose `repl` tool runs code in one REPL session for the life of the process.
 // Globals persist for the life of the process in both. FAKE_ASIDE_MCP_TOOLS=none drops the `repl`
 // tool, and FAKE_ASIDE_SILENT makes a line-protocol `aside repl` print nothing.
+// FAKE_ASIDE_MCP_SERVER_REQUESTS makes `aside mcp` send its own requests (a `ping` reusing the
+// call's id, then an unknown method) before answering each tools/call, and fail the call unless
+// both got their JSON-RPC answers. FAKE_ASIDE_STUBBORN makes `aside mcp` ignore SIGTERM and stdin
+// EOF. FAKE_ASIDE_HELP_HANG makes `aside repl --help` never answer; `aside mcp --help` lists tools.
 import { createInterface } from "node:readline";
 import vm from "node:vm";
 
@@ -24,6 +28,14 @@ if (args[0] === "account" && args[1] === "status") {
   const state = process.env.FAKE_ASIDE_SIGNED_OUT ? "signed out" : "signed in";
   const rows = [`* u0  someone@example.com  ${state}  profiles: Profile 0\n  provider: google\n`, "  u1  Local Account  signed out  profiles: Profile 1\n"];
   process.stdout.write(account === "u1" ? rows[1] : account === "u0" ? rows[0] : rows.join(""));
+  process.exit(0);
+}
+if (args[0] === "repl" && args.includes("--help") && process.env.FAKE_ASIDE_HELP_HANG) {
+  setInterval(() => {}, 1 << 30);
+  await new Promise(() => {});
+}
+if (args[0] === "mcp" && args.includes("--help") && SCRIPT_AT_EOF) {
+  process.stdout.write("Usage: aside mcp [options]\n\nRun an MCP server on stdio\n\nTools:\n  repl              Run browser automation JavaScript in one REPL session\n  browser_profiles  List browser profiles\n");
   process.exit(0);
 }
 if (args[0] === "repl" && args.includes("--help")) {
@@ -70,9 +82,35 @@ const evaluate = (code) => vm.runInContext(`(async () => { ${code}\n })()`, cont
 if (args[0] === "mcp") {
   const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
   const tools = process.env.FAKE_ASIDE_MCP_TOOLS === "none" ? [] : [{ name: "repl", inputSchema: { type: "object" } }];
-  for await (const line of createInterface({ input: process.stdin })) {
-    const { id, method, params } = JSON.parse(line);
-    if (id === undefined) continue;
+  const replies = new Map();
+  const ask = (id, method) => new Promise((resolve) => {
+    replies.set(id, resolve);
+    send({ id, method });
+  });
+  if (process.env.FAKE_ASIDE_STUBBORN) {
+    process.on("SIGTERM", () => {});
+    setInterval(() => {}, 1 << 30);
+  }
+  const input = createInterface({ input: process.stdin });
+  input.on("close", () => {
+    if (!process.env.FAKE_ASIDE_STUBBORN) process.exit(0);
+  });
+  input.on("line", async (line) => {
+    const message = JSON.parse(line);
+    const { id, method, params } = message;
+    if (method === undefined) {
+      replies.get(id)?.(message);
+      replies.delete(id);
+      return;
+    }
+    if (id === undefined) return;
+    if (method === "tools/call" && process.env.FAKE_ASIDE_MCP_SERVER_REQUESTS) {
+      const [ping, unknown] = await Promise.all([ask(id, "ping"), ask(`server-${id}`, "roots/list")]);
+      if (JSON.stringify(ping.result) !== "{}" || unknown.error?.code !== -32601) {
+        send({ id, result: { content: [{ type: "text", text: `Error: server requests got ${JSON.stringify([ping, unknown])}` }], isError: true } });
+        return;
+      }
+    }
     if (method === "initialize") send({ id, result: { protocolVersion: params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "aside", version: VERSION } } });
     else if (method === "tools/list") send({ id, result: { tools: [...tools, { name: "browser_profiles", inputSchema: { type: "object" } }] } });
     else if (method === "tools/call" && tools.some((tool) => tool.name === params.name)) {
@@ -85,8 +123,8 @@ if (args[0] === "mcp") {
         send({ id, result: { content: [{ type: "text", text: `Error: ${error?.message ?? error}` }, ...(text ? [{ type: "text", text }] : [])], isError: true } });
       }
     } else send({ id, error: { code: -32601, message: `unknown method ${method} ${params?.name ?? ""}`.trim() } });
-  }
-  process.exit(0);
+  });
+  await new Promise(() => {});
 }
 
 if (SCRIPT_AT_EOF) {

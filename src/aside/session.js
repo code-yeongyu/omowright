@@ -22,7 +22,8 @@ export { AsideReplError };
 const DEFAULT_START_TIMEOUT_MS = 15_000;
 // Aside stops a REPL evaluation after 120 s; wait a little longer for its own error.
 const DEFAULT_CALL_TIMEOUT_MS = 125_000;
-const VERSION_TIMEOUT_MS = 5_000;
+// Budget for each short CLI probe (`--version`, `repl --help`, `mcp --help`), apart from startTimeoutMs.
+const CLI_PROBE_TIMEOUT_MS = 5_000;
 
 export function findAsideBinary({ env = process.env, home = homedir(), exists = existsSync } = {}) {
   if (env.ASIDE_BIN) return env.ASIDE_BIN;
@@ -139,7 +140,7 @@ export async function connectAside({
     throw new AsideReplError("aside_not_found", "the Aside CLI is not installed: install it from Aside Settings > Developers, or set ASIDE_BIN");
   }
   const cli = { spawn, command, env };
-  const protocol = await replTransportFor({ ...cli, timeoutMs: startTimeoutMs });
+  const protocol = await replTransportFor({ ...cli, timeoutMs: CLI_PROBE_TIMEOUT_MS });
   const args = [...command.slice(1), protocol === "mcp" ? "mcp" : "repl"];
   if (account) args.push("--account", account);
   if (host) args.push("--host", host);
@@ -158,7 +159,7 @@ export async function connectAside({
   } catch (error) {
     child.kill();
     if (error.code !== "repl_start_timeout") throw error;
-    const version = await asideCliVersion({ ...cli, timeoutMs: VERSION_TIMEOUT_MS });
+    const version = await asideCliVersion({ ...cli, timeoutMs: CLI_PROBE_TIMEOUT_MS });
     throw new AsideReplError("repl_start_timeout", `aside ${protocol === "mcp" ? "mcp" : "repl"} (Aside CLI ${version ?? "of unknown version"}) did not answer within ${startTimeoutMs} ms`, { output: error.output });
   }
 }

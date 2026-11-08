@@ -6,7 +6,10 @@ keeps ONE CLI process per session, and `globalThis` state survives between
 calls. `aside repl --help` decides which process: CLIs up to 1.26.916 keep a
 piped `aside repl` (each call is one stdin line, 4-17 ms); CLIs whose help says
 "piped stdin runs as one script" (1.26.1107 on) keep `aside mcp` and run each
-call through its `repl` tool. Only `aside repl`, `aside mcp`'s `repl` tool,
+call through its `repl` tool. The help probe has its own 5 s budget, apart from
+the start timeout; if `aside repl --help` does not answer in time, omowright
+uses `aside mcp` when `aside mcp --help` lists a `repl` tool, else the piped
+`aside repl`. Only `aside repl`, `aside mcp`'s `repl` tool, the two `--help` probes,
 `aside --version` and `aside account status` are run, never a prompt or
 `aside exec`, which would hand the task to Aside's own model.
 

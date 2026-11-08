@@ -7,6 +7,8 @@ import { AsideReplError } from "./errors.js";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const CLOSE_TIMEOUT_MS = 5_000;
+// After SIGTERM, how long `aside mcp` gets to exit before SIGKILL.
+const KILL_GRACE_MS = 2_000;
 const STDERR_LINES = 50;
 
 export class McpTransport {
@@ -16,12 +18,15 @@ export class McpTransport {
   #pending = new Map();
   #stderr = [];
   #closed = false;
+  #exited = false;
+  #terminated = false;
   #exit;
 
   constructor(child) {
     this.#child = child;
     this.#exit = new Promise((resolve) => child.once("exit", (code, signal) => {
       this.#closed = true;
+      this.#exited = true;
       const error = new AsideReplError("repl_closed", `aside mcp exited (code ${code}, signal ${signal})`, { output: this.#stderr.splice(0) });
       for (const { reject, timer } of this.#pending.values()) {
         clearTimeout(timer);
@@ -68,19 +73,34 @@ export class McpTransport {
     return output;
   }
 
-  // Closing stdin ends `aside mcp`, which closes its REPL session on the way out.
+  // Closing stdin ends `aside mcp`, which closes its REPL session on the way out. close() returns
+  // only once the process is gone: SIGTERM if stdin EOF did not end it (or a call timeout already
+  // sent it), then SIGKILL for a CLI that ignores SIGTERM.
   async close() {
-    if (this.#closed) return;
     this.#closed = true;
-    this.#child.stdin.end();
-    let timer;
-    const timedOut = new Promise((resolve) => { timer = setTimeout(() => resolve(true), CLOSE_TIMEOUT_MS); });
-    const late = await Promise.race([this.#exit.then(() => false), timedOut]);
-    clearTimeout(timer);
-    if (late) {
-      this.#child.kill();
-      await this.#exit;
+    if (this.#exited) return;
+    if (!this.#terminated) {
+      this.#child.stdin.end();
+      if (await this.#exitsWithin(CLOSE_TIMEOUT_MS)) return;
+      this.#terminate();
     }
+    if (await this.#exitsWithin(KILL_GRACE_MS)) return;
+    this.#child.kill("SIGKILL");
+    await this.#exit;
+  }
+
+  async #exitsWithin(ms) {
+    let timer;
+    const timedOut = new Promise((resolve) => { timer = setTimeout(() => resolve(false), ms); });
+    const exited = await Promise.race([this.#exit.then(() => true), timedOut]);
+    clearTimeout(timer);
+    return exited;
+  }
+
+  #terminate() {
+    this.#terminated = true;
+    this.#child.stdin.end();
+    this.#child.kill();
   }
 
   #send(message) {
@@ -95,7 +115,7 @@ export class McpTransport {
         this.#pending.delete(id);
         // A call that never finished leaves the REPL mid-evaluation; nothing after it can be trusted.
         this.#closed = true;
-        this.#child.kill();
+        this.#terminate();
         reject(new AsideReplError(timeoutCode, `aside mcp did not answer ${method} within ${timeoutMs} ms`, { output: this.#stderr.splice(0) }));
       }, timeoutMs);
       this.#pending.set(id, { resolve, reject, timer, method });
@@ -115,12 +135,27 @@ export class McpTransport {
       } catch {
         continue;
       }
-      const pending = this.#pending.get(message?.id);
+      if (message === null || typeof message !== "object") continue;
+      // The server's own requests share no id space with ours: answer them, never settle a call.
+      if (message.method !== undefined) {
+        this.#answer(message);
+        continue;
+      }
+      if (!("result" in message) && !("error" in message)) continue;
+      const pending = this.#pending.get(message.id);
       if (!pending) continue;
       this.#pending.delete(message.id);
       clearTimeout(pending.timer);
       if (message.error) pending.reject(new AsideReplError("repl_protocol", `aside mcp refused ${pending.method}: ${message.error.message ?? JSON.stringify(message.error)}`));
       else pending.resolve(message.result);
     }
+  }
+
+  // JSON-RPC: a request with an id gets a response; `ping` gets an empty result, any other method
+  // (omowright declares no client capabilities) gets method-not-found. Notifications get nothing.
+  #answer({ id, method }) {
+    if (id === undefined || id === null || this.#closed) return;
+    if (method === "ping") this.#send({ id, result: {} });
+    else this.#send({ id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
 }
