@@ -63,15 +63,17 @@ test("the Windows lock opens ntdll on the first attempt and reuses it", { skip: 
   const report = runWithMockedFfi(
     workingNtdll,
     `
-      const first = await backend.tryAcquireWindows("first.flock");
-      report.opensAfterFirst = opens;
-      const second = await backend.tryAcquireWindows("second.flock");
-      report.opensAfterSecond = opens;
-      first.release();
-      second.release();
+      const racing = await Promise.all([
+        backend.tryAcquireWindows("racing-a.flock"),
+        backend.tryAcquireWindows("racing-b.flock"),
+      ]);
+      report.opensAfterRacingFirstCalls = opens;
+      const later = await backend.tryAcquireWindows("later.flock");
+      report.opensAfterLaterCall = opens;
+      for (const lock of [...racing, later]) lock.release();
     `,
   );
-  assert.deepEqual(report, { opensAfterImport: 0, opensAfterFirst: 1, opensAfterSecond: 1 });
+  assert.deepEqual(report, { opensAfterImport: 0, opensAfterRacingFirstCalls: 1, opensAfterLaterCall: 1 });
 });
 
 test(
