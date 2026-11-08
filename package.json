@@ -47,7 +47,7 @@
   },
   "scripts": {
     "test": "bun test",
-    "test:node": "node --test test/*.test.ts",
+    "test:node": "bun scripts/node-test.ts",
     "test:cloak-profile": "bun test test/cloak-profile.test.ts test/cloak-profile.integration.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:control": "bun scripts/typecheck-control.ts",

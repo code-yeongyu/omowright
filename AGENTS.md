@@ -2,7 +2,7 @@
 
 ## Tests
 
-- Full suite: `bun run test`. `bun run test:node` runs the same files under real Node (`node --test test/*.test.ts`, Node >= 24: three child scripts use `await using`), which is the runtime consumers import the packed package from, and CI runs both. A child script spawned by a test must name the `.ts` source it imports: Node resolves the specifier literally, so `../src/index.js` fails with ERR_MODULE_NOT_FOUND.
+- Full suite: `bun run test`. `bun run test:node` runs the same files under real Node (Node >= 24: three child scripts use `await using`), which is the runtime consumers import the packed package from, and CI runs both. It goes through `scripts/node-test.ts`, which resolves `SHELL_BIN` (environment first, then Playwright's cache) and refuses to start without one: nine live tests skip when it is unset, and a gate whose test set depends on an ambient variable cannot compare two heads. A child script spawned by a test must name the `.ts` source it imports: Node resolves the specifier literally, so `../src/index.js` fails with ERR_MODULE_NOT_FOUND.
 - Focused: `bun test test/<file>.test.ts`.
 - `test` runs the whole suite in one bun process; `test:cloak-profile` runs the two CloakBrowser profile files, which need `CLOAKBROWSER_BIN`.
 - Live tests need a Chromium headless shell: set `SHELL_BIN` (and `CLOAKBROWSER_BIN` for the event-bridge test), or install one into Playwright's cache.
