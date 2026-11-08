@@ -43,7 +43,7 @@ function portOf(server: http.Server): number {
   return address.port;
 }
 
-const SHELL = process.env.SHELL_BIN;
+const SHELL = process.env["SHELL_BIN"];
 const options = { skip: !SHELL && "set SHELL_BIN to a Chromium headless shell", timeout: 60_000 };
 
 // Public setup contracts at the browser boundary: missing adapters, wrong CDP

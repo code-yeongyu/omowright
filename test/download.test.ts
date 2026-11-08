@@ -12,7 +12,7 @@ import { connectPipe, OmOPage } from "../src/index.ts";
 test(
   "download.saveAs copies a real download into a new directory",
   {
-    skip: !process.env.SHELL_BIN && "SHELL_BIN is required",
+    skip: !process.env["SHELL_BIN"] && "SHELL_BIN is required",
     timeout: 60000,
   },
   async (t) => {
@@ -44,7 +44,7 @@ test(
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const connected = await connectPipe({
-      browserPath: process.env.SHELL_BIN,
+      browserPath: process.env["SHELL_BIN"],
       browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${path.join(root, "profile")}`],
       storageRoot: root,
     });

@@ -14,7 +14,7 @@
 import { createInterface } from "node:readline";
 import vm from "node:vm";
 
-const VERSION = process.env.FAKE_ASIDE_CLI ?? "1.26.916.1741";
+const VERSION = process.env["FAKE_ASIDE_CLI"] ?? "1.26.916.1741";
 const SCRIPT_AT_EOF = VERSION.startsWith("1.26.1107");
 const argv = process.argv.slice(2);
 const accountAt = argv.indexOf("--account");
@@ -25,7 +25,7 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 if (args[0] === "account" && args[1] === "status") {
-  const state = process.env.FAKE_ASIDE_SIGNED_OUT ? "signed out" : "signed in";
+  const state = process.env["FAKE_ASIDE_SIGNED_OUT"] ? "signed out" : "signed in";
   const rows = [
     `* u0  someone@example.com  ${state}  profiles: Profile 0\n  provider: google\n`,
     "  u1  Local Account  signed out  profiles: Profile 1\n",
@@ -33,7 +33,7 @@ if (args[0] === "account" && args[1] === "status") {
   process.stdout.write(account === "u1" ? rows[1] : account === "u0" ? rows[0] : rows.join(""));
   process.exit(0);
 }
-if (args[0] === "repl" && args.includes("--help") && process.env.FAKE_ASIDE_HELP_HANG) {
+if (args[0] === "repl" && args.includes("--help") && process.env["FAKE_ASIDE_HELP_HANG"]) {
   setInterval(() => {}, 1 << 30);
   await new Promise(() => {});
 }
@@ -85,7 +85,7 @@ const context = vm.createContext({
   openTab: async (url: string) => {
     const tab: FakeTab = { url: () => url, title: async () => `Title of ${url}` };
     tabs.push(tab);
-    context.page = tab;
+    context["page"] = tab;
     write(`✔︎ Opened a new tab and set it active: tabs[${tabs.length - 1}]\n`);
     return tab;
   },
@@ -105,20 +105,21 @@ const errorText = (error: unknown) => String(field(error, "message") ?? error);
 if (args[0] === "mcp") {
   const send = (message: Readonly<Record<string, unknown>>) =>
     process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
-  const tools = process.env.FAKE_ASIDE_MCP_TOOLS === "none" ? [] : [{ name: "repl", inputSchema: { type: "object" } }];
+  const tools =
+    process.env["FAKE_ASIDE_MCP_TOOLS"] === "none" ? [] : [{ name: "repl", inputSchema: { type: "object" } }];
   const replies = new Map<unknown, (reply: unknown) => void>();
   const ask = (id: unknown, method: string) =>
     new Promise<unknown>((resolve) => {
       replies.set(id, resolve);
       send({ id, method });
     });
-  if (process.env.FAKE_ASIDE_STUBBORN) {
+  if (process.env["FAKE_ASIDE_STUBBORN"]) {
     process.on("SIGTERM", () => {});
     setInterval(() => {}, 1 << 30);
   }
   const input = createInterface({ input: process.stdin });
   input.on("close", () => {
-    if (!process.env.FAKE_ASIDE_STUBBORN) process.exit(0);
+    if (!process.env["FAKE_ASIDE_STUBBORN"]) process.exit(0);
   });
   input.on("line", async (line) => {
     const message: unknown = JSON.parse(line);
@@ -131,7 +132,7 @@ if (args[0] === "mcp") {
       return;
     }
     if (id === undefined) return;
-    if (method === "tools/call" && process.env.FAKE_ASIDE_MCP_SERVER_REQUESTS) {
+    if (method === "tools/call" && process.env["FAKE_ASIDE_MCP_SERVER_REQUESTS"]) {
       const [ping, unknown] = await Promise.all([ask(id, "ping"), ask(`server-${String(id)}`, "roots/list")]);
       if (JSON.stringify(field(ping, "result")) !== "{}" || field(field(unknown, "error"), "code") !== -32601) {
         send({
@@ -203,7 +204,7 @@ if (SCRIPT_AT_EOF) {
     process.exit(1);
   }
 }
-if (process.env.FAKE_ASIDE_SILENT) {
+if (process.env["FAKE_ASIDE_SILENT"]) {
   process.stdin.resume();
   await new Promise(() => {});
 }

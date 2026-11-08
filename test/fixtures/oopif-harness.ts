@@ -59,7 +59,7 @@ interface WaitOptions {
 function findHeadlessShell() {
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
@@ -69,7 +69,7 @@ function findHeadlessShell() {
   return null;
 }
 
-export const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+export const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 const FIXTURE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function tcpPort(server: ReturnType<typeof createServer>) {

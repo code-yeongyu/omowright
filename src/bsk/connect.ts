@@ -82,7 +82,7 @@ export interface ConnectBrowserSkillOptions {
   timeoutMs?: number;
   bskBin?: string;
   name?: string;
-  browser?: string | null;
+  browser?: string | null | undefined;
   width?: number;
   height?: number;
   focused?: boolean;

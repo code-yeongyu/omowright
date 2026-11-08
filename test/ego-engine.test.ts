@@ -93,7 +93,7 @@ function egoOverRealBrowser(shellBin: string | null | undefined) {
 function findHeadlessShell() {
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
@@ -102,7 +102,7 @@ function findHeadlessShell() {
   return existsSync(chrome) ? chrome : null;
 }
 
-const shellBin = process.env.SHELL_BIN ?? findHeadlessShell();
+const shellBin = process.env["SHELL_BIN"] ?? findHeadlessShell();
 const live = { timeout: 60_000 };
 
 // The ego engine's public contract: connectEgo gives the full omowright Page API over Ego's

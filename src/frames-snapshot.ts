@@ -23,9 +23,9 @@ export interface FrameEntry {
   frameId: string;
   parentFrameId: string | null;
   url: string;
-  name?: string;
-  sessionId?: string;
-  isolatedContextId?: number | null;
+  name?: string | undefined;
+  sessionId?: string | undefined;
+  isolatedContextId?: number | null | undefined;
 }
 
 export interface FrameManagerView {
@@ -44,7 +44,7 @@ export interface FramesPage<S extends FramesSnapshot = FramesSnapshot> {
 }
 
 export interface FramesSnapshot {
-  refs?: Readonly<Record<string, unknown>> | null;
+  refs?: Readonly<Record<string, unknown>> | null | undefined;
 }
 
 export interface AdoptedFrame {

@@ -32,7 +32,7 @@ function portOf(server: Server) {
 }
 
 function findHeadlessShell() {
-  const home = process.env.HOME;
+  const home = process.env["HOME"];
   assert.ok(home !== undefined, "HOME is unset");
   const candidates = globSync(
     path.join(
@@ -46,7 +46,7 @@ function findHeadlessShell() {
   return undefined;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 
 const FIXTURE = `data:text/html,${encodeURIComponent(`<!DOCTYPE html>
 <html><body style="margin:0;font-family:monospace">

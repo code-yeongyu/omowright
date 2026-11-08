@@ -18,7 +18,7 @@ export async function processStartTime(pid: number): Promise<string | null> {
     // belongs to someone else. FILETIME ticks keep the value locale-free.
     // PowerShell is spawned by absolute path: a bare name resolves from the cwd
     // before PATH, which another user may be able to write.
-    const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+    const systemRoot = process.env["SystemRoot"] || process.env["windir"] || "C:\\Windows";
     try {
       const { stdout } = await execFileAsync(
         path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),

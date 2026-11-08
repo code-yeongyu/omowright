@@ -92,10 +92,15 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
+      # `prepack` builds dist/ before npm packs the tarball, and that build is bun.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
 
       # Trusted publishing (OIDC) needs npm >= 11.5.1.
       - name: Update npm

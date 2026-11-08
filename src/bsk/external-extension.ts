@@ -64,10 +64,10 @@ export type ExtensionRegistration = ExtensionEntry & {
   registered: boolean;
   alreadyPresent: boolean;
   reason?: "store_only" | "blocklisted" | "reg_failed" | "not_writable";
-  detail?: string;
+  detail?: string | undefined;
 };
 
-export type ExtensionRemoval = ExtensionEntry & { removed: boolean; detail?: string };
+export type ExtensionRemoval = ExtensionEntry & { removed: boolean; detail?: string | undefined };
 
 type ReadFile = (file: string, encoding: "utf8") => string;
 type WriteFile = (file: string, content: string) => void;

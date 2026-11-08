@@ -22,7 +22,7 @@ interface FulfillingRoute {
 function findHeadlessShell() {
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
@@ -32,7 +32,7 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 
 const PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -189,7 +189,7 @@ test(
           assert.equal(route.request(), request);
           assert.equal(request.method(), "GET");
           assert.equal(request.resourceType(), "xhr");
-          assert.equal(request.headers().accept, "*/*");
+          assert.equal(request.headers()["accept"], "*/*");
           assert.equal(request.postData(), null);
           assert.equal(request.url(), `${url}/api/x`);
           return route.fulfill({ status: 201, json: { mocked: true } });

@@ -90,7 +90,7 @@ test("attaching to a tab whose OOPIF already exists snapshots the child", live, 
     const snapshot = await snapshotWithFrames(framesPage);
     assert.ok(snapshot.tree.includes(`button "Inside" [ref=f1e1]`), snapshot.tree);
     assert.ok(snapshot.refs, "the snapshot carries refs");
-    assert.equal(snapshot.refs.f1e1?.name, "Inside");
+    assert.equal(snapshot.refs["f1e1"]?.["name"], "Inside");
     assert.equal(field(snapshot, "missingFrames"), undefined);
 
     const child = childFrameOf(page);

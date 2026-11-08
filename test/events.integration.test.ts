@@ -8,19 +8,19 @@ import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 function browserPath() {
   const pinned = path.join(
-    process.env.HOME ?? "",
+    process.env["HOME"] ?? "",
     ".cloakbrowser/chromium-145.0.7632.109.2/Chromium.app/Contents/MacOS/Chromium",
   );
   if (existsSync(pinned)) return pinned;
   const candidates = globSync(
     path.join(
-      process.env.HOME ?? "",
+      process.env["HOME"] ?? "",
       "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
     ),
   );
   return candidates.toSorted().at(-1) ?? null;
 }
-const BROWSER = process.env.CLOAKBROWSER_BIN ?? browserPath();
+const BROWSER = process.env["CLOAKBROWSER_BIN"] ?? browserPath();
 // Live tests are skipped without a binary; inside them the path is required.
 function requireBinary(binary: string | null | undefined): string {
   assert.ok(binary, "live test ran without a Chromium binary");

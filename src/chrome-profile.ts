@@ -5,6 +5,11 @@ import { readProperty } from "./read-property.ts";
 
 export type SqlValue = string | number | bigint | null | Uint8Array;
 export type SqlParam = string | number | bigint | null;
+export type SqlRow = Record<string, SqlValue>;
+
+export class ChromeProfileRowError extends TypeError {
+  readonly code = "invalid_profile_row";
+}
 
 export interface ProfileStatement {
   all(...params: SqlParam[]): unknown[];
@@ -30,9 +35,38 @@ async function loadSqlite(): Promise<DatabaseFactory> {
   return DatabaseCtor;
 }
 
-/** The one boundary cast for SQLite rows: each caller names the columns its SELECT returns. */
-export function selectRows<Row>(db: ProfileDatabase, sql: string, ...params: SqlParam[]): Row[] {
-  return db.prepare(sql).all(...params) as Row[];
+function isSqlValue(value: unknown): value is SqlValue {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "bigint" ||
+    value instanceof Uint8Array
+  );
+}
+
+function isSqlRow(value: unknown): value is SqlRow {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && Object.values(value).every(isSqlValue);
+}
+
+function parseSqlRow(value: unknown): SqlRow {
+  if (!isSqlRow(value)) throw new ChromeProfileRowError("SQLite returned an invalid profile row");
+  return value;
+}
+
+export function selectRows(db: ProfileDatabase, sql: string, ...params: SqlParam[]): SqlRow[] {
+  return db
+    .prepare(sql)
+    .all(...params)
+    .map(parseSqlRow);
+}
+
+function parseChromeTime(value: SqlValue | undefined): string | number | bigint {
+  if (value === null || value === undefined) {
+    throw new ChromeProfileRowError(`Cannot convert ${String(value)} to a BigInt`);
+  }
+  // BigInt applies the same string conversion to SQLite BLOBs; do not decode them as UTF-8.
+  return value instanceof Uint8Array ? value.toString() : value;
 }
 
 const CHROME_EPOCH_OFFSET_MS = 11_644_473_600_000;
@@ -77,25 +111,6 @@ export interface HistorySearchQuery {
 
 function isBookmarkFileNode(node: unknown): node is BookmarkFileNode {
   return Boolean(node && typeof node === "object" && "id" in node && node.id);
-}
-
-interface HistoryUrlRow {
-  id: SqlValue;
-  url: string;
-  title: string | null;
-  visit_count: SqlValue;
-  last_visit_time: number | bigint;
-}
-
-interface VisitRow {
-  id: SqlValue;
-  visit_time: number | bigint;
-  transition: SqlValue;
-}
-
-interface TopSiteRow {
-  url: string;
-  title: string | null;
 }
 
 function walkBookmarks(
@@ -231,7 +246,7 @@ export function createProfileApis(profilePath?: string) {
       const end = query.endTime != null ? msToChromeTime(query.endTime) : 99999999999999999n;
       const max = query.maxResults ?? 100;
       return await withDb("History", (db) =>
-        selectRows<HistoryUrlRow>(
+        selectRows(
           db,
           `SELECT id, url, title, visit_count, last_visit_time FROM urls
          WHERE (url LIKE ? OR title LIKE ?) AND last_visit_time BETWEEN ? AND ?
@@ -242,27 +257,27 @@ export function createProfileApis(profilePath?: string) {
           end,
           max,
         ).map((row) => ({
-          id: String(row.id),
-          url: row.url,
-          title: row.title ?? "",
-          visitCount: Number(row.visit_count),
-          lastVisitTime: chromeTimeToMs(row.last_visit_time),
+          id: String(row["id"]),
+          url: row["url"],
+          title: row["title"] ?? "",
+          visitCount: Number(row["visit_count"]),
+          lastVisitTime: chromeTimeToMs(parseChromeTime(row["last_visit_time"])),
         })),
       );
     },
     async getVisits(details: { url: string }) {
       return await withDb("History", (db) =>
-        selectRows<VisitRow>(
+        selectRows(
           db,
           `SELECT v.id, v.visit_time, v.transition FROM visits v
          JOIN urls u ON u.id = v.url WHERE u.url = ?
          ORDER BY v.visit_time DESC`,
           details.url,
         ).map((row) => ({
-          id: String(row.id),
+          id: String(row["id"]),
           url: details.url,
-          visitTime: chromeTimeToMs(row.visit_time),
-          transition: Number(row.transition),
+          visitTime: chromeTimeToMs(parseChromeTime(row["visit_time"])),
+          transition: Number(row["transition"]),
         })),
       );
     },
@@ -281,9 +296,9 @@ export function createProfileApis(profilePath?: string) {
     async get() {
       return (
         await withDb("Top Sites", (db) =>
-          selectRows<TopSiteRow>(db, `SELECT url, title, url_rank FROM top_sites ORDER BY url_rank ASC LIMIT 50`),
+          selectRows(db, `SELECT url, title, url_rank FROM top_sites ORDER BY url_rank ASC LIMIT 50`),
         )
-      ).map((row) => ({ url: row.url, title: row.title ?? "" }));
+      ).map((row) => ({ url: row["url"], title: row["title"] ?? "" }));
     },
   };
 

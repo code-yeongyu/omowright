@@ -340,11 +340,11 @@ export type CdpResult<M extends string> = M extends keyof CdpCommandResults ? Cd
 export type CdpEventPayload<E extends string> = E extends keyof CdpEventPayloads ? CdpEventPayloads[E] : unknown;
 
 export interface CdpEventMeta {
-  sessionId?: string;
+  sessionId?: string | undefined;
 }
 
 export interface CdpSendOptions {
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
   capability?: symbol;
   extensionBridge?: object;
 }
@@ -372,9 +372,9 @@ export interface CdpTargetSummary {
   type: string;
   url: string;
   title: string;
-  description?: string;
-  faviconUrl?: string;
-  parentId?: string;
+  description?: string | undefined;
+  faviconUrl?: string | undefined;
+  parentId?: string | undefined;
 }
 
 export interface CdpTransport {

@@ -27,7 +27,7 @@ export type InstallRunner = (command: string, args: string[], env: InstallEnv) =
 export interface InstallBskCliOptions {
   platform?: string;
   home?: string;
-  installDir?: string;
+  installDir?: string | undefined;
   version?: string;
   run?: InstallRunner;
 }
@@ -60,9 +60,9 @@ export function cliInstallCommand({
   platform = process.platform,
   installDir,
   version,
-}: { platform?: string; installDir?: string; version?: string } = {}): InstallCommand {
+}: { platform?: string; installDir?: string; version?: string | undefined } = {}): InstallCommand {
   const env: InstallEnv = { BSK_INSTALL_DIR: installDir };
-  if (version) env.BSK_VERSION = version;
+  if (version) env["BSK_VERSION"] = version;
   if (platform === "win32") {
     return {
       command: windowsSystemTool("WindowsPowerShell\\v1.0\\powershell.exe"),

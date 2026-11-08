@@ -14,7 +14,7 @@ type WaitFixture = Awaited<ReturnType<typeof serveWaitFixture>>;
 type UrlMatch = string | RegExp | ((url: URL) => boolean);
 
 function findHeadlessShell() {
-  const home = process.env.HOME ?? "";
+  const home = process.env["HOME"] ?? "";
   const candidates = globSync(
     path.join(
       home,
@@ -27,7 +27,7 @@ function findHeadlessShell() {
   return null;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 const LIVE = { skip: !SHELL && "no chromium binary found", timeout: 60000 };
 
 // Public API contract (#145): a waitForURL string is a Playwright glob. Expected values are taken from

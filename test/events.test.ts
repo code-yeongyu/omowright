@@ -6,7 +6,12 @@ import type { CdpEventMeta, CdpEventPayload, CdpResult, CdpSendOptions } from ".
 
 // A method signature, so typed CDP handlers can be stored beside each other (method parameters are bivariant).
 type Listener = { handle(...args: unknown[]): unknown }["handle"];
-type CdpCall = { method: string; params?: Record<string, unknown>; sessionId?: string; options?: CdpSendOptions };
+type CdpCall = {
+  method: string;
+  params?: Record<string, unknown> | undefined;
+  sessionId?: string | undefined;
+  options?: CdpSendOptions | undefined;
+};
 // The production guard against unknown event names is the contract under test, so the name reaches it untyped.
 type UntypedEventSubscriber = { on(name: unknown, listener: () => unknown): unknown };
 
@@ -94,7 +99,7 @@ test("events startup, filtering, popup classification, close and waits", async (
   ]);
   assert.equal(opened.length, 1);
   assert.equal(opened[0]?.initial, true);
-  assert.equal(cdp.calls.find((call) => call.method === "Target.setDiscoverTargets")?.params?.discover, true);
+  assert.equal(cdp.calls.find((call) => call.method === "Target.setDiscoverTargets")?.params?.["discover"], true);
   const getTargets = cdp.calls.find((call) => call.method === "Target.getTargets");
   assert.ok(getTargets);
   assert.equal(getTargets.sessionId, undefined);

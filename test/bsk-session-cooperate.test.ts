@@ -57,7 +57,7 @@ function sharedTabClient(replies: Record<string, StubReply> = {}) {
         const name = method.replace(/^tool\./, "");
         if (name === "cooperate")
           return (params: StubParams) => {
-            if (params.action !== "sync") return {};
+            if (params["action"] !== "sync") return {};
             syncs += 1;
             latest = `ctx-${syncs}`;
             return { context_id: latest, tab_id: 7, kind: "baseline" };
@@ -66,8 +66,8 @@ function sharedTabClient(replies: Record<string, StubReply> = {}) {
         if (!GATED.has(name) && name !== "observe") return target[method];
         return (params: StubParams, n: number) => {
           if (
-            (name !== "observe" || params.probe_hover) &&
-            (params.context_id === undefined || params.context_id !== latest)
+            (name !== "observe" || params["probe_hover"]) &&
+            (params["context_id"] === undefined || params["context_id"] !== latest)
           ) {
             throw new BskRpcError(
               "permission_denied",
@@ -146,7 +146,7 @@ test("a cooperate sync's context and dependencies reach every action the extensi
         ? client.calls.findLast((c) => c.method === "tool.screenshot_full_page")
         : lastCall(client);
     assert.equal(lastCall(client).method, method);
-    assert.deepEqual({ context_id: sent?.params.context_id, depends_on: sent?.params.depends_on }, bound, method);
+    assert.deepEqual({ context_id: sent?.params["context_id"], depends_on: sent?.params["depends_on"] }, bound, method);
   }
 
   // A newer sync supersedes the old context: reusing it is refused, the new one is accepted.

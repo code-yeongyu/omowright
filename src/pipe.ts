@@ -49,18 +49,18 @@ const EXIT_STDERR_DRAIN_MS = 1_000;
 
 export interface PipeCdpClientOptions {
   /** Required: the constructor throws a TypeError without it. */
-  browserPath?: string;
-  browserArgs?: readonly string[];
+  browserPath?: string | undefined;
+  browserArgs?: readonly string[] | undefined;
   /** Spawn options for the browser process; `stdio` is always owned by the client. */
-  spawnOptions?: Omit<SpawnOptions, "stdio">;
-  commandTimeoutMs?: number;
-  readinessTimeoutMs?: number;
-  logId?: string;
-  dialogPolicy?: DialogPolicy;
+  spawnOptions?: Omit<SpawnOptions, "stdio"> | undefined;
+  commandTimeoutMs?: number | undefined;
+  readinessTimeoutMs?: number | undefined;
+  logId?: string | undefined;
+  dialogPolicy?: DialogPolicy | undefined;
 }
 
 export interface ConnectPipeOptions extends PipeCdpClientOptions {
-  storageRoot?: string;
+  storageRoot?: string | undefined;
 }
 
 export interface PipeEventMeta extends CdpEventMeta {

@@ -539,7 +539,7 @@ test(
     const dir = scratchDir();
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const missing = path.join(dir, "no-such-browser");
-    const script = `import { connectPipe } from ${JSON.stringify(new URL("../src/index.js", import.meta.url).href)};
+    const script = `import { connectPipe } from ${JSON.stringify(new URL("../src/index.ts", import.meta.url).href)};
 try { await connectPipe({ browserPath: ${JSON.stringify(missing)} }); console.log(JSON.stringify({ resolved: true })); }
 catch (error) { console.log(JSON.stringify({ code: error.code, message: error.message })); }`;
     const child = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "pipe"] });

@@ -42,12 +42,12 @@ interface DialogHandle {
   dismiss(): Promise<unknown>;
 }
 interface DialogEventMeta {
-  sessionId?: string;
+  sessionId?: string | undefined;
   dialog?: DialogHandle;
 }
 
 function findHeadlessShell() {
-  const home = process.env.HOME;
+  const home = process.env["HOME"];
   assert.ok(home !== undefined, "HOME is unset");
   const candidates = globSync(
     path.join(
@@ -61,7 +61,7 @@ function findHeadlessShell() {
   return undefined;
 }
 
-const SHELL = process.env.SHELL_BIN ?? findHeadlessShell();
+const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
 
 function captureClient(options = {}) {
   const client = new PipeCdpClient({ browserPath: process.execPath, ...options });
