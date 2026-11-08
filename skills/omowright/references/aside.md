@@ -2,8 +2,11 @@
 
 Aside is the first engine `connectBrowser()` tries. It drives the user's own
 Aside browser, signed in as they are, through the Aside CLI's REPL. omowright
-keeps ONE `aside repl` process per session: each call is one stdin line
-(4-17 ms), and `globalThis` state survives between calls. Only `aside repl`,
+keeps ONE CLI process per session, and `globalThis` state survives between
+calls. `aside repl --help` decides which process: CLIs up to 1.26.916 keep a
+piped `aside repl` (each call is one stdin line, 4-17 ms); CLIs whose help says
+"piped stdin runs as one script" (1.26.1107 on) keep `aside mcp` and run each
+call through its `repl` tool. Only `aside repl`, `aside mcp`'s `repl` tool,
 `aside --version` and `aside account status` are run, never a prompt or
 `aside exec`, which would hand the task to Aside's own model.
 
@@ -40,4 +43,5 @@ approve the code in Aside). Relay that step; do not try another engine on the
 user's behalf without saying why.
 
 `repl_error` is the page code's own exception and the session stays usable.
-`repl_timeout` closes the session: connect again.
+`repl_timeout` closes the session: connect again. `repl_start_timeout` and
+`repl_unsupported_cli` name the CLI version; relay them with `aside --update`.
