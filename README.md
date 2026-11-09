@@ -25,7 +25,9 @@ Jun's argument is the whole design:
    new vocabulary to teach in the prompt.
 2. **Protect the context window.** Raw DOM and raw CDP are noise. The primary
    read is an accessibility snapshot with refs, and `compactSnapshot()` strips
-   the duplicated refs map, which is about 54% of the bytes on a real page.
+   the duplicated refs map. How much that saves depends on the page: on
+   2026-11-09 it cut 7% of the bytes on example.com, 56% on a form page and
+   64% on Hacker News.
 3. **CDP underneath, never on top.** Every method is a thin wrapper over CDP
    calls. The model writes Playwright; the library speaks the protocol.
 4. **Fall back to pixels.** When the DOM lies (canvas, custom widgets,
@@ -39,10 +41,9 @@ const browser = await connectPipe({ browserPath: "/path/to/chromium", browserArg
 const page = await browser.newTab("https://example.com");
 
 console.log(compactSnapshot(await page.snapshot()));
-// - heading "Example Domain" [level=1]
+// Live pages change, so the exact tree drifts; on 2026-11-09 it read:
 // - text: "This domain is for use in documentation examples ..."
-// - paragraph:
-//   - link "Learn more" [ref=e1]
+// - link "Learn more" [ref=e1]
 
 await page.locator("e1").click(); // refs come straight from the snapshot
 await browser.close();
@@ -57,8 +58,9 @@ browser that runs at the same time its own profile through
 `mkdtemp` directory). On Windows, Chrome otherwise falls back to a shared
 default profile, and a second launch on it exits with code 21.
 
-Re-snapshots come back as a unified diff against the previous tree, so a model
-reads what changed instead of the whole page again. To look for one thing,
+Every `page.snapshot()` returns the whole tree. Pass `{ diff: true }` to get
+only what changed since the previous snapshot instead, so a model does not
+read the whole page again. To look for one thing,
 `page.snapshot({ find: "Checkout" })` returns only the matching lines, with
 their refs and a little context around each.
 
@@ -93,7 +95,7 @@ Reproduce after `bun install` (any Chromium works for `--browser`, or set
 `OMOWRIGHT_BENCH_BROWSER`):
 
 ```bash
-node scripts/bench-snapshot-tokens.mjs --browser ~/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell --browser-arg=--no-sandbox
+bun scripts/bench-snapshot-tokens.ts --browser ~/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell --browser-arg=--no-sandbox
 ```
 
 ## Scrolling is a first-class problem
@@ -288,7 +290,7 @@ bun run test:node   # Node test runner, same files
 Live tests need a Chromium headless shell. Set `SHELL_BIN` (and
 `CLOAKBROWSER_BIN` for the event-bridge test) to its path, or install one into
 Playwright's cache. CI installs `chrome-headless-shell` with
-`@puppeteer/browsers` and runs both runners on Ubuntu. `test/hygiene.test.mjs`
+`@puppeteer/browsers` and runs both runners on Ubuntu. `test/hygiene.test.ts`
 fails the build if a tracked file contains an absolute home path, a personal
 address or a private host.
 
