@@ -21,4 +21,4 @@ One client at a time owns Ego's callbacks in a runtime: a second connect
 rejects with `ego_busy` and changes nothing, so close the first.
 `close()` releases the callbacks and leaves the user's browser running.
 Sends Ego refuses (the user took the space over, no space selected) reject at
-once with Ego's `error_code`, such as `EGO_TASK_SPACE_USER_CONTROLLED`.
+once with Ego's `error_code`, such as `EGO_TASK_SPACE_USER_IN_CONTROL`.
