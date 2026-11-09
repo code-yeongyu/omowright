@@ -40,17 +40,21 @@ What the named path does protect:
 
 - The port is bound to loopback only, never to a network interface.
 - The registry is owner-only (directory mode `0700`, record files `0600`; on
-  Windows a protected ACL). It refuses volumes without ACLs (FAT32, exFAT,
-  shares without ACLs) and is not supported on network filesystems.
+  Windows a protected ACL). On Windows it refuses volumes without ACLs (FAT32,
+  exFAT, shares without ACLs). Network filesystems are not supported.
 - A registry record stores the browser's GUID, and an attach happens only while
   the endpoint answers with that GUID. So a reused pid on a rebound port is
   relaunched, never driven.
 
 ### Attaching to the user's own browser
 
-`connect(url)` and `connectRunningBrowser()` attach to a browser the user
-started with remote debugging enabled. Chrome asks the user to allow each new
-connection. omowright never turns remote debugging on in someone's profile.
+`connect(url)` and `connectRunningBrowser()` attach to a browser that already
+has remote debugging on. When the user turned it on from
+`chrome://inspect/#remote-debugging`, Chrome asks them to allow each new
+connection. A browser started with `--remote-debugging-port` asks nothing: like
+a named instance, any local process can drive it. `connect(url)` accepts any CDP
+endpoint, so the endpoint's own protection is the only protection. omowright
+never turns remote debugging on in someone's profile.
 
 ### BrowserSkill and the MV3 bridge
 
@@ -73,7 +77,8 @@ into a page, so an endpoint should only pass paths the user chose.
 
 - CAPTCHA helpers are input and OCR aids with a human fallback, not a solver.
   omowright makes no claim about bypassing any provider.
-- The CloakBrowser binary is a separately licensed third-party build;
-  omowright pins the Python wrapper version and runs the binary it finds.
+- The CloakBrowser binary is a separately licensed third-party build. The
+  install docs pin the Python wrapper version; omowright runs the binary it
+  finds.
 - Dependencies: CI fails on known advisories in production dependencies
   (`bun audit --prod`).
