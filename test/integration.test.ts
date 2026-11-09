@@ -362,7 +362,9 @@ test(
 
 // Contract (ARIA, #285): aria-hidden is an ASCII case-insensitive token, so "TRUE" and "True" hide a subtree
 // in snapshot() and interactive mode the same as "true". Values that are not "true" ("1", "false") are the
-// spec's undefined/false state and stay visible. Fails if any page-bundle check compares case-sensitively.
+// spec's undefined/false state and stay visible. Fails if the visibility check (isVisibleUncached) compares
+// case-sensitively. The accessible-name and leaf-skip checks share the same helper but are not separately
+// observable through snapshot(): reverting only one of them leaves this output unchanged.
 test(
   "snapshot honours aria-hidden case-insensitively and keeps non-true values visible",
   { skip: !SHELL && "no chromium binary found", timeout: 60000 },
