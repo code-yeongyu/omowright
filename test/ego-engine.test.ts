@@ -148,12 +148,12 @@ test("a send Ego refuses rejects at once with Ego's error code", live, async () 
     ego.useTaskSpace(3);
     const product = field(await client.send("Browser.getVersion"), "product");
     assert.equal(typeof product === "string" && product.length > 0, true);
-    ego.refuse = "EGO_TASK_SPACE_USER_CONTROLLED";
+    ego.refuse = "EGO_TASK_SPACE_USER_IN_CONTROL";
     await assert.rejects(
       client.send("Browser.getVersion"),
       (error) =>
         error instanceof EgoCdpError &&
-        error.code === "EGO_TASK_SPACE_USER_CONTROLLED" &&
+        error.code === "EGO_TASK_SPACE_USER_IN_CONTROL" &&
         /Browser\.getVersion/.test(error.message),
     );
     // A refusal whose message carries no id fails every pending command, not just one.

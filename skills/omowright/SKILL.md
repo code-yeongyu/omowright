@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (57% smaller via compactSnapshot), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA solving (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in priority order: the user's agent browser (Aside, Ego Lite), then the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports; each engine has its own setup check (asideOnboard, bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (compactSnapshot drops the refs map), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA input and OCR helpers with a human fallback, not a solver (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in priority order: the user's agent browser (Aside, Ego Lite), then the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports; each engine has its own setup check (asideOnboard, bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
@@ -150,6 +150,8 @@ screenshot — coordinates read off an unpinned screenshot are stale.
 | First use, page API, snapshot options, locator rules                                                                       | `references/quickstart.md`; dialogs and readiness in `TOOLS.md` |
 | Driving a browser inside `eval` cells, kernel persistence, parallel lanes                                                  | `references/eval-kernel.md`                                     |
 | Tabs/windows/bookmarks/history/downloads/topSites (Chrome MV3)                                                             | `presets/chrome/SKILL.md`                                       |
+| Tab, popup and download lifecycle as push events, manager-owned background tabs (no polling)                              | `presets/agent-events/SKILL.md`                                 |
+| A user-driven CloakBrowser profile that needs MV3 Chrome writes/events through the native-messaging bridge                | `presets/cloak-bridge/SKILL.md`                                 |
 | API JSON instead of DOM scraping, wait for a request, infinite scroll, QA flight trace (jsonl/HAR), request routes         | `presets/network/SKILL.md`                                      |
 | Cross-origin iframes and shadow DOM, overlays that swallow clicks, login/OTP handoff to a human, device emulation          | `references/frames-layers-human.md`                             |
 | Reading an item from the 1Password web vault (tab-scoped session, sign-in check, secret handling)                          | `references/1password.md`                                       |
@@ -183,7 +185,7 @@ Preset and `TOOLS.md` paths are relative to the package root.
 
 ## Delegating the pixel loop
 
-CAPTCHA solving and pixel-level visual browsing are iterative (screenshot, reason,
+Working through a CAPTCHA and pixel-level visual browsing are iterative (screenshot, reason,
 act, verify). When that loop would consume your own context, delegate the blocked
 page to a `deep` subagent that loads these references. Drive it yourself when the
 flow is short or the state is already in your hands.
