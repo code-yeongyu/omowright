@@ -35,6 +35,11 @@ jobs:
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
       - run: bun install --frozen-lockfile
 
+      # Fails on any known advisory in a production dependency (the packages a consumer installs), so the
+      # next one is caught here instead of by an outside audit (#288). devDependencies are not shipped.
+      - name: Dependency audit (production)
+        run: bun audit --prod
+
       # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
