@@ -360,6 +360,46 @@ test(
   },
 );
 
+// Contract (ARIA, #285): aria-hidden is an ASCII case-insensitive token, so "TRUE" and "True" hide a subtree
+// in snapshot() and interactive mode the same as "true". Values that are not "true" ("1", "false") are the
+// spec's undefined/false state and stay visible. Fails if any page-bundle check compares case-sensitively.
+test(
+  "snapshot honours aria-hidden case-insensitively and keeps non-true values visible",
+  { skip: !SHELL && "no chromium binary found", timeout: 60000 },
+  async () => {
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-aria-hidden-"));
+    let browser;
+    try {
+      browser = await connectPipe({
+        browserPath: SHELL,
+        browserArgs: ["--headless", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
+      const page = await browser.newTab("about:blank");
+      await page.evaluate(() => {
+        document.body.innerHTML =
+          "<main><h1>Visible heading</h1>" +
+          '<div aria-hidden="true"><button>LowerHidden</button></div>' +
+          '<div aria-hidden="TRUE"><button>UpperHidden</button><p>UpperHiddenText</p></div>' +
+          '<div aria-hidden="True"><a href="#x">MixedHidden</a></div>' +
+          '<span aria-hidden="TRUE">LeafHidden</span>' +
+          '<div aria-hidden="1"><button>OneVisible</button></div>' +
+          '<div aria-hidden="false"><button>FalseVisible</button></div></main>';
+      });
+      for (const options of [{}, { interactive: true }]) {
+        const tree = compactSnapshot(await page.snapshot(options));
+        for (const hidden of ["LowerHidden", "UpperHidden", "UpperHiddenText", "MixedHidden", "LeafHidden"])
+          assert.ok(!tree.includes(hidden), `${JSON.stringify(options)} leaked ${hidden}:\n${tree}`);
+        for (const visible of ["OneVisible", "FalseVisible"])
+          assert.ok(tree.includes(visible), `${JSON.stringify(options)} dropped ${visible}:\n${tree}`);
+      }
+    } finally {
+      await browser?.close();
+      removeTreeSync(ud);
+    }
+  },
+);
+
 // The shadow-free hot path must use native matching, not call matches() on each DOM element.
 // Count calls instead of measuring elapsed time, so host load cannot make the regression pass.
 test(
