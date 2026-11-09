@@ -19,6 +19,9 @@ uv pip install --python ~/.local/share/omowright-cloak-venv/bin/python \
   'import cloakbrowser; print(cloakbrowser.binary_info()["binary_path"])'
 ```
 
+The `0.5.7` pin is deliberate: current releases (0.7.1 on 2026-11-07) ask for a
+license key on every launch, and this guide is written against 0.5.7.
+
 Do not assume the versioned Chromium directory. Resolve the binary path with
 `cloakbrowser.binary_info()` on the machine that will run the job.
 

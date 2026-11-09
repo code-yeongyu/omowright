@@ -12,7 +12,10 @@ python3 -c "import cloakbrowser, json; print(cloakbrowser.binary_info()['binary_
 ```
 
 Not installed: `uv pip install "cloakbrowser==0.5.7"` in a venv, then
-`python -c "import cloakbrowser; cloakbrowser.ensure_binary()"`.
+`python -c "import cloakbrowser; cloakbrowser.ensure_binary()"`. The pin is
+deliberate: these docs are written against 0.5.7, and current releases (0.7.1
+on 2026-11-07) ask for a license key on every launch. Moving it is a separate,
+tested change.
 
 ## Single-instance rule
 

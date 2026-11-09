@@ -46,7 +46,10 @@ await userBrowser.close();
 ```
 
 Always launch with a dedicated `--user-data-dir` (a `mkdtemp` dir) and delete it
-after `browser.close()`. Under Node, `node:sqlite` loads lazily with a
+after `browser.close()`. On Windows a second launch on Chrome's shared default
+profile exits with code 21. Also on Windows, write `browserPath` with forward
+slashes or `String.raw`: backslashes in a plain string literal are escapes
+(usually ENOENT, a SyntaxError for segments such as `\u`). Under Node, `node:sqlite` loads lazily with a
 `bun:sqlite` fallback under Bun (see Runtime above).
 
 ## Page essentials
@@ -69,7 +72,7 @@ await page.close();
 
 ```js
 const snap = await page.snapshot(); // { tree, refs } or JSON string
-const tree = compactSnapshot(snap); // raw tree, ~57% smaller
+const tree = compactSnapshot(snap); // raw tree without the refs map: 7%-64% smaller on pages measured 2026-11-09
 await page.snapshot({ interactive: true }); // controls, headings, landmarks and state feedback
 await page.snapshot({ maxDepth: 20, maxChars: 4000, selector: "main" });
 ```
