@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (compactSnapshot drops the refs map), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA input and OCR helpers with a human fallback, not a solver (reCAPTCHA, Turnstile, hCaptcha, slider, OCR), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in priority order: the user's agent browser (Aside, Ego Lite), then the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports; each engine has its own setup check (asideOnboard, bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (compactSnapshot drops the refs map), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA input helpers for reCAPTCHA, Turnstile, hCaptcha, slider and text OCR, with a human fallback (not a solver), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in priority order: the user's agent browser (Aside, Ego Lite), then the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports; each engine has its own setup check (asideOnboard, bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
@@ -166,7 +166,8 @@ Preset and `TOOLS.md` paths are relative to the package root.
   cookies. Detail in `references/stealth.md`. Cookie reuse is fine for ordinary
   sessions (Grafana, internal tools).
 - **Always `compactSnapshot()`** before sending a snapshot to a model — the refs
-  map is ~54% of bytes and resolves in-page, so dropping it is free.
+  map resolves in-page, so dropping it is free; it was 7% to 64% of the bytes
+  across pages measured on 2026-11-09.
 - **Refs die on every new snapshot.** Pass `page.locator("e1")` straight from the
   latest snapshot; never reuse a ref across snapshots, never put one in CSS.
 - **Refs stay page-level.** Child-frame refs look like `f1e3` and still go to

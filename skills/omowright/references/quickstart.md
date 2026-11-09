@@ -69,7 +69,7 @@ await page.close();
 
 ```js
 const snap = await page.snapshot(); // { tree, refs } or JSON string
-const tree = compactSnapshot(snap); // raw tree without the refs map: 7%-64% smaller, page-dependent
+const tree = compactSnapshot(snap); // raw tree without the refs map: 7%-64% smaller on pages measured 2026-11-09
 await page.snapshot({ interactive: true }); // controls, headings, landmarks and state feedback
 await page.snapshot({ maxDepth: 20, maxChars: 4000, selector: "main" });
 ```
