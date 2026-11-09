@@ -422,8 +422,13 @@
       .map((id) => doc.getElementById(id))
       .filter(Boolean);
   }
+  // aria-hidden is an ASCII case-insensitive token: "TRUE" hides like "true"; any other value is the spec's
+  // undefined state and hides nothing.
+  function hasAriaHiddenTrue(element) {
+    return element.getAttribute("aria-hidden")?.toLowerCase() === "true";
+  }
   function isHiddenForAria(element) {
-    if (element.getAttribute("aria-hidden") === "true") return true;
+    if (hasAriaHiddenTrue(element)) return true;
     try {
       const style = window.getComputedStyle(element);
       if (style.display === "none" || style.visibility === "hidden") return true;
@@ -704,7 +709,7 @@
     return result;
   }
   function isVisibleUncached(element) {
-    if (element.getAttribute("aria-hidden") === "true") return false;
+    if (hasAriaHiddenTrue(element)) return false;
     const targetVisibility = window.getComputedStyle(element).visibility;
     let hasContentsAncestor = false;
     for (
@@ -794,7 +799,7 @@
   function shouldTraverse(element, options) {
     const tag = element.tagName.toLowerCase();
     if (SKIP_TAGS.has(tag)) return false;
-    if (element.getAttribute("aria-hidden") === "true" && element.children.length === 0) return false;
+    if (hasAriaHiddenTrue(element) && element.children.length === 0) return false;
     if (!options.showHidden && !isVisible(element)) {
       if (tag === "input") {
         const type = element.type;
