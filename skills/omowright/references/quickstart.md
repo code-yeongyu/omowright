@@ -46,7 +46,9 @@ await userBrowser.close();
 ```
 
 Always launch with a dedicated `--user-data-dir` (a `mkdtemp` dir) and delete it
-after `browser.close()`. Under Node, `node:sqlite` loads lazily with a
+after `browser.close()`: without one, a second launch on Chrome's default profile
+exits with code 21. On Windows, write `browserPath` with forward slashes or
+`String.raw`; backslashes in a plain string literal are escapes (ENOENT). Under Node, `node:sqlite` loads lazily with a
 `bun:sqlite` fallback under Bun (see Runtime above).
 
 ## Page essentials

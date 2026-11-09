@@ -48,6 +48,14 @@ await page.locator("e1").click(); // refs come straight from the snapshot
 await browser.close();
 ```
 
+On Windows, write `browserPath` with forward slashes (`"C:/Program Files/..."`)
+or as `String.raw\`C:\Program Files\...\``: in a plain string literal each
+backslash starts an escape and the launch fails with ENOENT. Give every browser
+that runs at the same time its own profile through
+`browserArgs: ["--headless", \`--user-data-dir=${dir}\`]` (for example a
+`mkdtemp` directory). Without one, Chrome falls back to a shared default
+profile, and a second launch on it exits with code 21.
+
 Re-snapshots come back as a unified diff against the previous tree, so a model
 reads what changed instead of the whole page again. To look for one thing,
 `page.snapshot({ find: "Checkout" })` returns only the matching lines, with
