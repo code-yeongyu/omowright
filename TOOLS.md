@@ -52,7 +52,8 @@ running Chromium DevTools endpoint).
   look like `- link "Learn more" [ref=e1]`. Options: `maxDepth` (50),
   `maxChars`, `interactive`, `showHidden`, `selector`, `ref`.
 - `compactSnapshot(snapshot)` — returns the raw tree without the refs map
-  (refs resolve in-page; the map is ~54% of bytes on real pages). Use before
+  (refs resolve in-page; dropping the map saved 7% to 64% of the bytes across
+  pages measured on 2026-11-09). Use before
   sending snapshots to a model.
 - `page.locator(refOrCss)` — `click`, `fill`, `press`, `pressSequentially`,
   `hover`, `check`, `selectOption`, `dragTo`, `setInputFiles`, `textContent`,
@@ -218,7 +219,7 @@ running Chromium DevTools endpoint).
   `SameSite=None` dropped when not secure, name+domain deduped.
   `sanitizeCookies(cookies)` is the pure transform if you need it.
 
-Every tool below is exported from `src/index.js`, the same import as the core
+Every tool below is exported from `src/index.ts`, the same import as the core
 loop; the module files next to it are implementation detail.
 
 - `connectNamed(name, { browserPath, browserArgs, profileDir, registryRoot?,

@@ -1,17 +1,17 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Counts the o200k_base tokens a model would read for a fixed list of public
 // pages: the raw HTML, compactSnapshot(page.snapshot()) and the interactive-only
 // snapshot. Prints one markdown table row per page. Live pages change, so the
 // numbers drift between runs.
 //
-//   node scripts/bench-snapshot-tokens.mjs --browser <chromium> [--browser-arg=<arg> ...]
-//   OMOWRIGHT_BENCH_BROWSER=<chromium> node scripts/bench-snapshot-tokens.mjs
+//   bun scripts/bench-snapshot-tokens.ts --browser <chromium> [--browser-arg=<arg> ...]
+//   OMOWRIGHT_BENCH_BROWSER=<chromium> bun scripts/bench-snapshot-tokens.ts
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { countTokens } from "gpt-tokenizer/encoding/o200k_base";
-import { compactSnapshot, connectPipe } from "../src/index.js";
+import { compactSnapshot, connectPipe } from "../src/index.ts";
 
 const PAGES = [
   { url: "https://news.ycombinator.com/", shape: "link-heavy" },
@@ -21,7 +21,7 @@ const PAGES = [
   { url: "https://httpbin.org/forms/post", shape: "form" },
 ];
 
-const USAGE = `usage: node scripts/bench-snapshot-tokens.mjs --browser <chromium> [--browser-arg=<arg> ...]
+const USAGE = `usage: bun scripts/bench-snapshot-tokens.ts --browser <chromium> [--browser-arg=<arg> ...]
   --browser       Chromium, Chrome or chrome-headless-shell binary (or set OMOWRIGHT_BENCH_BROWSER)
   --browser-arg   extra browser argument, repeatable; write it as --browser-arg=--no-sandbox`;
 
