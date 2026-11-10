@@ -181,7 +181,7 @@ function runRegDefault(args: string[]): Promise<{ code: number | null; stderr: s
 
 export interface RegisterExternalExtensionOptions {
   platform?: string;
-  browser: ExtensionBrowser;
+  browser?: ExtensionBrowser;
   writeFile?: WriteFile;
   readFile?: ReadFile;
   runReg?: RunReg;
@@ -193,7 +193,8 @@ export async function registerExternalExtension({
   writeFile = writeFileSync,
   readFile = readFileSync,
   runReg = runRegDefault,
-}: RegisterExternalExtensionOptions): Promise<ExtensionRegistration> {
+}: RegisterExternalExtensionOptions = {}): Promise<ExtensionRegistration> {
+  if (browser === undefined) throw readProperty(browser, "store");
   const entry = externalExtensionEntry({ platform, browser });
   const id = BROWSERSKILL_EXTENSION_IDS[browser.store];
   const label = browser.label ?? browser.id;
@@ -251,9 +252,10 @@ export async function unregisterExternalExtension({
   runReg = runRegDefault,
 }: {
   platform?: string;
-  browser: ExtensionBrowser;
+  browser?: ExtensionBrowser;
   runReg?: RunReg;
-}): Promise<ExtensionRemoval> {
+} = {}): Promise<ExtensionRemoval> {
+  if (browser === undefined) throw readProperty(browser, "store");
   const entry = externalExtensionEntry({ platform, browser });
   if (entry.kind === "store") return { ...entry, removed: false };
   if (entry.kind === "registry") {

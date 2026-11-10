@@ -166,6 +166,7 @@ export class BrowserConnection {
   async #attachPopup(targetId: string, pending: PendingPopup) {
     const tabs = getAgentTabs(this) ?? createAgentTabs(this);
     const { page } = await tabs.adopt(targetId);
+    if (page === null) throw new TypeError(`Popup target ${targetId} is still being adopted`);
     // OmOPage does not declare popupMetadata; Object.assign sets it exactly as `=` did.
     Object.assign(page, { popupMetadata: Object.freeze(pending.metadata) });
     await page.waitForLoadState("interactive");

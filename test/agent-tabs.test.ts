@@ -144,6 +144,32 @@ test("headed creation attaches directly without stealing focus", async () => {
   );
 });
 
+// Public parity (#272): a concurrent adopt exposes the owned, unattached tab;
+// ordinary create/adopt tests only observe the completed attachment.
+test("concurrent adoption returns the owned tab view before attachment completes", async () => {
+  const c = connection();
+  const attached = Promise.withResolvers<FakePage>();
+  let attachCalls = 0;
+  withFakeAttach(c.connection, async () => {
+    attachCalls++;
+    return attached.promise;
+  });
+  const tabs = createAgentTabs(c.connection);
+  const first = tabs.adopt("owned");
+  try {
+    const concurrent = await tabs.adopt("owned");
+    assert.equal(concurrent.targetId, "owned");
+    assert.equal(concurrent.page, null);
+    assert.deepEqual(concurrent.viewport, DEFAULT_AGENT_VIEWPORT);
+    assert.equal(attachCalls, 1);
+  } finally {
+    attached.resolve(c.page);
+    await first;
+    await tabs.dispose({ closeOwned: false });
+  }
+  assert.equal((await first).page, c.page);
+});
+
 test("factory rejects close timeout conflicts and activation precedes attach", async () => {
   const c = connection();
   const tabs = createAgentTabs(c.connection, { closeTimeoutMs: 100 });

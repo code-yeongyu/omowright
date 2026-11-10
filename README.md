@@ -59,8 +59,9 @@ browser that runs at the same time its own profile through
 default profile, and a second launch on it exits with code 21.
 
 Every `page.snapshot()` returns the whole tree. Pass `{ diff: true }` to get
-only what changed since the previous snapshot instead, so a model does not
-read the whole page again. To look for one thing,
+only what changed since the previous snapshot; it falls back to the full tree
+with a `reason` when there is no usable baseline or the diff would be larger.
+To look for one thing,
 `page.snapshot({ find: "Checkout" })` returns only the matching lines, with
 their refs and a little context around each.
 

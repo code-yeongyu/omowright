@@ -58,7 +58,7 @@ function findHeadlessShell() {
 }
 
 const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
-const LIVE = { skip: !SHELL && "no chromium binary found", timeout: 60000 };
+const LIVE = { skip: !SHELL && "no chromium binary found", timeout: 90000 };
 
 // Contract (#191): deadlines are gone when their wait settles, including
 // rejection and browser teardown; successful return values alone miss leaks.
@@ -67,7 +67,9 @@ test("settled waits and connection teardown leave no timers", LIVE, async () => 
   await promisify(execFile)(
     process.execPath,
     [fileURLToPath(new URL("./fixtures/wait-timer-teardown.ts", import.meta.url))],
-    { env: { ...process.env, SHELL_BIN: SHELL }, timeout: 30000 },
+    // Measured alone: 3.0–3.2 s; observed under load: >30 s. The 60 s budget
+    // gives twice that kill point; a wedged child now costs 60 s per shard.
+    { env: { ...process.env, SHELL_BIN: SHELL }, timeout: 60000 },
   );
 });
 
