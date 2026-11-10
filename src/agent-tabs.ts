@@ -38,7 +38,7 @@ export interface AgentTab {
   readonly close: (options?: CloseAgentTabOptions) => Promise<unknown>;
 }
 
-/** An owned tab as get()/list() report it: its page is null while the tab is still being adopted. */
+/** An owned tab view: its page is null while another adopt() is still attaching it. */
 export interface AgentTabView extends Omit<AgentTab, "page"> {
   readonly page: Page | null;
 }
@@ -118,19 +118,15 @@ export class AgentTabManager {
     // Finish session/domain setup on a stable document before starting a
     // navigation that can replace the renderer or its execution contexts.
     const tab = await this.adopt(targetId, { viewport });
+    if (tab.page === null) throw new TypeError(`Target ${targetId} is still being adopted`);
     if (url !== "about:blank") await tab.page.goto(url);
-    return tab;
+    return Object.freeze({ ...tab, page: tab.page });
   }
 
-  async adopt(targetId: string, options: AdoptAgentTabOptions = {}): Promise<AgentTab> {
+  async adopt(targetId: string, options: AdoptAgentTabOptions = {}): Promise<AgentTabView> {
     if (this.#disposed) throw Error("Agent tab manager is disposed");
     const existing = this.#owned.get(targetId);
-    if (existing) {
-      // FINDING: a second adopt() while the first is still attaching found page
-      // null; the JS original returned that tab and its first page use threw.
-      if (existing.page === null) throw new TypeError(`Target ${targetId} is still being adopted`);
-      return this.#public(existing, existing.page);
-    }
+    if (existing) return this.#public(existing);
     const viewport = { ...this.viewport, ...options.viewport };
     const record: TabRecord = {
       targetId,
