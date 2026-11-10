@@ -2250,16 +2250,17 @@ async function waitForNavigationReadinessInner(
           quietSamples = 0;
           continue;
         }
-        if (network.captureTrackedRequests(page.url()).size > 0) {
+        const hasPendingRequests = network.captureTrackedRequests(page.url()).size > 0;
+        if (hasPendingRequests) {
           networkStarted ??= Date.now();
           if (Date.now() - networkStarted < NAVIGATION_NETWORK_BUDGET_MS) {
             quietSamples = 0;
             continue;
           }
         }
-        // Load and body mutations share the existing bounded network budget. A stalled
-        // fetch or a continuously changing document must not extend it indefinitely.
-        const settleDeadline = Math.min(deadline, (networkStarted ?? Date.now()) + NAVIGATION_NETWORK_BUDGET_MS);
+        // A completed fetch gets a full DOM-quiet window, even if it consumed most
+        // of the request budget. An expired request budget still bounds stalled fetches.
+        const settleDeadline = Math.min(deadline, Date.now() + (hasPendingRequests ? 0 : NAVIGATION_NETWORK_BUDGET_MS));
         await waitForNavigationDomQuiet(page, Math.max(settleDeadline - Date.now(), 0));
         if (navigated) continue;
         if (network.captureTrackedRequests(page.url()).size > 0) {
