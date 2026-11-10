@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { AsideReplError, connectAside, findAsideBinary } from "../src/index.ts";
 import type { ConnectAsideOptions } from "../src/aside/session-types.ts";
 import { field } from "./fixtures/read-field.ts";
+import { replTransportFor } from "../src/aside/cli-contract.ts";
 
 const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-aside-repl.ts");
 const asideCommand = [process.execPath, FAKE];
@@ -200,7 +201,7 @@ test(
   { timeout: 15_000 },
   async () => {
     const started = Date.now();
-    const [mcp, line] = await Promise.all([
+    const connections = await Promise.allSettled([
       connectAside({
         asideCommand,
         env: cliEnv({ FAKE_ASIDE_CLI: "1.26.1107.24", FAKE_ASIDE_HELP_HANG: "1" }),
@@ -208,17 +209,39 @@ test(
       }),
       connectAside({ asideCommand, env: cliEnv({ FAKE_ASIDE_HELP_HANG: "1" }), startTimeoutMs: 30_000 }),
     ]);
+    const sessions = connections.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
     try {
+      for (const result of connections) if (result.status === "rejected") throw result.reason;
+      const [mcp, line] = sessions;
+      assert.ok(mcp && line);
       assert.ok(Date.now() - started < 12_000);
       assert.equal(await mcp.run("globalThis.omowKept = 5;\nreturn 1;"), 1);
       assert.equal(await mcp.run("return globalThis.omowKept"), 5);
       assert.equal(await line.run("return 6"), 6);
       assert.equal(line.sessionDir, "~/.aside/u/0/sessions/fake");
     } finally {
-      await Promise.all([mcp.close(), line.close()]);
+      await Promise.all(sessions.map((session) => session.close()));
     }
   },
 );
+
+// The CLI help contract lists a tool name followed by whitespace, not a word boundary:
+// repl-foo must never opt a CLI into the MCP transport. Existing coverage only listed repl.
+test("MCP help fallback requires the exact repl tool name", { timeout: 15_000 }, async () => {
+  const protocols = await Promise.all(
+    ["repl", "repl-foo"].map((tool) =>
+      replTransportFor({
+        spawn: spawnChild,
+        command: [process.execPath, FAKE],
+        env: cliEnv({ FAKE_ASIDE_CLI: "1.26.1107.24", FAKE_ASIDE_HELP_HANG: "1", FAKE_ASIDE_MCP_HELP_TOOL: tool }),
+        // Use the production CLI probe budget: a real interpreter needs time to start
+        // under load before its help response can distinguish repl from repl-foo.
+        timeoutMs: 5_000,
+      }),
+    ),
+  );
+  assert.deepEqual(protocols, ["mcp", "line"]);
+});
 
 test("connectAside names the missing CLI instead of failing to spawn", async () => {
   await assert.rejects(

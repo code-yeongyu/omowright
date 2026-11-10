@@ -190,7 +190,19 @@ export async function connectBrowser({
     crossCheck: extra,
     // Closes the primary and every crossCheck handle: a BrowserSkill session stops, the rest close.
     closeAll: async () => {
-      await Promise.all(opened.map(({ handle }) => closeHandle(handle).catch(() => {})));
+      const failures = (
+        await Promise.all(
+          opened.map(async ({ engine, handle }) => {
+            try {
+              await closeHandle(handle);
+              return null;
+            } catch (cause) {
+              return new Error(`${engine} failed to close: ${reasonOf(cause)}`, { cause });
+            }
+          }),
+        )
+      ).filter((error): error is Error => error !== null);
+      if (failures.length) throw new AggregateError(failures, failures.map((error) => error.message).join("; "));
     },
   };
 }

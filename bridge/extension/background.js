@@ -63,40 +63,43 @@
   var SHAPES = {
     "bookmarks.create": (details) =>
       exact(details, ["parentId", "index", "title", "url"], ["title"]) &&
-      typeof details.title === "string" &&
-      details.title.length <= 8192 &&
-      (details.parentId === undefined || nonEmptyString(details.parentId)) &&
-      (details.index === undefined || nonNegativeInteger(details.index)) &&
-      (details.url === undefined || validUrl(details.url)),
+      typeof details["title"] === "string" &&
+      details["title"].length <= 8192 &&
+      (details["parentId"] === undefined || nonEmptyString(details["parentId"])) &&
+      (details["index"] === undefined || nonNegativeInteger(details["index"])) &&
+      (details["url"] === undefined || validUrl(details["url"])),
     "bookmarks.move": (details) =>
       exact(details, ["id", "parentId", "index"], ["id"]) &&
-      nonEmptyString(details.id) &&
-      (details.parentId === undefined || nonEmptyString(details.parentId)) &&
-      (details.index === undefined || nonNegativeInteger(details.index)),
-    "bookmarks.remove": (details) => exact(details, ["id"], ["id"]) && nonEmptyString(details.id),
-    "history.deleteUrl": (details) => exact(details, ["url"], ["url"]) && validUrl(details.url),
+      nonEmptyString(details["id"]) &&
+      (details["parentId"] === undefined || nonEmptyString(details["parentId"])) &&
+      (details["index"] === undefined || nonNegativeInteger(details["index"])),
+    "bookmarks.remove": (details) => exact(details, ["id"], ["id"]) && nonEmptyString(details["id"]),
+    "history.deleteUrl": (details) => exact(details, ["url"], ["url"]) && validUrl(details["url"]),
     "history.deleteRange": (details) =>
       exact(details, ["startTime", "endTime"], ["startTime", "endTime"]) &&
-      finiteNumber(details.startTime) &&
-      details.startTime >= 0 &&
-      finiteNumber(details.endTime) &&
-      details.endTime >= details.startTime,
+      finiteNumber(details["startTime"]) &&
+      details["startTime"] >= 0 &&
+      finiteNumber(details["endTime"]) &&
+      details["endTime"] >= details["startTime"],
     "tabGroups.update": (details) =>
       exact(details, ["groupId", "updateProperties"], ["groupId", "updateProperties"]) &&
-      nonNegativeInteger(details.groupId) &&
-      exact(details.updateProperties, ["collapsed", "color", "title"]) &&
-      Object.keys(details.updateProperties).length > 0 &&
-      (details.updateProperties.collapsed === undefined || typeof details.updateProperties.collapsed === "boolean") &&
-      (details.updateProperties.color === undefined || TAB_GROUP_COLORS.has(details.updateProperties.color)) &&
-      (details.updateProperties.title === undefined ||
-        details.updateProperties.title === null ||
-        (typeof details.updateProperties.title === "string" && details.updateProperties.title.length <= 1024)),
+      nonNegativeInteger(details["groupId"]) &&
+      exact(details["updateProperties"], ["collapsed", "color", "title"]) &&
+      Object.keys(details["updateProperties"]).length > 0 &&
+      (details["updateProperties"]["collapsed"] === undefined ||
+        typeof details["updateProperties"]["collapsed"] === "boolean") &&
+      (details["updateProperties"]["color"] === undefined ||
+        TAB_GROUP_COLORS.has(details["updateProperties"]["color"])) &&
+      (details["updateProperties"]["title"] === undefined ||
+        details["updateProperties"]["title"] === null ||
+        (typeof details["updateProperties"]["title"] === "string" &&
+          details["updateProperties"]["title"].length <= 1024)),
     "debugger.attach": (details) =>
       exact(details, ["tabId", "requiredVersion"], ["tabId", "requiredVersion"]) &&
-      nonNegativeInteger(details.tabId) &&
-      typeof details.requiredVersion === "string" &&
-      /^\d+\.\d+$/.test(details.requiredVersion),
-    "debugger.detach": (details) => exact(details, ["tabId"], ["tabId"]) && nonNegativeInteger(details.tabId),
+      nonNegativeInteger(details["tabId"]) &&
+      typeof details["requiredVersion"] === "string" &&
+      /^\d+\.\d+$/.test(details["requiredVersion"]),
+    "debugger.detach": (details) => exact(details, ["tabId"], ["tabId"]) && nonNegativeInteger(details["tabId"]),
   };
   var validDetails = (name, details) => isCommandName(name) && SHAPES[name](details);
 
@@ -145,13 +148,13 @@
   var response = (request, ok, value, name) => ({
     protocol: PROTOCOL,
     type: "response",
-    requestId: request.requestId,
+    requestId: request["requestId"],
     name: responseName(name),
     ok,
     ...(ok ? { result: value } : { error: value }),
   });
   var errorFor = (error) => {
-    const debuggerFailure = asRecord(error)?.code === "DEBUGGER_ERROR";
+    const debuggerFailure = asRecord(error)?.["code"] === "DEBUGGER_ERROR";
     return {
       code: debuggerFailure ? "DEBUGGER_ERROR" : "CHROME_ERROR",
       message: debuggerFailure ? "debugger operation failed" : "Chrome operation failed",
@@ -206,10 +209,10 @@
   function acceptHello(message) {
     const { commands, events, hostVersion, maxMessageBytes } = message;
     if (
-      message.protocol !== PROTOCOL ||
-      message.role !== "host" ||
-      message.hostName !== HOST_NAME ||
-      !validId(message.connectionId) ||
+      message["protocol"] !== PROTOCOL ||
+      message["role"] !== "host" ||
+      message["hostName"] !== HOST_NAME ||
+      !validId(message["connectionId"]) ||
       typeof hostVersion !== "string" ||
       !hostVersion.length ||
       hostVersion.length > 64 ||
@@ -253,20 +256,20 @@
       const message = asRecord(received);
       try {
         if (current !== port || currentEpoch !== epoch) return;
-        if (message?.type === "hello") return acceptHello(message);
-        if (message?.type !== "command") {
-          if (validId(message?.requestId))
+        if (message?.["type"] === "hello") return acceptHello(message);
+        if (message?.["type"] !== "command") {
+          if (validId(message?.["requestId"]))
             safePost(
-              response(message, false, { code: "INVALID_MESSAGE", message: "invalid command" }, message.name),
+              response(message, false, { code: "INVALID_MESSAGE", message: "invalid command" }, message["name"]),
               current,
             );
           return;
         }
         const { name, params, requestId } = message;
-        const details = plain(params) && exact(params, ["details"], ["details"]) ? params.details : undefined;
+        const details = plain(params) && exact(params, ["details"], ["details"]) ? params["details"] : undefined;
         if (
           !(
-            message.protocol === PROTOCOL &&
+            message["protocol"] === PROTOCOL &&
             validId(requestId) &&
             isCommandName(name) &&
             capabilities.commands.has(name) &&
@@ -288,9 +291,14 @@
         if (current === port && currentEpoch === epoch)
           safePost(response(message, true, result === undefined ? {} : result, name), current);
       } catch (error) {
-        pending.delete(message?.requestId);
-        if (current === port && currentEpoch === epoch && message?.type === "command" && validId(message.requestId))
-          safePost(response(message, false, errorFor(error), message.name), current);
+        pending.delete(message?.["requestId"]);
+        if (
+          current === port &&
+          currentEpoch === epoch &&
+          message?.["type"] === "command" &&
+          validId(message["requestId"])
+        )
+          safePost(response(message, false, errorFor(error), message["name"]), current);
       }
     });
     current.onDisconnect.addListener(() => {

@@ -10,7 +10,7 @@ import type { AsideReplProtocol, AsideSpawn, AsideSpawnedProcess } from "./sessi
 
 const SCRIPT_AT_EOF = /piped stdin runs as one script/i;
 // `aside mcp --help` lists its tools one per line; a `repl` entry means the mcp transport works.
-const LISTS_REPL_TOOL = /^\s*repl\b/m;
+const LISTS_REPL_TOOL = /^\s*repl(?:[ \t]|$)/m;
 
 export interface AsideCliProbeOptions {
   spawn: AsideSpawn;
