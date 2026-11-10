@@ -30,7 +30,8 @@ const { engine, handle, attempts } = await connectBrowser({ allow: ["aside", "eg
 `attempts` has one entry per engine in order: `ok`, `ms`, and `verified` (the
 check that proved it attached) or the `reason` it did not (often one step only
 the user can take, such as `aside login`); engines after the primary read
-`not tried`. `crossCheck: true` also attaches the other allowed engines, returned
+`not tried` when allowed, or `not allowed by the caller` when excluded from `allow`.
+`crossCheck: true` also attaches the other allowed engines, returned
 in `crossCheck` and listed in `attached`. Each is a SECOND BROWSER (a BrowserSkill
 tab has no CDP endpoint): compare results through it, act through `handle`, and
 end with `await result.closeAll()`, which closes every handle the call opened. When a
