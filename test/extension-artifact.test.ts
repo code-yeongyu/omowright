@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -12,7 +11,10 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 // byte-for-byte the canonical build of its source. Those tests only checked behavior.
 // Build in a temporary tree so this check cannot repair the artifact it is checking.
 test("committed extension matches its canonical source build", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "extension-artifact-"));
+  // Windows CI keeps the checkout and OS temp directory on different drives.
+  // Keep this independent build on the checkout's drive so Bun's source labels
+  // are relative to the sandbox, just as they are in the canonical build.
+  const dir = mkdtempSync(path.join(root, ".extension-artifact-"));
   try {
     cpSync(path.join(root, "bridge"), path.join(dir, "bridge"), { recursive: true });
     cpSync(path.join(root, "package.json"), path.join(dir, "package.json"));

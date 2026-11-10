@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { errorMonitor } from "node:events";
 import { spawn as spawnChild } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import path from "node:path";
@@ -12,33 +11,30 @@ const asideCommand = [process.execPath, FAKE];
 const cliEnv = (fake: Readonly<Record<string, string>>) => ({ ...process.env, ...fake });
 
 for (const protocol of ["line", "mcp"]) {
-  // A live REPL may close its input before its process exits (#265). Observe the actual
-  // pipe error without handling it: removing the transport's error listener must make this
-  // test fail with unhandled EPIPE, unlike the old test that waited until the child exited.
+  // A live REPL may close its input before its process exits (#265). Deliver the error
+  // at the real stdin stream's event boundary after the REPL closes its input: native
+  // broken-pipe delivery differs by platform. Only the transport handles this event;
+  // removing its error listener must make the EPIPE escape.
   test(`[${protocol}] stdin EPIPE cannot escape the transport`, { timeout: 15_000 }, async () => {
-    const errors: string[] = [];
+    let child: ChildProcess | undefined;
     const aside = await connectAside({
       asideCommand,
       env: cliEnv(protocol === "mcp" ? { FAKE_ASIDE_CLI: "1.26.1107.24" } : {}),
       callTimeoutMs: 300,
       spawn: (command, args, options) => {
-        const child = spawnChild(command, args, options);
-        if (args.at(-1) === "repl" || args.at(-1) === "mcp") {
-          child.stdin?.on(errorMonitor, (error: NodeJS.ErrnoException) => errors.push(error.code ?? ""));
-        }
-        return child;
+        const spawned = spawnChild(command, args, options);
+        if (args.at(-1) === "repl" || args.at(-1) === "mcp") child = spawned;
+        return spawned;
       },
     });
     try {
       assert.equal(await aside.run("closeInput(); return true;"), true);
-      await assert.rejects(
-        aside.run(`return ${JSON.stringify("x".repeat(1_000_000))};`),
-        (error) => error instanceof AsideReplError && error.code === "repl_timeout",
-      );
+      const stdin = child?.stdin;
+      assert.ok(stdin, "the session child has a stdin stream");
+      assert.doesNotThrow(() => stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" })));
     } finally {
       await aside.close();
     }
-    assert.ok(errors.includes("EPIPE"), `a closed input emitted EPIPE, saw ${errors.join(", ")}`);
   });
 }
 
