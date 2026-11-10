@@ -28,6 +28,7 @@
     li: "listitem",
     p: "paragraph",
     label: "label",
+    output: "status",
   };
   const VALID_ARIA_ROLES = /* @__PURE__ */ new Set([
     "alert",
@@ -1053,7 +1054,11 @@
             : [];
         return;
       }
-      if (withoutWhitespace(current.name) === withoutWhitespace(merged)) current.children = [];
+      if (withoutWhitespace(current.name) === withoutWhitespace(merged))
+        current.children =
+          current.element && !getLiveRegionRoot(current.element)
+            ? nestedLiveTexts(current.element, withoutWhitespace(texts.join(" ")), withoutWhitespace(current.name))
+            : [];
     };
     // Capped text of the live regions inside `element` that appears in the node's text but not in its cut name.
     const nestedLiveTexts = (element, fullText, nameText) => {

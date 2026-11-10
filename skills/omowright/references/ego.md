@@ -5,7 +5,7 @@ Ego Lite is second in `connectBrowser()`'s order. Its CDP bindings
 load omowright there by absolute path:
 
 ```bash
-ego-browser nodejs -e "const { connectBrowser } = await import('file:///<abs>/omowright/src/index.js'); const { handle: browser } = await connectBrowser({ allow: ['ego'] }); const page = await browser.newTab('https://example.com'); console.log(await page.title()); await browser.close();"
+ego-browser nodejs -e "const { connectBrowser } = await import('file:///<abs>/omowright/src/index.ts'); const { handle: browser } = await connectBrowser({ allow: ['ego'] }); const page = await browser.newTab('https://example.com'); console.log(await page.title()); await browser.close();"
 ```
 
 The script runs as ESM with top-level await, outside your shell's working

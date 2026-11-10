@@ -16,6 +16,18 @@ function scratchHome() {
   return mkdtempSync(path.join(tmpdir(), "omowright-ext-"));
 }
 
+// Public invocation contract (#273): the default options preserve arity zero,
+// and an omitted browser fails on its store access rather than destructuring.
+for (const operation of [registerExternalExtension, unregisterExternalExtension]) {
+  test(`${operation.name} keeps its default options and required browser failure`, async () => {
+    assert.equal(operation.length, 0);
+    await assert.rejects(
+      async () => operation(),
+      (error: unknown) => error instanceof TypeError && /store/.test(error.message),
+    );
+  });
+}
+
 test("BrowserSkill store ids are the published Chrome and Edge listings", () => {
   assert.equal(BROWSERSKILL_EXTENSION_IDS.chrome, "hhcmgoofomhgciiibhipgmgkgnoenaoi");
   assert.equal(BROWSERSKILL_EXTENSION_IDS.edge, "emacgiaaaiojkkpkddmmdfhmokgmnikg");
