@@ -1,6 +1,7 @@
+import manifest from "../package.json" with { type: "json" };
+
 const HTTP_VERSION = "HTTP/1.1";
-// Kept in sync with package.json; har.ts stays pure so it never reads the manifest from disk.
-const CREATOR = Object.freeze({ name: "omowright", version: "0.0.1" });
+const CREATOR = Object.freeze({ name: "omowright", version: manifest.version });
 
 export type HeaderMap = Readonly<Record<string, unknown>>;
 

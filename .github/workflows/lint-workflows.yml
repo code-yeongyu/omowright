@@ -4,9 +4,11 @@ on:
   push:
     paths:
       - ".github/workflows/**"
+      - "scripts/install-actionlint.sh"
   pull_request:
     paths:
       - ".github/workflows/**"
+      - "scripts/install-actionlint.sh"
 
 permissions:
   contents: read
@@ -23,10 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install actionlint
-        run: bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.10/scripts/download-actionlint.bash)
+      - name: Install actionlint (installation failure means lint did not run)
+        id: install_actionlint
+        run: bash scripts/install-actionlint.sh
 
       - name: Run actionlint
+        id: actionlint
         run: ./actionlint -color -shellcheck=""
 
       - name: Enforce mandatory workflow summary
@@ -49,5 +53,9 @@ jobs:
           {
             echo "## Lint Workflows — ${{ job.status }}"
             echo
-            echo "actionlint and the mandatory step-summary rule were checked on every workflow."
+            if [ "${{ steps.install_actionlint.outcome }}" != "success" ]; then
+              echo "actionlint installation failed; lint did not run."
+            else
+              echo "actionlint result: ${{ steps.actionlint.outcome }}."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -39,7 +39,7 @@ if (args[0] === "repl" && args.includes("--help") && process.env["FAKE_ASIDE_HEL
 }
 if (args[0] === "mcp" && args.includes("--help") && SCRIPT_AT_EOF) {
   process.stdout.write(
-    "Usage: aside mcp [options]\n\nRun an MCP server on stdio\n\nTools:\n  repl              Run browser automation JavaScript in one REPL session\n  browser_profiles  List browser profiles\n",
+    `Usage: aside mcp [options]\n\nRun an MCP server on stdio\n\nTools:\n  ${process.env["FAKE_ASIDE_MCP_HELP_TOOL"] ?? "repl"}              Run browser automation JavaScript in one REPL session\n  browser_profiles  List browser profiles\n`,
   );
   process.exit(0);
 }
@@ -58,12 +58,17 @@ if (args[0] !== "repl" && !(args[0] === "mcp" && SCRIPT_AT_EOF)) {
 }
 
 let sink = (text: string): unknown => process.stdout.write(text);
+if (process.env["FAKE_ASIDE_STUBBORN"]) {
+  process.on("SIGTERM", () => {});
+  setInterval(() => {}, 1 << 30);
+}
 const write = (text: string) => sink(text);
 // Reads a field off whatever the evaluated line threw or the client sent; vm errors come from
 // another realm, so no instanceof.
 const field = (value: unknown, key: string): unknown =>
   (typeof value === "object" && value !== null) || typeof value === "function" ? Reflect.get(value, key) : undefined;
 const PROMPT = "\x1b[32mrepl\x1b[0m \x1b[33m>\x1b[0m ";
+let closedInput = false;
 interface FakeTab {
   url(): string;
   title(): Promise<string>;
@@ -74,6 +79,11 @@ const context = vm.createContext({
   JSON,
   Promise,
   Error,
+  closeInput: () => {
+    closedInput = true;
+    process.stdin.destroy();
+    setInterval(() => {}, 1 << 30);
+  },
   tabs,
   page: null,
   // Writes in two chunks with a pause, so the reader sees the first part as its own chunk.
@@ -113,13 +123,9 @@ if (args[0] === "mcp") {
       replies.set(id, resolve);
       send({ id, method });
     });
-  if (process.env["FAKE_ASIDE_STUBBORN"]) {
-    process.on("SIGTERM", () => {});
-    setInterval(() => {}, 1 << 30);
-  }
   const input = createInterface({ input: process.stdin });
   input.on("close", () => {
-    if (!process.env["FAKE_ASIDE_STUBBORN"]) process.exit(0);
+    if (!process.env["FAKE_ASIDE_STUBBORN"] && !closedInput) process.exit(0);
   });
   input.on("line", async (line) => {
     const message: unknown = JSON.parse(line);
@@ -214,7 +220,10 @@ write(
 );
 const input = createInterface({ input: process.stdin });
 for await (const line of input) {
-  if (line.trim() === "exit") break;
+  if (line.trim() === "exit") {
+    if (process.env["FAKE_ASIDE_STUBBORN"]) continue;
+    break;
+  }
   try {
     await evaluate(line);
     write("\x1b[2m[ok | 1ms]\x1b[0m\n");
@@ -225,4 +234,5 @@ for await (const line of input) {
   }
   write(PROMPT);
 }
+if (process.env["FAKE_ASIDE_STUBBORN"] || closedInput) await new Promise(() => {});
 process.exit(0);

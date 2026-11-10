@@ -66,6 +66,12 @@ jobs:
         shell: bash
         run: bun run check
 
+      - name: Build and verify tracked artifacts
+        shell: bash
+        run: |
+          bun run build
+          git diff --exit-code HEAD --
+
       - name: bun test
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}

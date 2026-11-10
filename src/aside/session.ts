@@ -193,7 +193,7 @@ export async function connectAside({
   try {
     return await session.ready(startTimeoutMs);
   } catch (error) {
-    child.kill();
+    await session.close();
     if (!(error instanceof AsideReplError) || error.code !== "repl_start_timeout") throw error;
     const version = await asideCliVersion({ ...cli, timeoutMs: CLI_PROBE_TIMEOUT_MS });
     throw new AsideReplError(

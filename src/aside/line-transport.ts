@@ -6,6 +6,7 @@ import { AsideReplError } from "./errors.ts";
 import type { AsideChildProcess, AsideTransportInfo, Waiter } from "./session-types.ts";
 
 const CLOSE_TIMEOUT_MS = 5_000;
+const KILL_GRACE_MS = 2_000;
 const PROMPT = "repl > ";
 const MARKER = /^\[(ok|error) \| \d+ms\]$/;
 // Aside colours its banner, prompt and markers even on a pipe.
@@ -22,6 +23,8 @@ export class LineTransport {
   #lines: string[] = [];
   #waiter: Waiter | null = null;
   #closed = false;
+  #exited = false;
+  #terminated = false;
   #exit: Promise<void>;
 
   constructor(child: AsideChildProcess) {
@@ -29,6 +32,7 @@ export class LineTransport {
     this.#exit = new Promise<void>((resolve) =>
       child.once("exit", (code, signal) => {
         this.#closed = true;
+        this.#exited = true;
         this.#settle(
           new AsideReplError("repl_closed", `aside repl exited (code ${code}, signal ${signal})`, {
             output: this.#lines.splice(0),
@@ -88,18 +92,32 @@ export class LineTransport {
   }
 
   async close(): Promise<void> {
-    if (this.#closed) return;
-    this.#child.stdin.end("exit\n");
+    this.#closed = true;
+    if (this.#exited) return;
+    if (!this.#terminated) {
+      this.#child.stdin.end("exit\n");
+      if (await this.#exitsWithin(CLOSE_TIMEOUT_MS)) return;
+      this.#terminate();
+    }
+    if (await this.#exitsWithin(KILL_GRACE_MS)) return;
+    this.#child.kill("SIGKILL");
+    await this.#exit;
+  }
+
+  async #exitsWithin(ms: number): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timedOut = new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(true), CLOSE_TIMEOUT_MS);
+      timer = setTimeout(() => resolve(false), ms);
     });
-    const late = await Promise.race([this.#exit.then(() => false), timedOut]);
+    const exited = await Promise.race([this.#exit.then(() => true), timedOut]);
     clearTimeout(timer);
-    if (late) {
-      this.#child.kill();
-      await this.#exit;
-    }
+    return exited;
+  }
+
+  #terminate() {
+    this.#closed = true;
+    this.#terminated = true;
+    this.#child.kill();
   }
 
   #onData(chunk: string) {
@@ -121,7 +139,7 @@ export class LineTransport {
         const output = this.#lines.splice(0);
         reject(new AsideReplError(timeoutCode, `aside repl did not answer within ${timeoutMs} ms`, { output }));
         // A call that never finished leaves the REPL mid-evaluation; nothing after it can be trusted.
-        this.#child.kill();
+        this.#terminate();
       }, timeoutMs);
       this.#waiter = { isDone, resolve, reject, timer };
       this.#check();

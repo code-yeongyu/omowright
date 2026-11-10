@@ -21,6 +21,46 @@ const bskWithBrowser = () =>
     "session.start": { session_id: "s1", browser_instance_id: "b1" },
   });
 
+// Cleanup must attempt every attached engine and report failed stop/close calls (#262).
+// Successful cleanup coverage cannot detect swallowed errors; the existing IPC stub supplies
+// a real session.stop rejection, and Aside's public close method supplies a synchronous failure.
+test("closeAll reports every failed engine after attempting all handles", async () => {
+  const stopError = new Error("stop refused");
+  const bsk = stubClient({
+    "system.status": { browsers: [{ instance_id: "b1", browser_name: "chrome" }] },
+    "session.start": { session_id: "s1", browser_instance_id: "b1" },
+    "session.stop": stopError,
+  });
+  const result = await connectBrowser({
+    crossCheck: true,
+    allow: ["aside", "bsk"],
+    aside: { asideCommand: [process.execPath, FAKE_ASIDE] },
+    bsk: { client: bsk },
+  });
+  assert.ok(result.handle instanceof AsideSession);
+  const aside = result.handle;
+  const originalClose = aside.close.bind(aside);
+  const closeError = new Error("close refused");
+  aside.close = () => {
+    throw closeError;
+  };
+  try {
+    await assert.rejects(result.closeAll(), (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /aside/);
+      assert.match(error.message, /bsk/);
+      assert.deepEqual(
+        error.errors.map((entry) => entry.cause),
+        [closeError, stopError],
+      );
+      return true;
+    });
+    assert.ok(bsk.calls.some((call) => call.method === "session.stop"));
+  } finally {
+    await originalClose();
+  }
+});
+
 // The priority order is the contract agents are steered by: the user's agent browsers first,
 // then the user's own browser, then the owned CloakBrowser.
 test("connectBrowser takes the first engine in priority order and reports each attempt", async () => {

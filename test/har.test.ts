@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { toHar, type HarSourceEntry } from "../src/har.ts";
 
 const JSON_BODY = '{"ok":true}';
@@ -41,7 +42,10 @@ test("toHar builds a HAR 1.2 log with creator and pages", () => {
   const har = toHar([entry()]);
   assert.equal(har.log.version, "1.2");
   assert.equal(har.log.creator.name, "omowright");
-  assert.equal(typeof har.log.creator.version, "string");
+  assert.equal(
+    har.log.creator.version,
+    JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version,
+  );
   assert.deepEqual(har.log.pages, []);
   assert.equal(har.log.entries.length, 1);
   assert.deepEqual(toHar([]), {
