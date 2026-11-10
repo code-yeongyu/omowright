@@ -2164,11 +2164,12 @@ async function waitForNavigationReadiness(
   page: OmOPage,
   mode: NavigationReadinessMode = `interactive`,
   timeoutMs: number = ACTION_MAX_WAIT_MS,
+  signal?: AbortSignal,
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      waitForNavigationReadinessInner(page, mode, timeoutMs),
+      waitForNavigationReadinessInner(page, mode, timeoutMs, signal),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new NavigationReadinessTimeoutError(mode, timeoutMs)), timeoutMs + 1000);
       }),
@@ -2212,6 +2213,7 @@ async function waitForNavigationReadinessInner(
   page: OmOPage,
   mode: NavigationReadinessMode,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<PageProbe> {
   if (isPdfViewerUrl(page.url())) {
     await waitForDomReady(page, Math.min(DOM_READY_TIMEOUT_MS, timeoutMs)).catch(() => {});
@@ -2231,6 +2233,7 @@ async function waitForNavigationReadinessInner(
     if (mode === "stable") await ensureDomMonitor(page).catch(() => {});
     while (Date.now() < deadline) {
       await sleep$12(PROBE_INTERVAL_MS);
+      signal?.throwIfAborted();
       try {
         if (navigated) {
           navigated = false;
@@ -2247,18 +2250,23 @@ async function waitForNavigationReadinessInner(
           quietSamples = 0;
           continue;
         }
-        if (network.captureTrackedRequests(page.url()).size > 0) {
+        const hasPendingRequests = network.captureTrackedRequests(page.url()).size > 0;
+        if (hasPendingRequests) {
           networkStarted ??= Date.now();
           if (Date.now() - networkStarted < NAVIGATION_NETWORK_BUDGET_MS) {
             quietSamples = 0;
             continue;
           }
         }
-        // Load and body mutations share the existing bounded network budget. A stalled
-        // fetch or a continuously changing document must not extend it indefinitely.
-        const settleDeadline = Math.min(deadline, (networkStarted ?? Date.now()) + NAVIGATION_NETWORK_BUDGET_MS);
+        // A completed fetch gets a full DOM-quiet window, even if it consumed most
+        // of the request budget. An expired request budget still bounds stalled fetches.
+        const settleDeadline = Math.min(deadline, Date.now() + (hasPendingRequests ? 0 : NAVIGATION_NETWORK_BUDGET_MS));
         await waitForNavigationDomQuiet(page, Math.max(settleDeadline - Date.now(), 0));
         if (navigated) continue;
+        if (network.captureTrackedRequests(page.url()).size > 0) {
+          networkStarted ??= Date.now();
+          if (Date.now() - networkStarted < NAVIGATION_NETWORK_BUDGET_MS) continue;
+        }
         if (mode === "interactive") return probe;
         const sample = await readDomMonitor(page);
         quietSamples = sample.mutationCount / sample.totalNodes <= QUIET_MUTATION_RATIO ? quietSamples + 1 : 0;
@@ -6797,6 +6805,8 @@ function createOmOPageClass() {
         ? acquireNetwork(this.cdp, await this.resolveSessionId())
         : null;
       const documents = trackDocumentResponses(this, this.frameManager.mainFrameId);
+      const readinessController = new AbortController();
+      let readiness: Promise<void> | undefined;
       try {
         await releaseNetwork?.ready;
         await documents.ready;
@@ -6807,7 +6817,12 @@ function createOmOPageClass() {
             Vn === `commit`
               ? null
               : Vn === `interactive` || Vn === `stable`
-                ? waitForNavigationReadiness(this, Vn, DEFAULT_WAIT_TIMEOUT_MS).then(() => {})
+                ? (readiness = waitForNavigationReadiness(
+                    this,
+                    Vn,
+                    DEFAULT_WAIT_TIMEOUT_MS,
+                    readinessController.signal,
+                  ).then(() => {}))
                 : Vn === `networkidle`
                   ? this.#S(DEFAULT_WAIT_TIMEOUT_MS)
                   : new Promise<void>((xn, jn) => {
@@ -6825,10 +6840,12 @@ function createOmOPageClass() {
                         Vn.sessionId === qn && ei(xn);
                       })),
                         (Jn = () => ei(xn)));
-                    }),
-          Zn = await this.cdp.send(`Page.navigate`, { url: xn }, qn);
+                    });
+        Yn?.catch(() => {});
+        const Zn = await this.cdp.send(`Page.navigate`, { url: xn }, qn);
         if (Zn.errorText) throw Error(Zn.errorText);
-        if (((this.#r = xn), Vn === `domcontentloaded` && Yn)) {
+        this.#r = (await this.cdp.send(`Page.getFrameTree`, {}, qn)).frameTree.frame.url;
+        if (Vn === `domcontentloaded` && Yn) {
           if (!Zn.loaderId) {
             (Jn(), await this.#v(`Timed out waiting for "${Vn}" after goto`));
             return null;
@@ -6843,6 +6860,8 @@ function createOmOPageClass() {
         Yn && (await Yn);
         return documents.response(Zn.loaderId);
       } finally {
+        readinessController.abort();
+        await readiness?.catch(() => {});
         (documents.dispose(), releaseNetwork?.());
       }
     }

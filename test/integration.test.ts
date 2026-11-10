@@ -980,7 +980,7 @@ test(
             timers.delete(timer);
             response.end("<main><h1>Hydrated content</h1><button>Continue</button></main>");
           },
-          request.url === "/content" ? 500 : 200,
+          request.url === "/content" ? 100 : 700,
         );
         timers.add(timer);
         return;
