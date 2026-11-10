@@ -1,3 +1,4 @@
+/*! omowright | MIT License | Copyright (c) 2026 Yeongyu Kim | https://github.com/code-yeongyu/omowright */
 export { connect, BrowserConnection, TabRepository } from "./connection.ts";
 export { OMOWRIGHT_PAGE_CDP_METHODS } from "./cdp-methods.ts";
 export {
