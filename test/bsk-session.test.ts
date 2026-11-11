@@ -320,6 +320,39 @@ test("connectBrowserSkill keeps multiple_browsers_online when a browser entry ha
   });
 });
 
+test("connectBrowserSkill leaves out a session count that is not a finite number", async () => {
+  const browsers = [
+    { instance_id: "a1", browser_name: "chrome", session_count: Number.NaN },
+    { instance_id: "b2", browser_name: "chrome", session_count: Number.POSITIVE_INFINITY },
+  ];
+  const client = stubClient({
+    "system.status": { browsers },
+    "session.start": new BskRpcError("multiple_browsers_online", "more than one browser is online", { browsers }),
+  });
+  await assert.rejects(connectBrowserSkill({ client, name: "smoke", waitForBrowserMs: 10 }), (err) => {
+    assert.equal(field(err, "code"), "multiple_browsers_online");
+    const message = String(field(err, "message"));
+    assert.doesNotMatch(message, /NaN|Infinity/);
+    return true;
+  });
+});
+
+test("connectBrowserSkill keeps invalid_params when an ambiguous browser name has an object-valued instance id", async () => {
+  const client = stubClient({
+    "system.status": {
+      browsers: [
+        { instance_id: { toString: 1 }, browser_name: "chrome" },
+        { instance_id: "b", browser_name: "chrome" },
+      ],
+    },
+  });
+  await assert.rejects(connectBrowserSkill({ client, browser: "chrome", waitForBrowserMs: 10 }), (err) => {
+    assert.equal(field(err, "code"), "invalid_params");
+    assert.match(String(field(err, "message")), /unknown id, b/);
+    return true;
+  });
+});
+
 test("connectBrowserSkill refuses to continue when no browser is attached instead of falling back", async () => {
   const client = stubClient({ "system.status": { browsers: [], daemon_version: "0.3.0", protocol_version: "1.3" } });
   await assert.rejects(connectBrowserSkill({ client, waitForBrowserMs: 10 }), (err) => {
