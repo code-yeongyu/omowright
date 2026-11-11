@@ -67,21 +67,30 @@ function resolveBrowser(browser: string | null | undefined, browsers: unknown[])
   if (named.length > 1) {
     throw new BskRpcError(
       "invalid_params",
-      `browser "${browser}" matches ${named.length} connected browsers (${named.map((b) => readProperty(b, "instance_id")).join(", ")}); pass the instance id instead`,
+      `browser "${browser}" matches ${named.length} connected browsers (${named.map((b) => textField(b, "instance_id") ?? "unknown id").join(", ")}); pass the instance id instead`,
     );
   }
   return named.length === 1 ? readProperty(named[0], "instance_id") : browser;
 }
 
+// Only a string or a finite number from the daemon is printed: any other value (an object, possibly with a broken
+// toString) is skipped, so a malformed entry can never replace the coded error with a TypeError.
+function textField(b: unknown, key: string): string | undefined {
+  const value = optionalProperty(b, key);
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
 function describeBrowser(b: unknown): string {
-  const name = optionalProperty(b, "browser_name");
-  const label = optionalProperty(b, "label");
+  const name = textField(b, "browser_name");
   const parts = [
-    `${String(label || name || "browser")} [${String(optionalProperty(b, "instance_id"))}]`,
-    [name, optionalProperty(b, "browser_version")].filter(Boolean).join(" "),
+    `${textField(b, "label") || name || "browser"} [${textField(b, "instance_id") ?? "unknown id"}]`,
+    [name, textField(b, "browser_version")].filter(Boolean).join(" "),
   ];
   const sessions = optionalProperty(b, "session_count");
-  if (typeof sessions === "number") parts.push(`${sessions} session${sessions === 1 ? "" : "s"}`);
+  if (typeof sessions === "number" && Number.isFinite(sessions))
+    parts.push(`${sessions} session${sessions === 1 ? "" : "s"}`);
   // An out-of-range or non-numeric time would make toISOString() throw and hide the real error.
   const since = optionalProperty(b, "connected_at_ms");
   if (typeof since === "number" && Number.isFinite(since) && Math.abs(since) <= 8.64e15) {
