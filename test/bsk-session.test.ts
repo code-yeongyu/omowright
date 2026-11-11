@@ -300,6 +300,26 @@ test("connectBrowserSkill still names the online browsers when the daemon's erro
   });
 });
 
+// #309: a non-string field from the daemon must not turn the coded error into a TypeError.
+test("connectBrowserSkill keeps multiple_browsers_online when a browser entry has object-valued fields", async () => {
+  const broken = { toString: 1 };
+  const browsers = [
+    { instance_id: "49ae608d", browser_name: broken, browser_version: broken, label: broken },
+    { instance_id: broken, browser_name: "chrome", label: "Home" },
+  ];
+  const client = stubClient({
+    "system.status": { browsers, daemon_version: "0.3.3", protocol_version: "1.3" },
+    "session.start": new BskRpcError("multiple_browsers_online", "more than one browser is online", { browsers }),
+  });
+  await assert.rejects(connectBrowserSkill({ client, name: "smoke", waitForBrowserMs: 10 }), (err) => {
+    assert.equal(field(err, "code"), "multiple_browsers_online");
+    const message = String(field(err, "message"));
+    assert.ok(message.includes("browser [49ae608d]"), message);
+    assert.ok(message.includes("Home [unknown id]"), message);
+    return true;
+  });
+});
+
 test("connectBrowserSkill refuses to continue when no browser is attached instead of falling back", async () => {
   const client = stubClient({ "system.status": { browsers: [], daemon_version: "0.3.0", protocol_version: "1.3" } });
   await assert.rejects(connectBrowserSkill({ client, waitForBrowserMs: 10 }), (err) => {
