@@ -353,6 +353,19 @@ test("connectBrowserSkill keeps invalid_params when an ambiguous browser name ha
   });
 });
 
+test("connectBrowserSkill keeps extension_outdated when the 0.4.0 entry has object-valued fields", async () => {
+  const client = stubClient({
+    "system.status": {
+      browsers: [{ instance_id: { toString: 1 }, browser_name: { toString: 1 }, extension_version: "0.4.0" }],
+    },
+  });
+  await assert.rejects(connectBrowserSkill({ client, waitForBrowserMs: 10 }), (err) => {
+    assert.equal(field(err, "code"), "extension_outdated");
+    assert.match(String(field(err, "message")), /the browser \[unknown id\]/);
+    return true;
+  });
+});
+
 test("connectBrowserSkill refuses to continue when no browser is attached instead of falling back", async () => {
   const client = stubClient({ "system.status": { browsers: [], daemon_version: "0.3.0", protocol_version: "1.3" } });
   await assert.rejects(connectBrowserSkill({ client, waitForBrowserMs: 10 }), (err) => {

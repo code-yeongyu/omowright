@@ -22,7 +22,7 @@ export const TAB_GROUPING_EXTENSION_STEP =
 function outdatedError(browser: unknown): BskRpcError {
   return new BskRpcError(
     "extension_outdated",
-    `the BrowserSkill extension in ${readProperty(browser, "browser_name") ?? "the browser"} [${readProperty(browser, "instance_id")}] is 0.4.0, which leaves a "BrowserSkill" tab group behind in the user's browser after each task. ${TAB_GROUPING_EXTENSION_STEP}`,
+    `the BrowserSkill extension in ${textField(browser, "browser_name") ?? "the browser"} [${textField(browser, "instance_id") ?? "unknown id"}] is 0.4.0, which leaves a "BrowserSkill" tab group behind in the user's browser after each task. ${TAB_GROUPING_EXTENSION_STEP}`,
   );
 }
 
