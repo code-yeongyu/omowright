@@ -73,6 +73,36 @@ function resolveBrowser(browser: string | null | undefined, browsers: unknown[])
   return named.length === 1 ? readProperty(named[0], "instance_id") : browser;
 }
 
+function describeBrowser(b: unknown): string {
+  const name = optionalProperty(b, "browser_name");
+  const label = optionalProperty(b, "label");
+  const parts = [
+    `${String(label || name || "browser")} [${String(optionalProperty(b, "instance_id"))}]`,
+    [name, optionalProperty(b, "browser_version")].filter(Boolean).join(" "),
+  ];
+  const sessions = optionalProperty(b, "session_count");
+  if (typeof sessions === "number") parts.push(`${sessions} session${sessions === 1 ? "" : "s"}`);
+  // An out-of-range or non-numeric time would make toISOString() throw and hide the real error.
+  const since = optionalProperty(b, "connected_at_ms");
+  if (typeof since === "number" && Number.isFinite(since) && Math.abs(since) <= 8.64e15) {
+    parts.push(`online since ${new Date(since).toISOString()}`);
+  }
+  return parts.filter(Boolean).join(", ");
+}
+
+// The daemon's message names a CLI flag and no instance; a library caller needs the option and the candidates.
+function multipleBrowsersError(error: BskRpcError, statusBrowsers: unknown[]): BskRpcError {
+  const listed = optionalProperty(error.data, "browsers");
+  const browsers: unknown[] = Array.isArray(listed) ? listed : statusBrowsers;
+  const data: unknown = error.data;
+  const extra = typeof data === "object" && data !== null ? data : {};
+  return new BskRpcError(
+    error.code,
+    `more than one browser is online; pass browser: "<instance_id or label>" to connectBrowserSkill(). Online: ${browsers.map(describeBrowser).join("; ")}. Tabs are only visible inside a session: ask the user which browser holds the page, or open a session per browser and read tabList({ scope: "user" }) before stopping it.`,
+    { ...extra, browsers },
+  );
+}
+
 export interface ConnectBrowserSkillOptions {
   client?: BskClient;
   home?: string;
@@ -112,17 +142,26 @@ export async function connectBrowserSkill({
       "the BrowserSkill daemon is up but no browser extension is connected; open the browser that has the BrowserSkill extension enabled (bskDoctor() explains the remaining step); never substitute another browser for the user's without telling them",
     );
   }
-  const started = await ipc.call(
-    "session.start",
-    compact({
-      task_name: name,
-      browser_instance_id: chooseBrowser(browser, browsers),
-      width,
-      height,
-      focused,
-    }),
-    { idPrefix: "session-start" },
-  );
+  const browserInstanceId = chooseBrowser(browser, browsers);
+  let started: unknown;
+  try {
+    started = await ipc.call(
+      "session.start",
+      compact({
+        task_name: name,
+        browser_instance_id: browserInstanceId,
+        width,
+        height,
+        focused,
+      }),
+      { idPrefix: "session-start" },
+    );
+  } catch (error) {
+    if (error instanceof BskRpcError && error.code === "multiple_browsers_online") {
+      throw multipleBrowsersError(error, browsers);
+    }
+    throw error;
+  }
   return new BskSession(ipc, {
     sessionId: readProperty(started, "session_id"),
     browserInstanceId: readProperty(started, "browser_instance_id") ?? null,
