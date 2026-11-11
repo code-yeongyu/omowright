@@ -12,7 +12,10 @@ python3 -c "import cloakbrowser, json; print(cloakbrowser.binary_info()['binary_
 ```
 
 Not installed: `uv pip install "cloakbrowser==0.5.7"` in a venv, then
-`python -c "import cloakbrowser; cloakbrowser.ensure_binary()"`.
+`python -c "import cloakbrowser; cloakbrowser.ensure_binary()"`. The pin is
+deliberate: these docs are written against 0.5.7, and current releases (0.7.1
+on 2026-11-07) ask for a license key on every launch. Moving it is a separate,
+tested change.
 
 ## Single-instance rule
 
@@ -43,10 +46,10 @@ on a machine you trust and only when the instance is meant to be shared.
 ```js
 const { connectNamed, listInstances } = await import("omowright");
 const browser = await connectNamed("cloak-main", {
-  browserPath,   // required only when a launch is needed (connectCloakProfile resolves it)
+  browserPath, // required only when a launch is needed (connectCloakProfile resolves it)
   browserArgs,
-  profileDir,    // recorded with the instance; used for endpoint discovery
-  registryRoot,  // defaults to ~/.local/share/omowright/instances
+  profileDir, // recorded with the instance; used for endpoint discovery
+  registryRoot, // defaults to ~/.local/share/omowright/instances
 });
 const page = await browser.newTab("https://target.com");
 await listInstances();
@@ -56,7 +59,10 @@ await listInstances();
 
 `close()` on the launcher terminates the browser and removes its record; on an
 attached client it only detaches — the instance keeps running for the next
-`connectNamed`.
+`connectNamed`. Attaches in one process share one CDP connection per browser
+(Chrome asks to allow remote debugging once per connection): `close()`
+releases your handle and the last release disconnects, so keep one handle
+open across actions instead of attaching per action.
 `connectCloakProfile({ name })` and `omowright-cloak --name <name>` go through
 the same registry: same name, same instance. Without `name` both keep the
 zero-port pipe and never touch the registry.
@@ -72,7 +78,7 @@ curl -s -m 2 http://127.0.0.1:9242/json/version   # Browser info -> an instance 
 const browser = await connect("http://127.0.0.1:9242");
 const page = await browser.newTab("https://target.com");
 // ... work ...
-await page.close();                               // close only YOUR tab
+await page.close(); // close only YOUR tab
 ```
 
 ## Launch
@@ -81,7 +87,7 @@ await page.close();                               // close only YOUR tab
 const { connectCloakProfile } = await import("omowright");
 const browser = await connectCloakProfile({
   profileDir: `${process.env.HOME}/.local/share/omowright-cloak`,
-  fingerprintSeed: 63498,   // first use pins it; later runs reuse it and reject a mismatch
+  fingerprintSeed: 63498, // first use pins it; later runs reuse it and reject a mismatch
 });
 ```
 
@@ -113,8 +119,8 @@ extract them to JSON and inject with the package helper:
 ```js
 import { injectCookies } from "omowright";
 const cookies = JSON.parse(await fs.promises.readFile(cookieFile, "utf8"));
-await injectCookies(page, cookies);   // sanitize + Network.setCookies
-await page.goto(url);                 // cookies apply on navigation
+await injectCookies(page, cookies); // sanitize + Network.setCookies
+await page.goto(url); // cookies apply on navigation
 ```
 
 `injectCookies` drops `expires <= 0`, forces `secure` + root path + url-scoping

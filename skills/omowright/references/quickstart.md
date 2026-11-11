@@ -16,20 +16,40 @@ const { connect, connectPipe } = await import("omowright");
   nothing for other processes to hijack. Default choice. Returns an object with
   `newTab(url)`.
 - `connect("http://127.0.0.1:9222")` — attaches to a running Chromium started
-  with `--remote-debugging-port`. Use for a real user browser (its profile,
-  cookies, logins); pair with `createChromeApi` for bookmarks/history. Returns
-  `BrowserConnection`, which has **NO `newTab()`** — create tabs over CDP:
+  with `--remote-debugging-port`, or a user's own Chrome with remote debugging
+  enabled from `chrome://inspect/#remote-debugging` (its `DevToolsActivePort`
+  names the port and the `ws://127.0.0.1:<port>/devtools/browser/<id>` URL;
+  `connect()` takes either). Use for a real user browser (its
+  profile, cookies, logins); pair with `createChromeApi` for bookmarks/history.
+  Returns a `BrowserConnection` with `newTab(url)`.
+- `connectRunningBrowser({ browser })` — finds that port for you: it reads
+  `DevToolsActivePort` in each known browser profile, keeps the one whose port
+  answers (a TCP check, so no prompt), and connects to its exact WebSocket URL.
+  It never edits the profile. Two live browsers throw `choose_browser`; none
+  throws `not_found`, which means the user has not allowed remote debugging yet.
+  It works where an extension-based attach is blocked, for example a page that
+  holds another extension's iframe.
+
+**Every NEW connection to a user's own Chrome shows them an "Allow remote
+debugging?" prompt.** `connect()` calls in one process share one connection
+per browser, and `close()` releases your handle (the last release disconnects).
+So keep ONE handle for the whole job: across eval cells, store it on
+`globalThis` and reuse it instead of connecting (and closing) in every cell.
 
 ```js
-const browser = await connect("http://127.0.0.1:9222");
-const { targetId } = await browser.cdp.send("Target.createTarget", { url: "https://example.com" });
-const page = await browser.attachPage(targetId);
-// ... work ...
-await browser.cdp.send("Target.closeTarget", { targetId });
+globalThis.userBrowser ??= await connect("http://127.0.0.1:9222"); // one prompt
+const page = await userBrowser.newTab("https://example.com");
+// ... work, in this cell and later ones ...
+await page.close();
+// at the very end of the job:
+await userBrowser.close();
 ```
 
 Always launch with a dedicated `--user-data-dir` (a `mkdtemp` dir) and delete it
-after `browser.close()`. Under Node, `node:sqlite` loads lazily with a
+after `browser.close()`. On Windows a second launch on Chrome's shared default
+profile exits with code 21. Also on Windows, write `browserPath` with forward
+slashes or `String.raw`: backslashes in a plain string literal are escapes
+(usually ENOENT, a SyntaxError for segments such as `\u`). Under Node, `node:sqlite` loads lazily with a
 `bun:sqlite` fallback under Bun (see Runtime above).
 
 ## Page essentials
@@ -51,16 +71,29 @@ await page.close();
 ## Snapshot discipline
 
 ```js
-const snap = await page.snapshot();            // { tree, refs } or JSON string
-const tree = compactSnapshot(snap);            // raw tree, ~57% smaller
-await page.snapshot({ interactive: true });    // interactive elements only
+const snap = await page.snapshot(); // { tree, refs } or JSON string
+const tree = compactSnapshot(snap); // raw tree without the refs map: 7%-64% smaller on pages measured 2026-11-09
+await page.snapshot({ interactive: true }); // controls, headings, landmarks and state feedback
 await page.snapshot({ maxDepth: 20, maxChars: 4000, selector: "main" });
 ```
 
 Tree lines look like `- link "Learn more" [ref=e1]` — feed `e1` to
 `page.locator("e1")`. **EVERY NEW SNAPSHOT INVALIDATES EARLIER REFS**: re-snapshot
 after each state change, never act on a stale ref. Start with
-`interactive: true`; escalate to a full snapshot only when the target is missing.
+`interactive: true`; escalate to a full snapshot when a target or needed text is
+missing or truncated. Interactive reads keep capped text for clickable nodes,
+scrollable containers and live regions: roles alert, alertdialog, status, log,
+timer and marquee, and any `aria-live="polite"` or `"assertive"` element such as
+a toast. A clickable or scrollable node keeps up to 100 characters of its own
+text. Every other piece of text inside a live region counts toward that region's
+100 characters in total, however many items it holds, so two toasts each keep
+their own text and a long log keeps only its start. A live region nested inside
+a clickable or scrollable node, such as a toast in a scrollable pane, keeps its
+own 100 characters beside the node's. Clickable or scrollable nodes inside or
+around a live region keep their own 100 on top, so a scrollable `role="log"`
+keeps up to 100 characters of its own text plus 100 for entries that are kept
+nodes (`aria-live="off"` text is dropped; an invalid `aria-live` value counts
+as unset). Other free-standing body prose is omitted.
 
 ## Readiness and dialogs
 
@@ -69,7 +102,8 @@ Both are transport-level contracts documented once, in
 probe" and "Dialogs"). Short form: `goto` waits for meaningful content, not
 `readyState`, and times out after 30s on near-empty pages (`waitUntil: "commit"`
 is the escape hatch); every JavaScript dialog is auto-accepted unless a dialog
-policy says otherwise, and observable via `page.on("dialog")`.
+policy says otherwise, and observable via `page.on("dialog")`, where a listener
+can also answer it (`dialog.accept(text)` / `dialog.dismiss()`) instead of the policy.
 
 ## Errors worth knowing
 

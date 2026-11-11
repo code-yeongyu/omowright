@@ -15,20 +15,173 @@ running Chromium DevTools endpoint).
 - `newTab(url)` — open a tab, waits for interactivity, returns page.
 - `listTargets()` — list open tabs (id, type, url, title).
 - `attachPage(targetId)` — attach an existing tab.
-- `page.goto(url)` — navigate; resolves when interactive.
+- `page.goto(url)` — navigate; resolves when interactive with the main-frame
+  document response (the final hop after redirects), or `null` for a
+  same-document navigation such as a `#hash` change. `page.reload()`,
+  `page.goBack()` and `page.goForward()` resolve the same way once the new
+  document is active (they do not wait for `load`), and `null` when there is
+  no history entry (also `null` when the transport emits no network events).
+  The response is the object described under `page.on("request" | "response")`;
+  its body stays readable after the call.
+- `page.waitForURL(url, { timeout?, waitUntil? })` — wait until the page URL
+  matches a Playwright glob (`**` crosses `/`, `*` does not, `{a,b}` is a
+  choice, `?` is a literal question mark), a RegExp, or a predicate
+  `(url: URL) => boolean`. With `waitUntil` it then waits for that load state;
+  without it, it returns as soon as the URL matches.
+- `page.waitForLoadState(state, { timeout? })` — `domcontentloaded` and `load`
+  wait for those document events; `networkidle` waits until no request has been
+  in flight for 500 ms (requests already running when the wait starts are not
+  seen); `interactive` (default) and `stable` use the `goto` readiness probe.
+- `page.setContent(html, { waitUntil, timeout })` — replace the document with
+  `html`; waits for `load` by default (`domcontentloaded`, `networkidle`,
+  `commit`), timeout 30000ms (0 disables it).
+- `page.waitForTimeout(ms)` — discouraged: a fixed sleep. Wait for the state
+  you need instead (`locator.waitFor`, `page.waitForURL`, `page.waitForLoadState`).
+- `page.waitForEvent("popup")` / `page.on("popup", listener)` — deliver the
+  newly opened page after attachment and interactivity. Subscribe before
+  `window.open(...)` or a `target="_blank"` click. The result supports `url()`,
+  `snapshot()`, `goto()`, and the other page methods. The old `{ url, windowName }`
+  event metadata is available as `popup.popupMetadata` (`url` is the originally
+  requested URL; `popup.url()` is the current URL). Only popups from agent-owned
+  tabs with an active popup listener or waiter are adopted. User tabs attached
+  with `attachPage()` and unobserved popups remain untouched. Adopted popups are
+  registered with `createAgentTabs(connection)` and closed with its owned tabs
+  or the connection. Disconnecting leaves ordinary `newTab()` tabs open.
+  A popup that closes before attachment rejects its popup waiter promptly.
 - `page.snapshot(options?)` — PRIMARY read. Returns `{tree, refs}`; tree lines
   look like `- link "Learn more" [ref=e1]`. Options: `maxDepth` (50),
   `maxChars`, `interactive`, `showHidden`, `selector`, `ref`.
 - `compactSnapshot(snapshot)` — returns the raw tree without the refs map
-  (refs resolve in-page; the map is ~54% of bytes on real pages). Use before
+  (refs resolve in-page; dropping the map saved 7% to 64% of the bytes across
+  pages measured on 2026-11-09). Use before
   sending snapshots to a model.
 - `page.locator(refOrCss)` — `click`, `fill`, `press`, `pressSequentially`,
   `hover`, `check`, `selectOption`, `dragTo`, `setInputFiles`, `textContent`,
-  `innerText`, `isVisible`, `waitFor`, `first/nth/last`, `filter`.
+  `innerText`, `allTextContents`, `allInnerTexts`, `isVisible`, `waitFor`,
+  `first/nth/last`, `filter`, `and` (both match), `or` (either matches, document order).
+- `page.getByRole(role, options?)`, `getByText(text, { exact })`,
+  `getByLabel(text, { exact })`, `getByPlaceholder(text, { exact })`,
+  `getByAltText(text, { exact })`, `getByTitle(text, { exact })`,
+  `getByTestId(testId)` — Playwright locators. Frames (`page.frames()`,
+  `page.mainFrame()`), frame locators (`page.frameLocator(css)`) and locators
+  (`page.locator(css).getByTestId(id)`, scoped to that locator) have the same
+  getters. They match inside open shadow roots, never inside closed ones.
+  For placeholder, alt text and title, a string matches a
+  case-insensitive substring of the attribute, `exact: true` the whole
+  case-sensitive value, and a RegExp the raw value. `getByTestId` matches
+  `data-testid` exactly (or by RegExp); `selectors.setTestIdAttribute(name)`
+  switches the attribute for locators created afterwards.
 - `page.evaluate(expression)` — run JS in the page.
+- `page.addInitScript(script, arg?)` — register a function (with one serializable
+  argument), a source string, `{ content }`, or `{ path }` (relative to the
+  working directory). It runs in the main world before document scripts on
+  every navigation and child-frame attachment/navigation, including
+  out-of-process frames. It does not run in the current document.
+- `page.exposeFunction(name, callback)` — install an async function on every
+  frame's `window`, including existing frames and future documents. Browser
+  calls forward their arguments to the host callback; its result resolves the
+  browser promise and a thrown error rejects it. Duplicate names reject.
+  Supports JSON-like values, `undefined`, non-finite numbers, `-0` and bigints.
+  This member enables Runtime on demand and keeps it enabled for the binding's
+  lifetime; ordinary page setup does not enable Runtime.
+- `page.exposeBinding(name, callback)` — like `exposeFunction`, but the host
+  callback receives `{ context, page, frame }` before the browser arguments.
+  `context` is the real `page.context()` object and `frame` is the calling
+  frame, including a same-process or out-of-process child. Bindings survive
+  frame and page navigation and are installed in existing frames.
+- `page.setExtraHTTPHeaders(headers)` — replace the page's extra request
+  headers, including frame requests; values must be strings. Pass `{}` to
+  clear them. Network ownership is shared with readiness and request capture,
+  so ending a transient subscription does not remove the headers.
+- `page.setViewportSize({ width, height })` — set positive integer CSS-pixel
+  viewport and screen dimensions. On an agent-owned tab this also updates
+  its navigation pin, using the manager's serialized repin queue.
+- `page.emulateMedia({ media?, colorScheme?, reducedMotion?, forcedColors?, contrast? })`
+  — emulate CSS media and preferences. `media` accepts `"screen"` or `"print"`;
+  `colorScheme` accepts `"light"`, `"dark"` or `"no-preference"`;
+  `reducedMotion` accepts `"reduce"` or `"no-preference"`;
+  `forcedColors` accepts `"active"` or `"none"`; `contrast` accepts `"more"` or
+  `"no-preference"`. Omitted properties retain their overrides; `null` clears
+  that property's override. Applies to current and future frame sessions.
+- `page.context()` — the page's browser context (shared by pages in the same
+  context on this connection). Cookie reads, writes and clears are scoped to
+  that CDP browser context, including when attached to an incognito tab.
+  The supported [Playwright context methods](https://playwright.dev/docs/api/class-browsercontext)
+  are:
+  - `context.cookies(urls?)` — all cookies, or those affecting a URL string or
+    array of URLs. Returns `{ name, value, domain, path, expires, httpOnly,
+    secure, sameSite, partitionKey? }`; `expires` is Unix seconds (`-1` for a
+    session cookie).
+  - `context.addCookies(cookies)` — each cookie requires `name`, `value` and
+    either `url` or both `domain` and `path`. Optional fields: `expires`,
+    `httpOnly`, `secure`, `sameSite` (`"Strict"`, `"Lax"`, `"None"`) and
+    `partitionKey`. Unlike raw-export `injectCookies`, this preserves
+    same-name cookies at different paths.
+  - `context.clearCookies({ name?, domain?, path? }?)` — clear all cookies or
+    only those matching every supplied string or RegExp filter.
+  - `context.storageState({ path? }?)` — return `{ cookies, origins }`, where
+    each origin is `{ origin, localStorage: [{ name, value }] }`. Includes
+    localStorage for HTTP(S) origins observed by attached pages, even after
+    navigating away or closing them. A temporary, intercepted blank page reads
+    storage without running those sites' scripts or navigating existing pages.
+    With `path`, also write the same JSON, creating parent directories; relative
+    paths resolve from the current working directory. IndexedDB is not included.
+    Restore cookies with `addCookies(state.cookies)` and localStorage by
+    navigating a fresh page to each origin and setting its saved entries.
+  - `context.newPage()` — create an agent-owned blank page in this context.
+- `page.waitForRequest(urlOrPredicate, { timeout? })` /
+  `page.waitForResponse(urlOrPredicate, { timeout? })` — wait for the next
+  matching request or response headers (default timeout: 30000ms). Match an
+  exact URL string, a RegExp, or a sync/async predicate over the object.
+  Register the wait before triggering the request.
+- `page.on("request" | "response", listener)` — observe traffic; the returned
+  function unsubscribes, as does `page.off(event, listener)`. Both waits and
+  listeners receive objects with `url()`, `method()`, `headers()` (lowercase
+  names), and async `body()` (Buffer), `text()`, `json()`. Request bodies are
+  the CDP request's post data; responses also expose `status()` and `ok()`
+  (status 200-299). Response body reads wait for transfer completion and
+  decode base64 when necessary.
+  Bodies are cached on completion for response objects delivered to listeners.
+  If the transport refuses `Network.getResponseBody`, these reads reject with
+  the exported `NetworkBodyUnavailableError` (the transport error is `cause`),
+  never `null`. Failed transfers and redirects also reject body reads.
+  Network subscriptions and domain ownership are shared with
+  `createNetworkSnoop()` and readiness tracking. They start on demand and
+  release after the last consumer and its pending response bodies finish;
+  no Runtime domain is enabled. A refused Network enable does not break page
+  setup, but a transport that emits no network events will time out waits.
+- `page.waitForFunction(pageFunction, arg?, { timeout, polling })` — wait for
+  app-specific page state instead of sleeping. Runs `pageFunction(arg)` (a
+  function, or a string expression) in the page's main world until it returns a
+  truthy value, then resolves with that value by value: DOM nodes and functions
+  come back as `{}`, and a value CDP cannot return by value (a cycle such as
+  `window`, a symbol or a bigint) as `true`. `polling` is `"raf"` (default,
+  every animation frame, or every 100 ms when the page gets no frames, as a
+  background tab of a headful browser does) or a positive number of
+  milliseconds. `timeout`
+  defaults to 30000; `0` waits forever. A same-tab navigation during the wait
+  re-runs the function in the new document. An error thrown by the function,
+  or closing the page, rejects at once; a timeout rejects with
+  `WaitForFunctionTimeoutError` (exported; `timeoutMs`, and the message
+  carries the function source cut at 200 characters). Example:
+  `await page.waitForFunction(n => document.querySelector(".badge")?.textContent === String(n), 3)`.
 - `page.screenshot(options?)` — image bytes (path, fullPage, clip, type, quality).
 - `page.pdf(options?)` — PDF bytes (path, format, margin, printBackground).
 - `page.keyboard` / `page.mouse` — press, type, insertText / move, click, wheel.
+- `page.on(event, listener)` / `page.off(event, listener)` /
+  `page.waitForEvent(event, { timeout?, predicate? })` — page events; `on`
+  returns an unsubscribe function. The accepted names are the exported
+  `PAGE_EVENT_NAMES`: `close`, `console`, `crash`, `dialog`,
+  `domcontentloaded`, `download`, `filechooser`, `frameattached`,
+  `framedetached`, `framenavigated`, `load`, `pageerror`, `popup`, `request`,
+  `response`. Any other name throws a `TypeError` that lists them.
+  `pageerror` receives an `Error` (page `name`, `message` and `stack`) for each
+  uncaught exception or unhandled rejection in the page or its frames. The
+  Runtime domain it needs is enabled only while a `pageerror` or `console`
+  listener or an exposed function exists (pages can detect it), and exceptions thrown before the
+  subscription are not replayed. `close` fires once the tab is gone, whether
+  `page.close()`, `window.close()`, the user or another client closed it; the
+  page is disposed with it.
 - `createCua(page)` — coordinate fallback (visual-browse equivalent): `click`,
   `doubleClick`, `drag({path})`, `move`, `scroll`, `type`, `keypress`,
   `getVisibleScreenshot()` (base64 PNG). Use only when refs/locators cannot
@@ -54,8 +207,9 @@ running Chromium DevTools endpoint).
   Full bounds, timing, cancellation, and acceptance examples:
   [CAPTCHA skill](presets/captcha/SKILL.md).
 - `createChromeApi(connection, { profilePath?, downloadDir? })` — Chrome
-  MV3-shaped APIs: `tabs.query/get`, `windows.get/getCurrent/getLastFocused/
-  getAll`, `bookmarks.*` (read-only), `history.search/getVisits`,
+  MV3-shaped APIs: `tabs.query/get`, `windows.get/getCurrent/getAll` (no
+  `focused` field and `windows.getLastFocused` throws: CDP exposes no window
+  focus), `bookmarks.*` (read-only), `history.search/getVisits`,
   `downloads.search/download`, `topSites.get`. Profile-backed methods need
   `profilePath`. Write methods throw `UnsupportedOperationError` (extension
   bridge required). Full reference: presets/chrome/.
@@ -65,11 +219,12 @@ running Chromium DevTools endpoint).
   `SameSite=None` dropped when not secure, name+domain deduped.
   `sanitizeCookies(cookies)` is the pure transform if you need it.
 
-Every tool below is exported from `src/index.js`, the same import as the core
+Every tool below is exported from `src/index.ts`, the same import as the core
 loop; the module files next to it are implementation detail.
 
 - `connectNamed(name, { browserPath, browserArgs, profileDir, registryRoot?,
-  probeTimeoutMs?, launchTimeoutMs?, connectTimeoutMs?, lockTimeoutMs? })`:
+  dialogPolicy?, probeTimeoutMs?, launchTimeoutMs?, connectTimeoutMs?,
+  lockTimeoutMs? })`:
   attach-or-launch a named Chromium. A healthy registered instance is attached;
   a stale record is cleaned up and relaunched; a live pid whose recorded port
   refuses connections, or answers as a different browser, is treated as a reused
@@ -81,15 +236,42 @@ loop; the module files next to it are implementation detail.
   wait is bounded: discovery by `probeTimeoutMs`, the launch by
   `launchTimeoutMs`, the CDP handshake by `connectTimeoutMs`, the registry lock
   by `lockTimeoutMs` (default: the other three plus a margin).
-  The registry lock has two known races when a takeover meets a live holder:
-  two callers can hold a name for a moment, and a released lock can come back
-  and block the name until its holder's process exits (tracked in #62).
+  The registry lock is kernel-held and released when its holder closes it or
+  exits. A timeout names the `.flock` path; use `lsof`, `fuser`, or Windows
+  `handle.exe` on that path to find its holder.
   **The named endpoint is unauthenticated.** CDP listens on 127.0.0.1 with a
   kernel-chosen port: off the network, but any local process or user can drive
   that browser. Name-less launches (`connectPipe`, `connectCloakProfile()`
   without `name`) expose no port at all.
   `newTab()` works on both paths; `close()` from the launcher terminates the
   browser and removes its record, from an attached client it only detaches.
+  Attaches in one process share one CDP connection per browser, because
+  Chrome asks the user to allow remote debugging once per connection: each
+  attach returns a handle on it, `close()` releases that handle, and the last
+  release disconnects. Every connection handle is also async-disposable, so a
+  script can write `await using browser = await connect(url)`: the handle is
+  released when the scope ends, also on a throw, and the script exits without
+  a trailing `close()` or `process.exit()`. Agent tabs stay open for the next
+  script's `attachPage(targetId)`; popups the script attached are closed with
+  the connection, so create tabs that must outlive the script with
+  `createAgentTabs`. A dropped socket is reconnected once, and a browser
+  with another GUID always gets its own connection. Callers passing different
+  connection options (storage root, client options, `dialogPolicy`) are not
+  shared. A holder never changes what another holder gets: on a shared handle
+  `setDialogPolicy` throws `SharedConnectionError` (`error.code ===
+  "shared_connection"`; pass `dialogPolicy` when attaching instead), a sole holder's `setDialogPolicy` works and that
+  connection is never shared again, properties set on a handle stay on it,
+  writing or defining `cdp`, `close` or `setDialogPolicy` on a handle throws
+  `TypeError`, the shared client can't be written through it, and listeners
+  added through `handle.cdp` are removed by that handle's `close()`.
+  `handle.cdp.transportEvents.clearListeners()` removes only that handle's
+  transport listeners, and `handle.cdp.transportEvents.emit()` throws
+  `TypeError`. The connection keeps a frozen copy of the options it was
+  attached with, so mutating your options object after attaching changes
+  nothing. `handle.cdp.dialogPolicy` on a shared connection is that frozen
+  copy (or a frozen default when you passed none), not your object, so it
+  can't be changed in place. `setDialogPolicy(undefined)` resets to the default (accept every
+  dialog).
   `listInstances()` returns every record (`{ name, pid, endpoint,
   webSocketDebuggerUrl, profileDir, browserPath, startedAt }`) with `alive` /
   `responsive` liveness.
@@ -137,7 +319,21 @@ loop; the module files next to it are implementation detail.
   `emulate(page, nameOrPreset)`: set metrics, touch, and UA together;
   `emulate(page, null)` clears the override and restores the UA captured on the
   first call.
-- `createRoutes(page)`: request interception. `route(match, handler)`,
+- `page.route(urlGlobOrRegExpOrPredicate, handler, { times }?)`,
+  `page.unroute(url, handler?)`, `page.unrouteAll()`: request interception.
+  Strings match the whole URL: `*` excludes `/`, `**` crosses directories,
+  `{png,jpg}` matches alternatives, and `?` is literal. Predicates receive
+  a `URL`. The newest matching handler runs first; `route.fallback()` passes
+  to the next match, while `route.continue({ url, method, headers, postData })`
+  sends directly to the network. Handlers receive `(route, request)`;
+  `route.request()` returns that request, with `url()`, `method()`, `headers()`,
+  `postData()` and `resourceType()`. Respond with
+  `route.fulfill({ status, headers, contentType, body, json, path })` or
+  `route.abort(errorCode?)` (default `"failed"`, also `"blockedbyclient"`, etc.).
+  `times` limits matching invocations. Fetch stays off until registration and
+  is disabled after the last route is removed or exhausted. Page methods and
+  `createRoutes(page)` share one dispatcher; `unrouteAll()` clears both.
+- `createRoutes(page)`: legacy request interception. `route(match, handler)`,
   `unroute(match?)`, `dispose()`, `enabled`. `match` is a glob string (`*` and
   `?`; plain substring otherwise), a RegExp, or a predicate over
   `{ url, method, resourceType, headers }`. The handler receives `{ request,
@@ -153,16 +349,24 @@ loop; the module files next to it are implementation detail.
 
 - `connectBrowserSkill({ name, browser, width, height, focused, home, sockPath,
   autoStart, timeoutMs })`: starts a session in the user's own browser through
-  the BrowserSkill daemon's IPC socket and returns a `BskSession`. Throws
-  `BskRpcError` `no_browser_connected` when no extension is attached; never
-  launches a browser of its own.
+  the BrowserSkill daemon's IPC socket and returns a `BskSession`. `browser`
+  takes an instance id, a unique label, or a browser name such as `"chrome"`
+  that exactly one connected browser carries. Throws
+  `BskRpcError` `no_browser_connected` when no extension is attached, and
+  `extension_outdated` when the chosen extension is 0.4.0 (its task tab groups
+  stay in the user's browser after the task); with no `browser` named it picks
+  an up-to-date connected browser over a 0.4.0 one. Never launches a browser of
+  its own.
 - `BskSession`: `navigate`, `back`, `forward`, `reload`, `observe`, `snapshot`,
   `getHtml`, `screenshot({ ref, fullPage })`, `click`, `hover`, `fill`,
   `press`, `select`, `focus`, `blur`, `scrollTo`, `wheel`, `evaluate`,
   `tabList`, `tabCreate`, `tabClose`, `tabSelect`, `tabBorrow`, `tabReturn`,
   `waitForNavigation`, `requestHelp`, `console`, `network`, `resize`,
-  `emulate`, `stop()`. Targets: `"e3"` / `"@e3"` (daemon refs), a CSS
-  selector, or `{ captureId, x, y }`.
+  `emulate`, `cooperate(action)`, `stop()`. Targets: `"e3"` / `"@e3"` (daemon
+  refs), a CSS selector, or `{ captureId, x, y }`. BrowserSkill 0.4 refuses
+  page actions (`cooperation_sync_required`) without `{ context }` from the
+  latest `cooperate("sync")`; `dependsOn` narrows that check
+  (`skills/omowright/references/browserskill.md`).
 - `bskSnapshot(session, options)`: OmOWright `{ tree, refs, css }` from an
   attached tab with no page global and no DOM mutation; `css[ref]` is `null`
   inside shadow roots.
@@ -173,11 +377,14 @@ loop; the module files next to it are implementation detail.
   browser the user actually uses, then a wait on
   `system.status{wait_for_browser_ms}`. The one human step is returned as
   `humanStep`; `needsChoice: true` means nothing was registered and the user
-  has to name the browser.
-- `identifyBrowser({ catalog, signals, explicit })` / `probeBrowserSignals()` /
-  `catalogBrowsers()` / `detectBrowsers()`: the browser choice on its own —
-  default browser, running process and recent-use signals, ranked; ambiguity
-  returns `needsChoice` instead of a guess.
+  has to name the browser. While the daemon is down nothing is registered,
+  `humanStep` is `null`, and `nextStep` says how to start the daemon; otherwise
+  `nextStep` is the same step as `humanStep` (`null` once ready).
+- `identifyBrowser({ catalog, signals, explicit, connected })` /
+  `probeBrowserSignals()` / `catalogBrowsers()` / `detectBrowsers()`: the
+  browser choice on its own — the daemon's connected `browser_name`s, default
+  browser, running process and recent-use signals, ranked; ambiguity returns
+  `needsChoice` instead of a guess.
 - `BskIpcClient` / `BskRpcError` / `readDaemonInfo` / `resolveBskHome`: the
   raw JSON Lines IPC client (`call`, `callWithHandle`, `cancel`) for daemon
   methods the session does not wrap.
@@ -188,14 +395,14 @@ loop; the module files next to it are implementation detail.
   CSS selectors. Every new snapshot invalidates earlier ref ids. Attached-engine
   refs from `session.observe()` are `@eN` strings for `session.click("@e3")`;
   `bskSnapshot` refs are clicked through `css[ref]`.
-- `page.context()` and raw CDP `_sendToTarget` exist but are escape hatches;
+- Raw CDP `page._sendToTarget(method, params)` exists but is an escape hatch;
   prefer the tools above.
 
 ## Dialogs (alert / confirm / prompt / beforeunload)
 
-Every JavaScript dialog is **answered at the transport layer** by a dialog
-policy, so the page never hangs waiting for a human, including a click that
-triggers `window.print()`. The default policy accepts everything, which keeps
+Every JavaScript dialog is **answered at the transport layer**: by a `dialog`
+listener that answers it, otherwise by a dialog policy, so the page never hangs
+waiting for a human, including a click that triggers `window.print()`. The default policy accepts everything, which keeps
 the old behaviour: `alert()` returns immediately, `confirm()` returns `true`,
 `prompt()` returns `""`, `beforeunload` never blocks navigation, and dialogs
 during page load are handled the same way (`page.goto()` still completes because
@@ -204,14 +411,14 @@ readiness is content-probe based).
 A policy is either an object or a function:
 
 ```js
-const browser = await connectPipe({ browserPath, browserArgs, storageRoot,
-  dialogPolicy: { accept: false } });              // confirm() -> false, prompt() -> null
+const browser = await connectPipe({ browserPath, browserArgs, storageRoot, dialogPolicy: { accept: false } }); // confirm() -> false, prompt() -> null
 browser.setDialogPolicy({ accept: true, promptText: "agent@example.com" }); // prompt() -> the text
-browser.setDialogPolicy(dialog => {               // { type, message, defaultPrompt, url }
+browser.setDialogPolicy((dialog) => {
+  // { type, message, defaultPrompt, url }
   if (dialog.type === "beforeunload") return true;
   return { accept: !/delete/i.test(dialog.message), promptText: dialog.defaultPrompt };
 });
-browser.cdp.dialogPolicy;                         // read the current policy (client getter)
+browser.cdp.dialogPolicy; // read the current policy (client getter)
 ```
 
 - `{ accept: false }` dismisses: `confirm()` returns `false`, `prompt()` returns
@@ -223,8 +430,25 @@ browser.cdp.dialogPolicy;                         // read the current policy (cl
 - `connectPipe({ dialogPolicy })` and `connect(url, { dialogPolicy })` set it
   up front; `browser.setDialogPolicy()` swaps it later (it forwards to the pipe
   or WebSocket client and throws for a transport without policy support).
-- Subscribe to `page.on('dialog', d => ...)` for observability: the event
-  carries `{type, message, defaultPrompt, url}` and fires after the policy runs.
+- `page.on('dialog', dialog => ...)` hands each listener a Playwright-style
+  `Dialog`: `type()`, `message()`, `defaultValue()` (the prompt's default
+  text), `url`, `accept(promptText?)` and `dismiss()`. A listener that answers
+  replaces the policy for that dialog. The policy answers once the listeners
+  have run and none of them answered, so a listener that only looks (a trace,
+  `page.waitForEvent('dialog')`) leaves the dialog to the policy:
+
+  ```js
+  page.on("dialog", (dialog) => (dialog.type() === "prompt" ? dialog.accept("agent@example.com") : dialog.dismiss()));
+  ```
+
+  Answer inside the listener or in a promise it returns: the policy waits for
+  that promise. A dialog is answered once: a second `accept()` / `dismiss()`,
+  or one after the policy answered, rejects.
+
+- CDP listeners of `Page.javascriptDialogOpening` get the same `Dialog` as
+  `meta.dialog`. On a shared connection the policy is the connection's and a
+  listener belongs to the handle that added it: it answers until that handle
+  closes, then the policy answers again.
 
 ## Frames (OOPIF) and shadow DOM
 

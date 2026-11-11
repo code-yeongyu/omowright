@@ -1,37 +1,106 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>bsk snapshot fixture</title></head>
-<body>
-  <main>
-    <h1>Fixture for the trace-free snapshot</h1>
-    <p>This page watches itself: any attribute or child-list mutation is counted, and it reports whether an automation global appeared.</p>
-    <nav aria-label="Primary">
-      <a id="home" href="#home">Home</a>
-      <a href="#docs">Docs</a>
-      <a href="#docs">Docs</a>
-    </nav>
-    <form>
-      <label for="q">Search</label>
-      <input id="q" name="q" placeholder="Search the docs">
-      <button type="button">Go</button>
-      <button type="button">Go</button>
-    </form>
-    <div id="host"></div>
-  </main>
-  <script>
-    var host = document.getElementById("host");
-    var root = host.attachShadow({ mode: "open" });
-    root.innerHTML = '<button type="button">Inside shadow</button>';
-    window.__fixtureMutations = 0;
-    window.__fixtureMutationLog = [];
-    new MutationObserver(function (records) {
-      window.__fixtureMutations += records.length;
-      records.forEach(function (r) {
-        window.__fixtureMutationLog.push(r.type + ":" + r.target.nodeName + ":" + (r.attributeName || ""));
-      });
-    }).observe(document.documentElement, { attributes: true, childList: true, subtree: true, characterData: true });
-    window.__fixtureClicks = [];
-    document.addEventListener("click", function (event) { window.__fixtureClicks.push(event.target.textContent.trim()); }, true);
-  </script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>bsk snapshot fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Fixture for the trace-free snapshot</h1>
+      <p>
+        This page watches itself: any attribute or child-list mutation is counted, and it reports whether an automation
+        global appeared.
+      </p>
+      <nav aria-label="Primary">
+        <a id="home" href="#home">Home</a>
+        <a href="#docs">Docs</a>
+        <a href="#docs">Docs</a>
+      </nav>
+      <form>
+        <label for="q">Search</label>
+        <input id="q" name="q" placeholder="Search the docs" />
+        <button type="button">Go</button>
+        <button type="button">Go</button>
+      </form>
+      <section id="pointer-generics" style="cursor: pointer">
+        <div id="card-tile" style="cursor: pointer">Card tile</div>
+        <span id="icon-tile" style="cursor: pointer"><span id="icon-glyph">Icon tile</span></span>
+        <div id="outlined-tile" tabindex="0" style="cursor: pointer">Focusable tile</div>
+        <div id="svg-tile" style="cursor: pointer">
+          <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"></circle></svg>SVG tile
+        </div>
+      </section>
+      <div id="nested-labels">
+        <div id="nested-pointer-card" style="cursor: pointer">
+          <div><div>Nested pointer card</div></div>
+        </div>
+        <div id="invoice-card" tabindex="0">
+          <div class="t">Invoice 42</div>
+          <p>Due Friday</p>
+        </div>
+        <div id="open-menu" onclick="void 0">
+          <div>Open</div>
+          <div>menu</div>
+        </div>
+        <span id="span-tile" style="cursor: pointer"><span>Span tile</span></span>
+        <div id="settings-tile" onclick="void 0">
+          <svg width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3"></circle></svg>
+          <div>Settings</div>
+        </div>
+        <div id="long-card" tabindex="0">
+          <p>
+            Long card start: this clickable card wraps a whole paragraph of body copy, the kind of card that links a
+            full article teaser LONG_CARD_TAIL
+          </p>
+          <button type="button">Read</button>
+        </div>
+        <section id="pointer-section" style="cursor: pointer">
+          <div>
+            <div><div>Deep pointer section</div></div>
+          </div>
+        </section>
+        <div id="js-card" style="cursor: pointer">
+          <div>Pro plan</div>
+          <div><span>new</span><span>$20</span><span>/mo</span></div>
+        </div>
+        <a id="link-card" href="#link-card"
+          ><div><span>Link card</span></div></a
+        >
+        <div id="scroll-box" style="overflow: auto; height: 40px">
+          <p>Scroll box line one</p>
+          <p>line two</p>
+          <p>line three</p>
+          <p>line four</p>
+          <p>line five</p>
+        </div>
+        <ul tabindex="0">
+          <li id="option-alpha" style="cursor: pointer">Option alpha</li>
+          <li id="option-beta" style="cursor: pointer">Option beta</li>
+        </ul>
+      </div>
+      <div id="host"></div>
+    </main>
+    <script>
+      var host = document.getElementById("host");
+      var root = host.attachShadow({ mode: "open" });
+      root.innerHTML = '<button type="button">Inside shadow</button>';
+      window.__fixtureMutations = 0;
+      window.__fixtureMutationLog = [];
+      new MutationObserver(function (records) {
+        window.__fixtureMutations += records.length;
+        records.forEach(function (r) {
+          window.__fixtureMutationLog.push(r.type + ":" + r.target.nodeName + ":" + (r.attributeName || ""));
+        });
+      }).observe(document.documentElement, { attributes: true, childList: true, subtree: true, characterData: true });
+      document.getElementById("js-card").addEventListener("click", function () {});
+      window.__fixtureClicks = [];
+      document.addEventListener(
+        "click",
+        function (event) {
+          window.__fixtureClicks.push(event.target.textContent.trim());
+        },
+        true,
+      );
+    </script>
+  </body>
 </html>

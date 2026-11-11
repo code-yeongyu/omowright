@@ -1,12 +1,9 @@
 # Attached engine: the user's own browser through BrowserSkill
 
-OmOWright has two engines. The **owned** engine (`connectPipe`,
-`connectCloakProfile`) launches a browser you control. The **attached** engine
-drives the browser the user is already signed into, through Tencent
-BrowserSkill (stock `bsk` daemon + Web Store extension, no fork). Pick the
-attached engine when the task needs the user's sessions, cookies, or their
-open tabs; pick the owned engine for scraping, WAF targets, headless runs, and
-anything that should not touch the user's profile.
+BrowserSkill is third in `connectBrowser()`'s order, after Aside and Ego Lite.
+It drives the browser the user is already signed into (Chrome, Edge, Brave)
+through Tencent BrowserSkill (stock `bsk` daemon + Web Store extension, no
+fork), so it serves tasks that need the user's sessions, cookies, or open tabs.
 
 ## Core loop
 
@@ -15,15 +12,36 @@ const { connectBrowserSkill, bskSnapshot } = await import("omowright");
 
 const session = await connectBrowserSkill({ name: "book a table", focused: false });
 await session.navigate("https://example.com/");
-const { tree, refs, css } = await bskSnapshot(session, { interactive: true });
+const sync = () => session.cooperate("sync").then((r) => r.context_id);
+const { tree, refs, css } = await bskSnapshot(session, { interactive: true, context: await sync() });
 // tree and refs look exactly like page.snapshot(); css[ref] is a light-DOM
 // selector for the same element (null inside shadow roots)
-await session.click({ selector: css.e3 });          // or session.click("@e3") after session.observe()
-await session.fill(css.e5, "hello", { clearBefore: true });
-await session.press("Enter");
+await session.click({ selector: css.e3 }, { context: await sync() }); // or "@e3" after session.observe()
+await session.fill(css.e5, "hello", { clearBefore: true, context: await sync() });
+await session.press("Enter", { context: await sync() });
 await session.waitForNavigation({ waitUntil: "load" });
-await session.stop();                                // ALWAYS: returns borrowed tabs, closes the Agent Window
+await session.stop(); // ALWAYS: returns borrowed tabs, closes the Agent Window
 ```
+
+### Shared control (BrowserSkill 0.4+)
+
+The person at the keyboard can work in the task tab while the agent does. The
+extension therefore refuses every page action with `permission_denied` /
+`data.reason: "cooperation_sync_required"` unless it carries the
+`context_id` of the latest `session.cooperate("sync")`. A context is good
+for one action: sync, decide from what the sync reported, act with
+`{ context }`, then sync again. Gated: navigation (except the first
+navigation of the untouched blank tab), every input method, `evaluate` (and
+so `bskSnapshot`), `tabClose`, `resize`, `emulate`, `observe` with
+`probeHover`, and `screenshot({ fullPage: true })`. Reads (`observe`,
+`snapshot`, `getHtml`, `screenshot()`, `console`, `network`,
+`waitForNavigation`) need no context. `dependsOn: ["@e2", ...]` narrows the
+check to the observed regions the decision used.
+
+On `cooperation_sync_required`, call `session.cooperate("wait", { timeoutMs })`
+(at most 25 s) until it reports `ready`, sync again and replan from the live
+page; never replay the refused action blindly. `user_aborted` means the
+person stopped the task.
 
 `connectBrowserSkill` talks to the daemon over its Unix-socket IPC directly —
 no `bsk` process per call. It starts the daemon if needed (`bsk status`),
@@ -33,7 +51,13 @@ per-user `bsk-daemon-<hash>` scheduled task that runs `bsk daemon start
 --foreground` under `conhost.exe --headless`, so no console window opens.
 It never falls back to a headless browser: when no
 extension is connected it throws `no_browser_connected` and `bskDoctor()`
-tells you the one step that is missing.
+tells you the one step that is missing. It also refuses extension 0.4.0 with
+`extension_outdated`: that release puts each task's tabs into a "BrowserSkill"
+tab group the browser saves and syncs, so the group outlives the task. With no
+`browser` named, an up-to-date connected browser is picked instead; otherwise
+the user updates the extension to 0.4.1 or later and deletes any saved
+"BrowserSkill" groups by hand. `bskDoctor()` reports such browsers in
+`outdatedExtensions` and is not `ready` while they are the only ones connected.
 
 ## What the session can do
 
@@ -43,16 +67,16 @@ Targets are a ref (`"e3"` / `"@e3"` from `session.observe()` or
 `session.snapshot()`), a CSS selector, or `{ captureId, x, y }` from a
 screenshot.
 
-| Need | Call |
-| --- | --- |
-| Navigate / history | `navigate(url, {waitUntil, timeoutMs})`, `back()`, `forward()`, `reload({hard})`, `waitForNavigation()` |
-| Read the page | `observe({maxTokens, cursor, probeHover})` (VOM text with `@eN` refs), `snapshot()`, `getHtml({ref, maxBytes})`, `bskSnapshot(session)` (OmOWright tree + css) |
-| Act | `click(target, {button, clickCount, modifiers})`, `hover`, `fill(target, value)`, `press(key, {target, holdMs})`, `select(target, values)`, `focus`, `blur`, `scrollTo`, `wheel({deltaY})` |
-| Script | `evaluate(expression, {awaitPromise, timeoutMs})` → `{ok, value, error}`; Agent Window tabs only |
-| Pixels | `screenshot({ref})` → `{buffer, width, height, captureId}`; `screenshot({fullPage: true})` streams the capture back in chunks |
-| Tabs | `tabList({scope: "user"})`, `tabCreate({url})`, `tabSelect(id)`, `tabClose(id)`, `tabBorrow(id)` (the user confirms), `tabReturn(id)` |
-| Humans | `requestHelp({prompt, targets, completionCriteria, timeoutMs})` for login, CAPTCHA, OTP, payment — the extension shows an overlay and waits |
-| Diagnostics | `console({since})`, `network({since})` (metadata only), `emulate({overrides})`, `resize(w, h)` |
+| Need               | Call                                                                                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Navigate / history | `navigate(url, {waitUntil, timeoutMs})`, `back()`, `forward()`, `reload({hard})`, `waitForNavigation()`                                                                                    |
+| Read the page      | `observe({maxTokens, cursor, probeHover})` (VOM text with `@eN` refs), `snapshot()`, `getHtml({ref, maxBytes})`, `bskSnapshot(session)` (OmOWright tree + css)                             |
+| Act                | `click(target, {button, clickCount, modifiers})`, `hover`, `fill(target, value)`, `press(key, {target, holdMs})`, `select(target, values)`, `focus`, `blur`, `scrollTo`, `wheel({deltaY})` |
+| Script             | `evaluate(expression, {awaitPromise, timeoutMs})` → `{ok, value, error}`; Agent Window tabs only                                                                                           |
+| Pixels             | `screenshot({ref})` → `{buffer, width, height, captureId}`; `screenshot({fullPage: true})` streams the capture back in chunks                                                              |
+| Tabs               | `tabList({scope: "user"})`, `tabCreate({url})`, `tabSelect(id)`, `tabClose(id)`, `tabBorrow(id)` (the user confirms), `tabReturn(id)`                                                      |
+| Humans             | `requestHelp({prompt, targets, completionCriteria, timeoutMs})` for login, CAPTCHA, OTP, payment — the extension shows an overlay and waits                                                |
+| Diagnostics        | `console({since})`, `network({since})` (metadata only), `emulate({overrides})`, `resize(w, h)`                                                                                             |
 
 Anything the daemon refuses comes back as a `BskRpcError` with the daemon's
 `code` (`not_found`, `invalid_params`, `permission_denied`, `timeout`,
@@ -79,16 +103,27 @@ bot detection; for WAF-heavy targets use the owned engine with CloakBrowser
 
 ```js
 const { bskDoctor, bskOnboard } = await import("omowright");
-const report = await bskDoctor();            // {cli, daemon, browsers, primary, identification, browsersConnected, ready, nextStep}
+const report = await bskDoctor(); // {cli, daemon, browsers, primary, identification, browsersConnected, ready, nextStep}
 if (!report.ready) {
   const result = await bskOnboard({ browser: knownBrowserOrUndefined, onHumanStep: (s) => console.log(s.step) });
   // result.needsChoice === true: nothing was registered; ask the user which
   //   browser they use (result.identification.candidates), then call again with
   //   { browser: "<id>" }.
+  // result.outdatedExtensions non-empty and ready === false: the only connected
+  //   extension is 0.4.0; humanStep (also sent to onHumanStep) tells the user to
+  //   update it to 0.4.1 or later and delete saved "BrowserSkill" tab groups.
+  // result.daemon.running === false: humanStep is null and nothing was
+  //   registered; result.nextStep says how to start the daemon. Start it and
+  //   call again before telling the user anything.
   // otherwise result.humanStep is the single thing to tell the user, e.g.
   // 'Quit Aside completely and open it again; a dialog offers to enable "BrowserSkill" — click Enable.'
 }
 ```
+
+`daemon.startBlocked: true` means the host refused a detached daemon start
+(Windows Job Object breakaway). Only a client that starts the daemon can see
+that, so `bskOnboard()` reports it; `bskDoctor()`'s default client has
+auto-start off and does not.
 
 ### Which browser gets the extension
 
@@ -98,17 +133,24 @@ proves nothing — Chrome leaves one behind after a single launch — so
 Brave, Chromium, Arc, Dia, Vivaldi, Opera, Comet, Aside, Naver Whale) by
 usage signals from `probeBrowserSignals`:
 
-| Signal | macOS | Linux | Windows |
-| --- | --- | --- | --- |
-| Default browser | LaunchServices `https` handler | `xdg-settings get default-web-browser` | `UserChoice` ProgId |
-| Running now | the app bundle in `/Applications` or `~/Applications` (automation builds elsewhere do not count) | process name | `tasklist` image |
-| Recent use | `Local State` / `Default/History` mtime within 7 days | same | same |
+| Signal          | macOS                                                                                            | Linux                                  | Windows             |
+| --------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------- |
+| Default browser | LaunchServices `https` handler                                                                   | `xdg-settings get default-web-browser` | `UserChoice` ProgId |
+| Running now     | the app bundle in `/Applications` or `~/Applications` (automation builds elsewhere do not count) | process name                           | `tasklist` image    |
+| Recent use      | `Local State` / `Default/History` mtime within 7 days                                            | same                                   | same                |
 
-The decision, in order: an explicit `browser` option or `OMOWRIGHT_BROWSER`;
-the default browser when it is also in use, or when nothing else is; the only
-browser in use when no default can be read. Everything else — the default is
-Safari or Firefox, the default is idle while another browser runs, several
-browsers are in use, or nothing shows use — returns `needsChoice: true` with
+The decision, in order, with the `confidence` each step reports: an explicit
+`browser` option or `OMOWRIGHT_BROWSER` (`explicit`); the one browser whose
+extension is already connected to the daemon (`connected`); the default
+browser when it is also in use (`default-and-in-use`), or when nothing else is
+(`default`); the only browser in use (`only-in-use`), the only one running
+(`only-running`) or the only one installed (`only-installed`) when no default
+can be read. The extension names its browser from the user agent, and forks
+such as Brave and Arc report `chrome`, so a `chrome` or `chromium` name counts
+as connected only when exactly one browser able to send it is running.
+Everything else — the default is Safari or Firefox, the default is idle while
+another browser runs, several browsers are in use, or nothing shows use —
+returns `needsChoice: true` with
 every candidate and its signals, and registers nothing. Ask the user; if the
 agent keeps a memory, look there first and record the answer.
 
@@ -123,13 +165,13 @@ reverted — the library calls the binary by absolute path); `bsk status` to
 start the daemon; then, for the identified browser only, Chrome's
 external-extension registration for the Web Store listing:
 
-| Platform | Where the entry goes | What the user does |
-| --- | --- | --- |
-| macOS | `<user data dir>/External Extensions/<id>.json` | relaunch the browser, click **Enable** once |
-| Windows | `HKCU\Software\<vendor>\<browser>\Extensions\<id>` (`reg add`, no admin) | click **Enable** on the toolbar badge; no restart |
-| Linux (Chromium) | `<user data dir>/External Extensions/<id>.json` | relaunch; installs silently |
-| Linux (Chrome/Edge/Brave) | `/opt/google/chrome/extensions/<id>.json` etc. — needs root | otherwise: open the store link and click Add |
-| Opera, and Vivaldi/Whale off macOS | no external-extension path | open the store link in that browser and click Add |
+| Platform                           | Where the entry goes                                                     | What the user does                                |
+| ---------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------- |
+| macOS                              | `<user data dir>/External Extensions/<id>.json`                          | relaunch the browser, click **Enable** once       |
+| Windows                            | `HKCU\Software\<vendor>\<browser>\Extensions\<id>` (`reg add`, no admin) | click **Enable** on the toolbar badge; no restart |
+| Linux (Chromium)                   | `<user data dir>/External Extensions/<id>.json`                          | relaunch; installs silently                       |
+| Linux (Chrome/Edge/Brave)          | `/opt/google/chrome/extensions/<id>.json` etc. — needs root              | otherwise: open the store link and click Add      |
+| Opera, and Vivaldi/Whale off macOS | no external-extension path                                               | open the store link in that browser and click Add |
 
 Then it waits on `system.status{wait_for_browser_ms}` until the extension
 connects. Tell the user exactly `result.humanStep`, nothing more. If the user

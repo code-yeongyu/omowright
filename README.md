@@ -25,7 +25,9 @@ Jun's argument is the whole design:
    new vocabulary to teach in the prompt.
 2. **Protect the context window.** Raw DOM and raw CDP are noise. The primary
    read is an accessibility snapshot with refs, and `compactSnapshot()` strips
-   the duplicated refs map, which is about 54% of the bytes on a real page.
+   the duplicated refs map. How much that saves depends on the page: on
+   2026-11-09 it cut 7% of the bytes on example.com, 56% on a form page and
+   64% on Hacker News.
 3. **CDP underneath, never on top.** Every method is a thin wrapper over CDP
    calls. The model writes Playwright; the library speaks the protocol.
 4. **Fall back to pixels.** When the DOM lies (canvas, custom widgets,
@@ -39,17 +41,63 @@ const browser = await connectPipe({ browserPath: "/path/to/chromium", browserArg
 const page = await browser.newTab("https://example.com");
 
 console.log(compactSnapshot(await page.snapshot()));
-// - heading "Example Domain" [level=1]
+// Live pages change, so the exact tree drifts; on 2026-11-09 it read:
 // - text: "This domain is for use in documentation examples ..."
-// - paragraph:
-//   - link "Learn more" [ref=e1]
+// - link "Learn more" [ref=e1]
 
-await page.locator("e1").click();          // refs come straight from the snapshot
+await page.locator("e1").click(); // refs come straight from the snapshot
 await browser.close();
 ```
 
-Re-snapshots come back as a unified diff against the previous tree, so a model
-reads what changed instead of the whole page again.
+On Windows, write `browserPath` with forward slashes (`"C:/Program Files/..."`)
+or as `` String.raw`C:\Program Files\...` ``. In a plain string literal each
+backslash starts an escape: the launch usually fails with ENOENT, and a segment
+such as `\u` or `\x` is a SyntaxError before anything runs. Give every
+browser that runs at the same time its own profile through
+``browserArgs: ["--headless", `--user-data-dir=${dir}`]`` (for example a
+`mkdtemp` directory). On Windows, Chrome otherwise falls back to a shared
+default profile, and a second launch on it exits with code 21.
+
+Every `page.snapshot()` returns the whole tree. Pass `{ diff: true }` to get
+only what changed since the previous snapshot; it falls back to the full tree
+with a `reason` when there is no usable baseline or the diff would be larger.
+To look for one thing,
+`page.snapshot({ find: "Checkout" })` returns only the matching lines, with
+their refs and a little context around each.
+
+## Snapshot size
+
+Token counts per page (o200k_base, from the `gpt-tokenizer` devDependency),
+each read right after `page.goto()`: the raw HTML
+(`document.documentElement.outerHTML`), `compactSnapshot(await page.snapshot())`
+and `compactSnapshot(await page.snapshot({ interactive: true }))`. Measured on
+2026-11-05 (UTC) at commit `4845ef5` with Chrome for Testing 156.0.8078.4
+(headless shell) on Linux.
+
+| Page                                 | Shape        | Raw HTML | Snapshot | Interactive snapshot | Snapshot / HTML | Interactive / HTML |
+| ------------------------------------ | ------------ | -------: | -------: | -------------------: | --------------: | -----------------: |
+| news.ycombinator.com                 | link-heavy   |   11,615 |    4,220 |                3,811 |           36.3% |              32.8% |
+| en.wikipedia.org/wiki/Web_browser    | long article |  143,312 |   14,155 |               12,591 |            9.9% |               8.8% |
+| github.com/code-yeongyu/omowright \* | app-like     |  116,378 |    5,432 |                5,481 |            4.7% |               4.7% |
+| example.com                          | trivial      |      637 |      222 |                  222 |           34.9% |              34.9% |
+| httpbin.org/forms/post               | form         |      428 |      370 |                  245 |           86.4% |              57.2% |
+
+\* The interactive snapshot is read after the full one, and here it came out
+larger, so the page likely changed between the two reads: `page.goto()` can
+resolve before a page like this has loaded
+([#152](https://github.com/code-yeongyu/omowright/issues/152)). The next run
+read 111,370 / 5,262 / 4,443 tokens (4.7% / 4.0%).
+
+Live pages drift, so reruns differ; the raw HTML varies most (Wikipedia read
+143,312 and then 92,100 HTML tokens in two runs in a row, and 14,155 and then
+12,925 snapshot tokens).
+
+Reproduce after `bun install` (any Chromium works for `--browser`, or set
+`OMOWRIGHT_BENCH_BROWSER`):
+
+```bash
+bun scripts/bench-snapshot-tokens.ts --browser ~/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell --browser-arg=--no-sandbox
+```
 
 ## Scrolling is a first-class problem
 
@@ -69,15 +117,15 @@ await page.goto("https://example.com/feed");
 
 const items = [];
 const run = collectWhileScrolling(page, snoop, {
-  minItems: 200,                 // stop once this many items are in hand
-  maxScrolls: 15,                // or after this many scroll rounds
+  minItems: 200, // stop once this many items are in hand
+  maxScrolls: 15, // or after this many scroll rounds
   extract: (json) => json.items, // pull items out of each JSON body
-  scroll: "wheel",               // "end" jumps to the bottom instead
-  settleMs: 800,                 // wait for the next page to land
+  scroll: "wheel", // "end" jumps to the bottom instead
+  settleMs: 800, // wait for the next page to land
 });
 let step;
 while (!(step = await run.next()).done) items.push(step.value);
-step.value;                      // { rounds, total, stoppedBecause: "minItems" | "maxScrolls" | "noGrowth" }
+step.value; // { rounds, total, stoppedBecause: "minItems" | "maxScrolls" | "noGrowth" }
 ```
 
 It drains first, scrolls second, and stops on its own when the document stops
@@ -113,7 +161,34 @@ sleep to tune.
   endpoint) when it is unresponsive; an attach requires the endpoint to answer
   with the browser GUID recorded at launch, so a reused pid on a rebound port is
   relaunched rather than driven. `listInstances()` lists every registered
-  instance with liveness.
+  instance with liveness. The registry directory is owner-only (mode `0700`; on
+  Windows a protected ACL), so on Windows it must live on a volume with ACLs:
+  on FAT32, exFAT or a share without ACLs `connectNamed` throws instead of
+  leaving the registry open. The registry must be on a local filesystem;
+  network filesystems (NFS/SMB) do not provide the cross-process guarantees
+  required here. Linux needs the `flock` utility from util-linux or BusyBox.
+  Locks are kernel-held and released on process exit; their zero-byte `.flock`
+  files persist. Never delete or rename a `.flock` while clients use the registry.
+  **Upgrading from 0.1.0:** stop all clients sharing a registry before upgrading
+  them together; old and new versions use different locks and must not overlap.
+  Legacy `.lock`, `.lock.*.stale`, and `.lock.*.tmp` files are ignored and left
+  untouched; remove them manually only after all clients have upgraded.
+- **Shared attaches.** Chrome asks the user to allow remote debugging once per
+  connection to their own profile, so `connect(url)` and `connectNamed`
+  attaches in one process share one CDP connection per browser (keyed by its
+  GUID). Each call returns a handle on it: `close()` RELEASES that handle, and
+  only the last release disconnects. Pages attached through one handle are the
+  same pages for every handle and stay attached until the last release. A
+  handle never changes what another holder gets: on a shared connection
+  `setDialogPolicy` throws `SharedConnectionError` (pass `dialogPolicy` when
+  attaching to get a connection of your own), a sole holder's
+  `setDialogPolicy` works and that connection is never shared again, and
+  properties, client writes and listeners stay with the handle. A connection
+  is never shared when an `authorizer` (or any non-plain client option) is
+  set, nor between callers whose options differ (`dialogPolicy` included). A
+  shared handle's reconnect never reaches a browser other than the one it
+  was opened for; an unshared connection (one with an authorizer, say)
+  reconnects to whatever answers on its URL.
 - **Scoped endpoints.** An app can hand OmOWright a limited browser (say, one
   thread's tabs) behind a token: `connect(url, { client: { authorizer } })`
   sends `Authorization` from `authorizer.resolveAuthorization({ forceRefresh })`
@@ -126,7 +201,8 @@ sleep to tune.
   `Browser.setDownloadBehavior`).
 - **Agent signals.** `createEvents()` pushes `tabOpened`, `popupOpened`,
   `downloadStarted` / `downloadFinished` and friends, so agents stop polling.
-  `createAgentTabs()` opens every tab in the background and never steals focus.
+  `createAgentTabs()` opens every tab in its own background window, so it never
+  steals focus. Headed rendering and screenshots are verified on Linux and macOS.
 - **Frames and overlays.** OOPIF-aware snapshots, `describeLayers()` for the
   dialog or toast that swallowed your click, and a dialog policy for
   `alert` / `confirm` / `prompt`.
@@ -154,6 +230,14 @@ sleep to tune.
 ## Install
 
 ```bash
+npm i omowright
+# or
+bun add omowright
+```
+
+To track unreleased changes, install from GitHub instead:
+
+```bash
 bun add github:code-yeongyu/omowright
 ```
 
@@ -170,17 +254,18 @@ browser log), stealth profiles, eval-kernel usage, frames and human handoff,
 the attached BrowserSkill engine, and reading a 1Password web-vault item
 safely. Task presets live in `presets/`:
 
-| Preset | Covers |
-| --- | --- |
-| `presets/network` | Snoop JSON APIs, wait for requests, **collect while scrolling**, traces, routes |
-| `presets/visual-browse` | Coordinate UI, **CUA scroll**, viewport pinning, extension popups |
-| `presets/captcha` | Checkbox, slider, OCR and image-grid challenges |
-| `presets/chrome` | Tabs, windows, bookmarks, history, downloads, topSites |
-| `presets/agent-events` | Tab, popup and download push events |
-| `presets/cloak-bridge` | The MV3 bridge extension and native-messaging host |
+| Preset                  | Covers                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `presets/network`       | Snoop JSON APIs, wait for requests, **collect while scrolling**, traces, routes |
+| `presets/visual-browse` | Coordinate UI, **CUA scroll**, viewport pinning, extension popups               |
+| `presets/captcha`       | Checkbox, slider, OCR and image-grid challenges                                 |
+| `presets/chrome`        | Tabs, windows, bookmarks, history, downloads, topSites                          |
+| `presets/agent-events`  | Tab, popup and download push events                                             |
+| `presets/cloak-bridge`  | The MV3 bridge extension and native-messaging host                              |
 
-Install the skill by copying or symlinking `skills/omowright` into your
-harness's skills directory (for example `~/.agents/skills/omowright`). The
+Install the skill by copying or symlinking `skills/omowright` (in an npm
+install, `node_modules/omowright/skills/omowright`) into your harness's
+skills directory (for example `~/.agents/skills/omowright`). The
 agent-facing tool reference is [`TOOLS.md`](TOOLS.md); machine-readable schemas
 ship as the `toolSchemas` export.
 
@@ -188,7 +273,9 @@ ship as the `toolSchemas` export.
 
 For long-lived authenticated work, use `connectCloakProfile()` or the bundled
 `omowright-cloak` launcher. The first run stores a random fingerprint seed in
-`.omowright-cloak.json` (mode `0600`) inside the private profile (mode `0700`);
+`.omowright-cloak.json` (mode `0600`) inside the private profile (mode `0700`;
+on Windows, a protected ACL that grants only the current user, plus SYSTEM and
+Administrators, Windows' root equivalents, where Windows put them);
 later runs reuse it and reject a conflicting seed. Never copy Google or
 1Password cookies between profiles. Full lifecycle:
 [`docs/cloakbrowser-persistent-profile.md`](docs/cloakbrowser-persistent-profile.md).
@@ -204,7 +291,7 @@ bun run test:node   # Node test runner, same files
 Live tests need a Chromium headless shell. Set `SHELL_BIN` (and
 `CLOAKBROWSER_BIN` for the event-bridge test) to its path, or install one into
 Playwright's cache. CI installs `chrome-headless-shell` with
-`@puppeteer/browsers` and runs both runners on Ubuntu. `test/hygiene.test.mjs`
+`@puppeteer/browsers` and runs both runners on Ubuntu. `test/hygiene.test.ts`
 fails the build if a tracked file contains an absolute home path, a personal
 address or a private host.
 

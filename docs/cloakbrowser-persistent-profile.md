@@ -19,6 +19,9 @@ uv pip install --python ~/.local/share/omowright-cloak-venv/bin/python \
   'import cloakbrowser; print(cloakbrowser.binary_info()["binary_path"])'
 ```
 
+The `0.5.7` pin is deliberate: current releases (0.7.1 on 2026-11-07) ask for a
+license key on every launch, and this guide is written against 0.5.7.
+
 Do not assume the versioned Chromium directory. Resolve the binary path with
 `cloakbrowser.binary_info()` on the machine that will run the job.
 
@@ -40,7 +43,14 @@ omowright-cloak \
   --snapshot
 ```
 
-The profile directory is mode `0700`. The metadata file is not a credential
+The profile directory is mode `0700`. On Windows, where mode bits do not
+restrict access, it gets a protected ACL that grants only the current user (plus
+SYSTEM and Administrators, Windows' root equivalents, where Windows put them)
+and that its files inherit; the metadata file gets the same. A later run that
+finds the directory already protected that way leaves its ACL alone. The ACL
+needs a volume that keeps ACLs: on FAT32, exFAT or a network share without them,
+`connectCloakProfile()` throws rather than use a profile other users can read, so
+keep the profile on an NTFS or ReFS volume. The metadata file is not a credential
 store; it only pins the CloakBrowser fingerprint seed. Keep the profile on the
 machine that owns the session, and never commit it.
 
@@ -52,8 +62,7 @@ overrides fail closed.
 ## Launch and reuse one profile
 
 ```js
-import { connectPipe, compactSnapshot } from
-  "omowright";
+import { connectPipe, compactSnapshot } from "omowright";
 import fs from "node:fs";
 
 const profile = "/path/to/private/browser-profile";
@@ -99,8 +108,7 @@ flags. `connectCloakProfile()` does both and is the preferred programmatic
 entry point:
 
 ```js
-import { connectCloakProfile } from
-  "omowright";
+import { connectCloakProfile } from "omowright";
 
 const browser = await connectCloakProfile({
   profileDir: "/path/to/private/browser-profile",
@@ -128,8 +136,7 @@ depend on device-bound application state rather than cookies alone.
 explicitly provides an authorized export:
 
 ```js
-import { injectCookies } from
-  "omowright";
+import { injectCookies } from "omowright";
 
 await injectCookies(page, authorizedCookies);
 ```
