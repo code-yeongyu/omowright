@@ -1533,7 +1533,9 @@ type OmODownload = InstanceType<typeof OmODownload>;
 function createRefStaleErrorClass() {
   return class RefStaleError extends Error {
     constructor(xn: string) {
-      super(`Ref "${xn}" is stale — the element was removed or the page changed. Take a new snapshot and retry.`);
+      super(
+        `Ref "${xn}" is stale — the element was removed, the page changed, or the ref came from a snapshot taken by another script or connection. Take a new snapshot on this connection and use its refs.`,
+      );
       this.name = `RefStaleError`;
     }
   };
