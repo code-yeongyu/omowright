@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
 
+import noFlakeMasking from "./no-flake-masking.ts";
 import { type Finding, lintFixtures } from "./rule-findings.ts";
 
 type Case = readonly [name: string, source: string];
+// A flagged no-flake-masking case names the message kind it must report, read from the rule itself.
+type FlakeCase = readonly [name: string, source: string, kind: keyof typeof noFlakeMasking.meta.messages];
 
 const sleepCode = "omowright-testing(no-fixed-sleep)";
 const flakeCode = "omowright-testing(no-flake-masking)";
@@ -65,27 +68,28 @@ const signals: readonly Case[] = [
   ],
 ];
 
-const flagged: readonly Case[] = [
-  ["a test retry option", 'test("loads", { retry: 2 }, async () => {});'],
-  ["an it retry option", 'it("loads", { retry: 2 }, async () => {});'],
-  ["a describe retry option", 'describe("loader", { retry: 3 }, () => {});'],
-  ["a test.concurrent retry option", 'test.concurrent("loads", { retry: 1 }, async () => {});'],
-  ["a test.each retry option", 'test.each([1, 2])("loads %i", { retry: 1 }, async () => {});'],
-  ["a retry option in the third argument", 'test("loads", async () => {}, { retry: 2 });'],
-  ["a vi.setConfig retry", "vi.setConfig({ retry: 2 });"],
-  ["a defineConfig test retry", "export default defineConfig({ test: { retry: 2 } });"],
+const flagged: readonly FlakeCase[] = [
+  ["a test retry option", 'test("loads", { retry: 2 }, async () => {});', "retry"],
+  ["an it retry option", 'it("loads", { retry: 2 }, async () => {});', "retry"],
+  ["a describe retry option", 'describe("loader", { retry: 3 }, () => {});', "retry"],
+  ["a test.concurrent retry option", 'test.concurrent("loads", { retry: 1 }, async () => {});', "retry"],
+  ["a test.each retry option", 'test.each([1, 2])("loads %i", { retry: 1 }, async () => {});', "retry"],
+  ["a retry option in the third argument", 'test("loads", async () => {}, { retry: 2 });', "retry"],
+  ["a vi.setConfig retry", "vi.setConfig({ retry: 2 });", "retry"],
+  ["a defineConfig test retry", "export default defineConfig({ test: { retry: 2 } });", "retry"],
   [
     "a nested projects retry",
     "export default defineConfig({ test: { projects: [{ test: { name: 'node', retry: 1 } }] } });",
+    "retry",
   ],
-  ["a positional timeout literal", 'test("loads", async () => {}, 60_000);'],
-  ["a positional timeout expression", 'test("loads", async () => {}, 2 * 60_000);'],
-  ["a positional timeout identifier", 'test("loads", async () => {}, LONG_TIMEOUT);'],
-  ["a timeout option in the second argument", 'test("loads", { timeout: 60_000 }, async () => {});'],
-  ["a timeout option in the third argument", 'test("loads", async () => {}, { timeout: 60_000 });'],
-  ["a describe timeout option", 'describe("loader", { timeout: 60_000 }, () => {});'],
-  ["a vi.setConfig testTimeout", "vi.setConfig({ testTimeout: 45_000 });"],
-  ["a vi.setConfig hookTimeout", "vi.setConfig({ hookTimeout: 45_000 });"],
+  ["a positional timeout literal", 'test("loads", async () => {}, 60_000);', "timeout"],
+  ["a positional timeout expression", 'test("loads", async () => {}, 2 * 60_000);', "timeout"],
+  ["a positional timeout identifier", 'test("loads", async () => {}, LONG_TIMEOUT);', "timeout"],
+  ["a timeout option in the second argument", 'test("loads", { timeout: 60_000 }, async () => {});', "timeout"],
+  ["a timeout option in the third argument", 'test("loads", async () => {}, { timeout: 60_000 });', "timeout"],
+  ["a describe timeout option", 'describe("loader", { timeout: 60_000 }, () => {});', "timeout"],
+  ["a vi.setConfig testTimeout", "vi.setConfig({ testTimeout: 45_000 });", "timeout"],
+  ["a vi.setConfig hookTimeout", "vi.setConfig({ hookTimeout: 45_000 });", "timeout"],
 ];
 
 const allowed: readonly Case[] = [
@@ -112,10 +116,12 @@ let results: Finding[][] = [];
 before(() => {
   results = lintFixtures(groups.flat().map(([, source]) => source));
 });
-const codesOf = (group: readonly Case[], index: number): string[] => {
+const findingsOf = (group: (typeof groups)[number], index: number): Finding[] => {
   const offset = groups.slice(0, groups.indexOf(group)).reduce((sum, g) => sum + g.length, 0);
-  return (results[offset + index] ?? []).map((finding) => finding.code);
+  return results[offset + index] ?? [];
 };
+const codesOf = (group: readonly Case[], index: number): string[] =>
+  findingsOf(group, index).map((finding) => finding.code);
 
 describe("no-fixed-sleep through the ratchet lint configuration", () => {
   sleeps.forEach(([name], index) => {
@@ -131,9 +137,9 @@ describe("no-fixed-sleep through the ratchet lint configuration", () => {
 });
 
 describe("no-flake-masking through the ratchet lint configuration", () => {
-  flagged.forEach(([name], index) => {
-    test(`reports ${name}`, () => {
-      assert.deepEqual(codesOf(flagged, index), [flakeCode]);
+  flagged.forEach(([name, , kind], index) => {
+    test(`reports ${name} as a ${kind}`, () => {
+      assert.deepEqual(findingsOf(flagged, index), [{ code: flakeCode, message: noFlakeMasking.meta.messages[kind] }]);
     });
   });
   allowed.forEach(([name], index) => {

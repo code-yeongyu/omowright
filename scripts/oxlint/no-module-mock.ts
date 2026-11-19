@@ -1,12 +1,11 @@
 // Module-mock half of no-test-doubles from interfere-inc/landmines 0.1.0 (MIT, Copyright (c) 2026
 // Interfere, Inc.), packages/landmines/src/rules/no-test-doubles.ts: vi.mock, vi.doMock and jest.mock
 // keep upstream's detection, including its `{ spy: true }` observation exception. Upstream does not
-// know bun:test or node:test, so bun's mock.module, its vi.mock alias and node:test's mock.module are
-// added here. Per-file counts are pinned in the lint ratchet.
-type Node = {
-  readonly type: string;
-  readonly [key: string]: unknown;
-};
+// know bun:test or node:test, so bun's mock.module, its vi.mock alias and node:test's mock.module (also
+// reached as `test.mock`, a default import's `.mock`, and a test or hook context's `t.mock`; see
+// node-test-context.ts) are added here. Per-file counts are pinned in the lint ratchet.
+import { child, field, identifier, nameOf, type Node, nodes, propertyName, unwrap } from "./ast.ts";
+import { givesContext, isContextMockModule, NODE_TEST_HOOKS, NODE_TEST_RUNNERS } from "./node-test-context.ts";
 
 type RuleContext = {
   readonly report: (problem: { readonly node: Node; readonly messageId: string }) => void;
@@ -35,58 +34,6 @@ const mockerOf = (module: string | null, name: string | null): Mocker | undefine
 
 const testModules: ReadonlySet<string> = new Set(mockers.map((mocker) => mocker.module));
 
-const isNode = (value: unknown): value is Node =>
-  typeof value === "object" && value !== null && typeof Reflect.get(value, "type") === "string";
-
-const child = (node: Node, key: string): Node | undefined => {
-  const value = node[key];
-  return isNode(value) ? value : undefined;
-};
-
-// A child the node type always has (a call's callee, a member's object): its absence is a parser bug.
-const field = (node: Node, key: string): Node => {
-  const value = child(node, key);
-  if (value === undefined) throw new Error(`${node.type} has no ${key}`);
-  return value;
-};
-
-const nodes = (node: Node, key: string): readonly Node[] => {
-  const value = node[key];
-  const values: readonly unknown[] = Array.isArray(value) ? value : [];
-  return values.filter(isNode);
-};
-
-const unwrap = (initial: Node): Node => {
-  let node = initial;
-  while (
-    node.type === "TSAsExpression" ||
-    node.type === "TSSatisfiesExpression" ||
-    node.type === "TSNonNullExpression" ||
-    node.type === "TSTypeAssertion" ||
-    node.type === "ParenthesizedExpression" ||
-    node.type === "AwaitExpression"
-  ) {
-    node = field(node, node.type === "AwaitExpression" ? "argument" : "expression");
-  }
-  return node;
-};
-
-const nameOf = (node: Node | undefined): string | null => {
-  if (node?.type === "Identifier") return String(node["name"]);
-  return node?.type === "Literal" && typeof node["value"] === "string" ? node["value"] : null;
-};
-
-const propertyName = (member: Node): string | null => {
-  const property = child(member, "property");
-  if (member["computed"] !== true) return property?.type === "Identifier" ? String(property["name"]) : null;
-  return property?.type === "Literal" ? nameOf(property) : null;
-};
-
-const identifier = (node: Node | undefined): string | null => {
-  const target = node === undefined ? undefined : unwrap(node);
-  return target?.type === "Identifier" ? String(target["name"]) : null;
-};
-
 // A require function: `require` itself, or one made inline by `createRequire(import.meta.url)`.
 const isRequire = (initial: Node | undefined): boolean => {
   const node = initial === undefined ? undefined : unwrap(initial);
@@ -101,6 +48,11 @@ const loadedModule = (initial: Node): string | null => {
   if (node.type === "ImportExpression") return nameOf(child(node, "source"));
   if (node.type !== "CallExpression" || !isRequire(child(node, "callee"))) return null;
   return nameOf(nodes(node, "arguments")[0]);
+};
+
+const loadedTestModule = (node: Node): string | null => {
+  const module = loadedModule(node);
+  return module !== null && testModules.has(module) ? module : null;
 };
 
 // upstream: `vi.mock(path, { spy: true })` keeps the real module and only observes it.
@@ -135,13 +87,9 @@ const noModuleMock = {
     const objects = new Map<string, Mocker>();
     const namespaces = new Map<string, string>();
     const imported = new Set<string>();
+    const nodeTestHooks = new Set<string>();
     const declarators: Node[] = [];
     const calls: Node[] = [];
-
-    const loadedTestModule = (node: Node): string | null => {
-      const module = loadedModule(node);
-      return module !== null && testModules.has(module) ? module : null;
-    };
 
     const objectOf = (initial: Node): Mocker | undefined => {
       const node = unwrap(initial);
@@ -158,13 +106,25 @@ const noModuleMock = {
     const namespaceOf = (node: Node): string | null =>
       loadedTestModule(node) ?? namespaces.get(identifier(node) ?? "") ?? null;
 
+    // node:test's test function (also its default export) carries `mock` like the module does, so it
+    // binds as a node:test namespace; its hooks only hand a TestContext to their callback.
+    const bindNodeTest = (local: string, exported: string | null): void => {
+      if (exported === null || NODE_TEST_RUNNERS.has(exported)) namespaces.set(local, "node:test");
+      else if (NODE_TEST_HOOKS.has(exported)) nodeTestHooks.add(local);
+    };
+    const isNodeTest = (node: Node): boolean => namespaceOf(node) === "node:test";
+    const isRunner = (callee: Node): boolean => givesContext(callee, isNodeTest, nodeTestHooks);
+
     const bindExports = (pattern: Node, module: string): void => {
       for (const property of nodes(pattern, "properties")) {
-        const mocker = property.type === "Property" ? mockerOf(module, nameOf(child(property, "key"))) : undefined;
-        if (mocker === undefined) continue;
+        if (property.type !== "Property") continue;
+        const key = nameOf(child(property, "key"));
         const value = child(property, "value");
-        const local = value?.type === "AssignmentPattern" ? child(value, "left") : value;
-        if (local?.type === "Identifier") objects.set(String(local["name"]), mocker);
+        const local = nameOf(value?.type === "AssignmentPattern" ? child(value, "left") : value);
+        const mocker = mockerOf(module, key);
+        if (local === null) continue;
+        if (mocker !== undefined) objects.set(local, mocker);
+        else if (module === "node:test" && key !== null) bindNodeTest(local, key);
       }
     };
 
@@ -197,11 +157,12 @@ const noModuleMock = {
           imported.add(local);
           if (module === null) continue;
           if (specifier.type === "ImportNamespaceSpecifier") namespaces.set(local, module);
-          const mocker =
-            specifier.type === "ImportSpecifier" && specifier["importKind"] !== "type"
-              ? mockerOf(module, nameOf(child(specifier, "imported")))
-              : undefined;
+          if (module === "node:test" && specifier.type === "ImportDefaultSpecifier") bindNodeTest(local, null);
+          if (specifier.type !== "ImportSpecifier" || specifier["importKind"] === "type") continue;
+          const exported = nameOf(child(specifier, "imported"));
+          const mocker = mockerOf(module, exported);
           if (mocker !== undefined) objects.set(local, mocker);
+          else if (module === "node:test" && exported !== null) bindNodeTest(local, exported);
         }
       },
       VariableDeclarator: (node: Node) => {
@@ -218,7 +179,10 @@ const noModuleMock = {
           const callee = unwrap(field(call, "callee"));
           const mocker = objectOf(field(callee, "object"));
           const method = propertyName(callee) ?? "";
-          if (mocker === undefined) continue;
+          if (mocker === undefined) {
+            if (isContextMockModule(call, isRunner)) context.report({ node: call, messageId: "module" });
+            continue;
+          }
           const methods: readonly string[] = mocker.methods;
           if (!methods.includes(method)) continue;
           if (mocker.module === "vitest" && observes(call)) continue;

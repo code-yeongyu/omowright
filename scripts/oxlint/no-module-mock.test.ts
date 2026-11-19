@@ -43,6 +43,24 @@ const replaced: readonly (readonly [name: string, source: string, count: number]
   ["vitest vi.mock and vi.doMock", 'import { vi } from "vitest"; vi.mock("./a"); vi.doMock("./b");', 2],
   ["a global vi.mock", 'vi.mock("./a", () => ({}));', 1],
   ["a node:test mock.module", 'import { mock } from "node:test"; mock.module("./a", { namedExports: {} });', 1],
+  ["node:test's test.mock", 'import { test } from "node:test"; test.mock.module("./a", {});', 1],
+  ["node:test's it.mock from require", 'const { it } = require("node:test"); it.mock.module("./a", {});', 1],
+  ["a default node:test import's mock", 'import nt from "node:test"; nt.mock.module("./a", {});', 1],
+  [
+    "a node:test test context's t.mock",
+    'import { test } from "node:test"; test("x", (t) => { t.mock.module("./a", {}); });',
+    1,
+  ],
+  [
+    "a node:test hook context",
+    'import { beforeEach } from "node:test"; beforeEach(async (ctx) => { ctx.mock.module("./a", {}); });',
+    1,
+  ],
+  [
+    "a context from a namespace's test.only",
+    'import * as nt from "node:test"; nt.test.only("x", function (t) { t.mock.module("./a", {}); });',
+    1,
+  ],
   [
     "jest.mock, jest.doMock and unstable_mockModule",
     'import { jest } from "@jest/globals"; jest.mock("./a"); jest.doMock("./b"); jest.unstable_mockModule("./c", () => ({}));',
@@ -61,6 +79,19 @@ const allowed: readonly (readonly [name: string, source: string])[] = [
   [
     "node:test mock functions, methods and timers",
     'import { mock } from "node:test"; mock.fn(); mock.method(api, "get"); mock.timers.enable();',
+  ],
+  [
+    "a node:test context's mock.fn, and a nested callback's own t",
+    'import { test } from "node:test"; test("x", (t) => { t.mock.fn(); [1].forEach((t) => t.mock.module("./a")); });',
+  ],
+  [
+    "a bun:test callback's first parameter",
+    'import { test } from "bun:test"; test("x", (t) => { t.mock.module("./a"); });',
+  ],
+  ["a t.mock.module outside any test callback", 'const t = makeContext(); t.mock.module("./a");'],
+  [
+    "a node:test callback's second parameter",
+    'import { test } from "node:test"; test("x", (_ctx, t) => { t.mock.module("./a"); });',
   ],
   ["a local object named mock", 'const mock = { module: () => 1 }; mock.module("./a");'],
   ["an unrelated .module call", 'registry.module("./a", () => ({}));'],
