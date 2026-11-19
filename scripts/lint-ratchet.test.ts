@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { compare, countByFile, countSuppressions, ratchetedFiles, SUPPRESSION } from "./lint-ratchet.ts";
+import { compare, countByFile, countSuppressions, lint, ratchetedFiles, SUPPRESSION } from "./lint-ratchet.ts";
 
 const root = "/repo";
 const sleep = "omowright-testing/no-fixed-sleep";
@@ -75,4 +79,40 @@ test("refuses a new disable comment like any other rise", () => {
 test("ratchets only hand-written JS/TS sources, never the tracked build outputs", () => {
   const files = ["src/a.ts", "src/b.mjs", "src/page-bundle.js", "bridge/extension/background.js"];
   assert.deepEqual(ratchetedFiles([...files, "README.md"]), ["src/a.ts", "src/b.mjs"]);
+});
+
+// The ratchet's real oxlint run, in a scratch repo that reuses this repo's oxlint and plugin. A config's
+// ignorePatterns resolve inside its own directory, so the hidden file sits in scripts/ next to it.
+// It runs at module load: bun ignores node:test hook options.
+const scratch = mkdtempSync(join(tmpdir(), "lint-ratchet-ignore-"));
+const config = join(scratch, "scripts/lint-ratchet.oxlintrc.json");
+const repo = join(import.meta.dirname, "..");
+const shipped = JSON.parse(readFileSync(join(repo, "scripts/lint-ratchet.oxlintrc.json"), "utf8"));
+symlinkSync(join(repo, "node_modules"), join(scratch, "node_modules"));
+mkdirSync(join(scratch, "scripts"));
+symlinkSync(join(repo, "scripts/oxlint"), join(scratch, "scripts/oxlint"));
+writeFileSync(config, JSON.stringify(shipped));
+writeFileSync(
+  join(scratch, "scripts/hidden.test.ts"),
+  'import { mock } from "bun:test";\nmock.module("./dep", () => ({}));\n',
+);
+writeFileSync(join(scratch, "clean.ts"), "export const clean = 1;\n");
+writeFileSync(join(scratch, ".eslintignore"), "scripts/hidden.test.ts\n");
+execFileSync("git", ["init", "-q"], { cwd: scratch });
+execFileSync("git", ["add", "."], { cwd: scratch });
+const listedInEslintignore = lint(scratch);
+writeFileSync(config, JSON.stringify({ ...shipped, ignorePatterns: ["hidden.test.ts"] }));
+const hiddenByIgnorePatterns = lint(scratch);
+rmSync(scratch, { recursive: true, force: true });
+
+test("still counts a violating file that .eslintignore lists", () => {
+  assert.deepEqual(listedInEslintignore, {
+    counts: { "scripts/hidden.test.ts": { [moduleMock]: 1 } },
+    unparsed: [],
+    skipped: 0,
+  });
+});
+
+test("reports a file hidden by the ratchet config ignorePatterns as skipped, not as zero findings", () => {
+  assert.deepEqual(hiddenByIgnorePatterns, { counts: {}, unparsed: [], skipped: 1 });
 });
