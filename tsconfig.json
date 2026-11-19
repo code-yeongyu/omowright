@@ -21,6 +21,6 @@
     "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*", "bin/**/*", "bridge/**/*", "test/**/*.mjs", "test/**/*.ts", "scripts/typecheck-control.ts"],
+  "include": ["src/**/*", "bin/**/*", "bridge/**/*", "test/**/*.mjs", "test/**/*.ts", "scripts/typecheck-control.ts", "scripts/lint-ratchet*.ts", "scripts/oxlint/**/*.ts"],
   "exclude": ["node_modules", "dist", "src/page-bundle.js"]
 }

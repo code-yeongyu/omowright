@@ -1,0 +1,92 @@
+{
+  "test/aside-engine.test.ts": {
+    "omowright-testing/no-flake-masking": 3
+  },
+  "test/aside-shutdown.test.ts": {
+    "omowright-testing/no-flake-masking": 2
+  },
+  "test/async-dispose.test.ts": {
+    "omowright-testing/no-flake-masking": 3
+  },
+  "test/browser-pidfile.test.ts": {
+    "omowright-testing/no-flake-masking": 4
+  },
+  "test/bsk-ipc-client.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/bsk-snapshot.test.ts": {
+    "omowright-testing/no-flake-masking": 3
+  },
+  "test/captcha.integration.test.ts": {
+    "omowright-testing/no-flake-masking": 2
+  },
+  "test/chrome.test.ts": {
+    "omowright-testing/no-flake-masking": 4
+  },
+  "test/cloak-profile.integration.test.ts": {
+    "omowright-testing/no-flake-masking": 3
+  },
+  "test/cloak-profile.test.ts": {
+    "omowright-testing/no-flake-masking": 4
+  },
+  "test/cookies.test.ts": {
+    "omowright-testing/no-flake-masking": 4
+  },
+  "test/dialogs.test.ts": {
+    "omowright-testing/no-flake-masking": 4
+  },
+  "test/download.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/emulate.test.ts": {
+    "omowright-testing/no-flake-masking": 2
+  },
+  "test/events.integration.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/getby-locators.test.ts": {
+    "omowright-testing/no-flake-masking": 3
+  },
+  "test/human-handoff.test.ts": {
+    "omowright-testing/no-flake-masking": 3
+  },
+  "test/instances.test.ts": {
+    "omowright-testing/no-flake-masking": 16
+  },
+  "test/integration.test.ts": {
+    "omowright-testing/no-flake-masking": 19
+  },
+  "test/interaction.test.ts": {
+    "omowright-testing/no-flake-masking": 11
+  },
+  "test/layers.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/network-snoop.test.ts": {
+    "omowright-testing/no-flake-masking": 2
+  },
+  "test/pipe-frames.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/pipe.test.ts": {
+    "omowright-testing/no-flake-masking": 17
+  },
+  "test/routes.live.test.ts": {
+    "omowright-testing/no-flake-masking": 3
+  },
+  "test/running-browser.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/scoped-endpoint.test.ts": {
+    "omowright-testing/no-flake-masking": 5
+  },
+  "test/scroll-collect.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/snapshot-live-feedback.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
+  "test/trace.live.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  }
+}

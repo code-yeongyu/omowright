@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "plugins": [],
+  "jsPlugins": ["./oxlint/testing.ts"],
+  "categories": {
+    "correctness": "off"
+  },
+  "rules": {
+    "omowright-testing/no-fixed-sleep": "error",
+    "omowright-testing/no-flake-masking": "error",
+    "omowright-testing/no-module-mock": "error"
+  }
+}
