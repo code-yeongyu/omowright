@@ -4,8 +4,14 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { windowsSystemTool } from "../owner-only.ts";
 
-const INSTALL_SH = "https://raw.githubusercontent.com/Tencent/BrowserSkill/main/install.sh";
-const INSTALL_PS1 = "https://raw.githubusercontent.com/Tencent/BrowserSkill/main/install.ps1";
+// The bsk release this library is tested against. The installer comes from that release's tag and the
+// daemon's own update check is pointed at the same release (see daemonEnv), so the CLI a user runs
+// changes only when this constant does.
+export const BSK_CLI_VERSION = "0.5.0";
+const RELEASE_TAG = `cli-v${BSK_CLI_VERSION}`;
+const INSTALL_SH = `https://raw.githubusercontent.com/Tencent/BrowserSkill/${RELEASE_TAG}/install.sh`;
+const INSTALL_PS1 = `https://raw.githubusercontent.com/Tencent/BrowserSkill/${RELEASE_TAG}/install.ps1`;
+export const BSK_PINNED_MANIFEST_URL = `https://github.com/Tencent/BrowserSkill/releases/download/${RELEASE_TAG}/version.json`;
 const RC_FILES = [".zshrc", ".bashrc", ".profile"];
 
 export type InstallEnv = Record<string, string | undefined>;
@@ -59,10 +65,9 @@ function windowsPowerShellEnv(env: InstallEnv): InstallEnv {
 export function cliInstallCommand({
   platform = process.platform,
   installDir,
-  version,
+  version = BSK_CLI_VERSION,
 }: { platform?: string; installDir?: string; version?: string | undefined } = {}): InstallCommand {
-  const env: InstallEnv = { BSK_INSTALL_DIR: installDir };
-  if (version) env["BSK_VERSION"] = version;
+  const env: InstallEnv = { BSK_INSTALL_DIR: installDir, BSK_VERSION: version };
   if (platform === "win32") {
     return {
       command: windowsSystemTool("WindowsPowerShell\\v1.0\\powershell.exe"),

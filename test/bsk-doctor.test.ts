@@ -6,7 +6,7 @@ import path from "node:path";
 import { startFakeBskDaemon } from "./fixtures/fake-bsk-daemon.ts";
 import { BskIpcClient } from "../src/bsk/ipc-client.ts";
 import { bskDoctor, bskOnboard } from "../src/bsk/onboard.ts";
-import { installBskCli, cliInstallCommand } from "../src/bsk/install-cli.ts";
+import { BSK_CLI_VERSION, installBskCli, cliInstallCommand } from "../src/bsk/install-cli.ts";
 import type { HumanStepEvent } from "../src/bsk/onboard.ts";
 import { field } from "./fixtures/read-field.ts";
 
@@ -21,19 +21,22 @@ function macHomeWithChrome() {
   return home;
 }
 
-test("cliInstallCommand uses the official installers with an explicit install dir", () => {
+// Supply-chain contract (omo#14347): the installer and the CLI it installs are the pinned release, never upstream main.
+test("cliInstallCommand runs the pinned release's official installers with an explicit install dir", () => {
   const unix = cliInstallCommand({ platform: "darwin", installDir: "/opt/x/bin" });
   assert.equal(unix.command, "sh");
   assert.deepEqual(unix.args, [
     "-c",
-    "curl -fsSL https://raw.githubusercontent.com/Tencent/BrowserSkill/main/install.sh | sh",
+    `curl -fsSL https://raw.githubusercontent.com/Tencent/BrowserSkill/cli-v${BSK_CLI_VERSION}/install.sh | sh`,
   ]);
   assert.equal(unix.env["BSK_INSTALL_DIR"], "/opt/x/bin");
+  assert.equal(unix.env["BSK_VERSION"], BSK_CLI_VERSION);
   const win = cliInstallCommand({ platform: "win32", installDir: "C:\\x\\bin" });
   // Windows PowerShell 5.1 by absolute path: a bare name resolves from the cwd before PATH.
   assert.match(win.command, /^[A-Z]:\\.*\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe$/i);
-  assert.ok(win.args.join(" ").includes("install.ps1"));
+  assert.ok(win.args.join(" ").includes(`/cli-v${BSK_CLI_VERSION}/install.ps1`));
   assert.equal(win.env["BSK_INSTALL_DIR"], "C:\\x\\bin");
+  assert.equal(win.env["BSK_VERSION"], BSK_CLI_VERSION);
 });
 
 // Platform contract (omo#9855): Windows PowerShell 5.1 started from a PowerShell 7
