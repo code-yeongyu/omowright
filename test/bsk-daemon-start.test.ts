@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeF
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startDaemonWithCli, windowsDaemonTaskName } from "../src/bsk/daemon-info.ts";
+import { BSK_PINNED_MANIFEST_URL } from "../src/bsk/install-cli.ts";
 import { windowsSystemTool } from "../src/owner-only.ts";
 
 // Platform contract: when bsk cannot detach its daemon from the caller's Job Object, the start
@@ -23,7 +24,7 @@ import path from "node:path";
 const args = process.argv.slice(2);
 if (args[0] === "status") { console.log(JSON.stringify({ message: ${JSON.stringify(REFUSAL)}, exit_code: 2 })); process.exit(2); }
 const marker = path.join(process.env.BSK_HOME, "started.txt");
-writeFileSync(marker + ".tmp", args.join(" "));
+writeFileSync(marker + ".tmp", [args.join(" "), process.env.BSK_AUTO_UPDATE, process.env.BSK_UPDATE_MANIFEST_URL].join("\\n"));
 renameSync(marker + ".tmp", marker);
 `;
 
@@ -84,6 +85,36 @@ after(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 
+// Network contract (omo#14347): a daemon this library starts never asks the third-party update mirror and never
+// replaces its own binary, unless the caller chose an update policy. `bsk status` starts the daemon, which
+// inherits this environment.
+const posixOnly = { skip: process.platform === "win32" };
+for (const [label, callerEnv, expected] of [
+  ["by default", {}, ["off", BSK_PINNED_MANIFEST_URL]],
+  [
+    "as the caller set it",
+    { BSK_AUTO_UPDATE: "on", BSK_UPDATE_MANIFEST_URL: "https://mirror.test/v.json" },
+    ["on", "https://mirror.test/v.json"],
+  ],
+] as const) {
+  test(`the daemon starts with its update policy ${label}`, posixOnly, async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "bsk-env-"));
+    try {
+      const fake = path.join(home, "bsk");
+      writeFileSync(
+        fake,
+        '#!/bin/sh\nprintf "%s\\n%s" "$BSK_AUTO_UPDATE" "$BSK_UPDATE_MANIFEST_URL" > "$BSK_HOME/env.txt"\n',
+        { mode: 0o700 },
+      );
+      const { BSK_AUTO_UPDATE: _a, BSK_UPDATE_MANIFEST_URL: _u, ...ambient } = process.env;
+      await startDaemonWithCli({ home, bskBin: fake, env: { ...ambient, ...callerEnv } });
+      assert.equal(readFileSync(path.join(home, "env.txt"), "utf8"), expected.join("\n"));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+}
+
 for (const name of ["Tom&Jerry (x) ^ ;", "100% %PATH% home", "O'Brien", "O\u2019Brien", "\u2018quoted\u201B \u201A"]) {
   test(`a refused breakaway starts the daemon from a headless task for a home named ${name}`, windowsOnly, async () => {
     const home = path.join(dir, name);
@@ -102,7 +133,10 @@ for (const name of ["Tom&Jerry (x) ^ ;", "100% %PATH% home", "O'Brien", "O\u2019
       );
       const marker = path.join(home, "started.txt");
       await waitForMarker(marker, 15_000);
-      assert.equal(readFileSync(marker, "utf8"), "daemon start --foreground");
+      assert.equal(
+        readFileSync(marker, "utf8"),
+        ["daemon start --foreground", "off", BSK_PINNED_MANIFEST_URL].join("\n"),
+      );
     } finally {
       unregister([task]);
       registered.delete(task);

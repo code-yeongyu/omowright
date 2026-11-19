@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { windowsSystemTool } from "../owner-only.ts";
+import { BSK_PINNED_MANIFEST_URL } from "./install-cli.ts";
 
 export interface DaemonInfo {
   sock_path: string;
@@ -84,17 +85,35 @@ export function windowsDaemonTaskName(home: string): string {
 const powershellLiteral = (value: string) =>
   `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, (quote) => quote + quote)}'`;
 
-function windowsDaemonLaunch(home: string, bskBin: string): string {
-  const script = `$env:BSK_HOME = ${powershellLiteral(home)}; & ${powershellLiteral(bskBin)} daemon start --foreground; exit $LASTEXITCODE`;
+// bsk's daemon checks for an update when it starts and every 30 minutes, asking a third-party mirror
+// before GitHub, and installs whatever newer release that manifest names (omo#14347). A daemon started
+// here asks the pinned release instead, which never names a newer one, and installs nothing; a value
+// the caller set wins.
+function daemonEnv(env: NodeJS.ProcessEnv, home: string | undefined): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    BSK_HOME: home,
+    BSK_AUTO_UPDATE: env["BSK_AUTO_UPDATE"] ?? "off",
+    BSK_UPDATE_MANIFEST_URL: env["BSK_UPDATE_MANIFEST_URL"] ?? BSK_PINNED_MANIFEST_URL,
+  };
+}
+
+function windowsDaemonLaunch(env: NodeJS.ProcessEnv, bskBin: string): string {
+  const assignments = ["BSK_HOME", "BSK_AUTO_UPDATE", "BSK_UPDATE_MANIFEST_URL"]
+    .map((name) => `$env:${name} = ${powershellLiteral(env[name] ?? "")}; `)
+    .join("");
+  const script = `${assignments}& ${powershellLiteral(bskBin)} daemon start --foreground; exit $LASTEXITCODE`;
   return `--headless "${windowsSystemTool("WindowsPowerShell\\v1.0\\powershell.exe")}" -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
 }
 
 function startDaemonInWindowsTask({
   home,
+  env,
   bskBin,
   timeoutMs,
 }: {
   home: string;
+  env: NodeJS.ProcessEnv;
   bskBin: string;
   timeoutMs: number;
 }): Promise<ExitResult> {
@@ -111,7 +130,7 @@ function startDaemonInWindowsTask({
       env: {
         ...process.env,
         BSK_TASK_NAME: windowsDaemonTaskName(home),
-        BSK_TASK_ARGUMENT: windowsDaemonLaunch(home, bskBin),
+        BSK_TASK_ARGUMENT: windowsDaemonLaunch(env, bskBin),
       },
       timeoutMs,
       label: "registering the bsk daemon task",
@@ -153,8 +172,9 @@ export async function startDaemonWithCli({
   bskBin = findBskBinary(env),
   timeoutMs = 20_000,
 }: StartDaemonOptions = {}): Promise<void> {
+  const daemon = daemonEnv(env, home);
   const status = await runToExit(bskBin, ["status", "--json"], {
-    env: { ...env, BSK_HOME: home },
+    env: daemon,
     timeoutMs,
     label: "bsk status",
   });
@@ -162,7 +182,7 @@ export async function startDaemonWithCli({
   if (process.platform === "win32" && NO_BREAKAWAY.test(status.output)) {
     // path.resolve rejected a missing home here before the types made it explicit.
     if (home === undefined) throw new TypeError("startDaemonWithCli needs a home to register the Windows daemon task");
-    const task = await startDaemonInWindowsTask({ home, bskBin, timeoutMs });
+    const task = await startDaemonInWindowsTask({ home, env: daemon, bskBin, timeoutMs });
     if (task.code === 0) return;
     // Keep bsk's refusal in the message: it is why a retry cannot help, and bskDoctor reads it.
     throw new Error(
