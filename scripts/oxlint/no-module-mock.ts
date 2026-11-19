@@ -107,7 +107,7 @@ const noModuleMock = {
       loadedTestModule(node) ?? namespaces.get(identifier(node) ?? "") ?? null;
 
     // node:test's test function (also its default export) carries `mock` like the module does, so it
-    // binds as a node:test namespace; its hooks only hand a TestContext to their callback.
+    // binds as a node:test namespace; its hooks only hand a context (see NODE_TEST_HOOKS) to their callback.
     const bindNodeTest = (local: string, exported: string | null): void => {
       if (exported === null || NODE_TEST_RUNNERS.has(exported)) namespaces.set(local, "node:test");
       else if (NODE_TEST_HOOKS.has(exported)) nodeTestHooks.add(local);

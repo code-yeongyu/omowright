@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { before, describe, test } from "node:test";
+import { beforeAll, describe, test } from "bun:test";
 
-import { type Finding, lintFixtures } from "./rule-findings.ts";
+import { type Finding, LINT_HOOK_BUDGET_MS, lintFixtures } from "./rule-findings.ts";
 
 const moduleMockCode = "omowright-testing(no-module-mock)";
 
@@ -103,9 +103,9 @@ const allowed: readonly (readonly [name: string, source: string])[] = [
 let results: Finding[][] = [];
 
 describe("no-module-mock through the ratchet lint configuration", () => {
-  before(() => {
+  beforeAll(() => {
     results = lintFixtures([...replaced, ...allowed].map(([, source]) => source));
-  });
+  }, LINT_HOOK_BUDGET_MS);
   test("tells the agent to inject the dependency or use a real fake at a boundary", () => {
     assert.match(results[0]?.[0]?.message ?? "", /Inject the dependency instead/);
   });

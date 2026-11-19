@@ -5,6 +5,11 @@ import path from "node:path";
 
 const root = path.join(import.meta.dirname, "../..");
 
+// The fixture lint is one oxlint process, so it runs once per file in a beforeAll hook with this
+// explicit budget instead of bun's 5 s default: on a loaded machine the spawn alone can pass 5 s.
+// The tests then only read its results.
+export const LINT_HOOK_BUDGET_MS = 60_000;
+
 export type Finding = { readonly code: string; readonly message: string };
 
 type Diagnostic = { readonly code?: string; readonly message?: string; readonly filename: string };

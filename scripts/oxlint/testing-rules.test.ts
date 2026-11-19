@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { before, describe, test } from "node:test";
+import { beforeAll, describe, test } from "bun:test";
 
 import noFlakeMasking from "./no-flake-masking.ts";
-import { type Finding, lintFixtures } from "./rule-findings.ts";
+import { type Finding, LINT_HOOK_BUDGET_MS, lintFixtures } from "./rule-findings.ts";
 
 type Case = readonly [name: string, source: string];
 // A flagged no-flake-masking case names the message kind it must report, read from the rule itself.
@@ -110,12 +110,12 @@ const allowed: readonly Case[] = [
   ["a vi.setConfig fakeTimers", "vi.setConfig({ fakeTimers: { now: 0 } });"],
 ];
 
-// One oxlint run for every fixture in this file, in `before`; each test reads its own case's findings.
+// One oxlint run for every fixture in this file, in `beforeAll`; each test reads its own case's findings.
 const groups = [sleeps, signals, flagged, allowed] as const;
 let results: Finding[][] = [];
-before(() => {
+beforeAll(() => {
   results = lintFixtures(groups.flat().map(([, source]) => source));
-});
+}, LINT_HOOK_BUDGET_MS);
 const findingsOf = (group: (typeof groups)[number], index: number): Finding[] => {
   const offset = groups.slice(0, groups.indexOf(group)).reduce((sum, g) => sum + g.length, 0);
   return results[offset + index] ?? [];

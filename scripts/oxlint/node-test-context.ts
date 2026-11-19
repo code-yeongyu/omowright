@@ -5,7 +5,9 @@ import { child, field, identifier, type Node, nodes, propertyName, unwrap } from
 
 // node:test exports that are the test function and so carry `mock` themselves.
 export const NODE_TEST_RUNNERS: ReadonlySet<string> = new Set(["test", "it"]);
-// node:test hooks: their callbacks receive a TestContext too.
+// node:test hooks: at file level their callbacks receive a TestContext. Inside a `describe`, `before`
+// and `after` get a SuiteContext without `mock`, so a `ctx.mock.module` there is reported though it
+// would throw at runtime anyway.
 export const NODE_TEST_HOOKS: ReadonlySet<string> = new Set(["before", "after", "beforeEach", "afterEach"]);
 const MODIFIERS = new Set(["only", "skip", "todo"]);
 const FUNCTIONS = new Set(["ArrowFunctionExpression", "FunctionExpression", "FunctionDeclaration"]);
