@@ -1,9 +1,9 @@
 /**
  * Builds what npm publishes: `package.json` `exports` and `bin` point at `dist/`.
  *
- * Declarations are emitted by `typescript-5`, not by the pinned `typescript` 7:
- * TypeScript 7 refuses the anonymous class `createOmOPageClass` returns (one TS4094
- * per private field) and writes no `dist/index.d.ts`. TypeScript 7 stays the gate.
+ * Declarations are emitted by `typescript-5`: `bun check` (the type gate) emits nothing, and
+ * TypeScript 7 refuses the anonymous class `createOmOPageClass` returns (one TS4094 per
+ * private field) and writes no `dist/index.d.ts`.
  *
  * `bun build.ts --only=js,assets,bin` runs a subset; the default runs every step.
  */

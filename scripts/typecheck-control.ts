@@ -1,17 +1,20 @@
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const child = Bun.spawn(
-  [process.execPath, "x", "--no-install", "tsc", "--noEmit", "--pretty", "false", "-p", "tsconfig.control.json"],
-  { cwd: root, env: process.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
-);
+const child = Bun.spawn([process.execPath, "check", "--no-script", "--no-pretty", "-p", "tsconfig.control.json"], {
+  cwd: root,
+  env: process.env,
+  stdin: "ignore",
+  stdout: "pipe",
+  stderr: "pipe",
+});
 const [stdout, stderr, exitCode] = await Promise.all([
   new Response(child.stdout).text(),
   new Response(child.stderr).text(),
   child.exited,
 ]);
 const output = stdout + stderr;
-const diagnostics = output.split(/\r?\n/).filter((line) => line.trim().length > 0);
+const diagnostics = output.split(/\r?\n/).filter((line) => /: error TS\d+:/.test(line));
 const expected =
   /(?:^|[/\\])typecheck-control\.ts\(1,14\): error TS2322: Type 'string' is not assignable to type 'number'\./;
 

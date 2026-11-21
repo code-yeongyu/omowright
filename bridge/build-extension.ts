@@ -15,9 +15,9 @@ const [worker] = extension.outputs;
 if (!extension.success || worker === undefined) throw new AggregateError(extension.logs, "extension build failed");
 await Bun.write(`${root}bridge/extension/background.js`, `${GENERATED}\n\n${await worker.text()}`);
 
-const format = Bun.spawn(["bun", "x", "oxfmt", "--write", "bridge/extension/background.js"], {
+const format = Bun.spawn([process.execPath, "fmt", "--no-script", "--write", "bridge/extension/background.js"], {
   cwd: root,
   stdout: "inherit",
   stderr: "inherit",
 });
-if ((await format.exited) !== 0) throw new Error("oxfmt failed on the generated extension worker");
+if ((await format.exited) !== 0) throw new Error("bun fmt failed on the generated extension worker");
