@@ -1,2 +1,5 @@
-command -v bun >/dev/null 2>&1 || { echo "pre-push: bun is not on PATH; install bun 1.4.x, then push again (the hook runs CI's first gate, bun run check:push)" >&2; exit 1; }
+# A push can run with a minimal PATH (a gated push uses /usr/bin:/bin:/usr/sbin:/sbin); bun's installer puts it in ~/.bun/bin.
+command -v bun >/dev/null 2>&1 || PATH="${BUN_INSTALL:-$HOME/.bun}/bin:$PATH"
+command -v bun >/dev/null 2>&1 || { echo "pre-push: bun is not on PATH or in ~/.bun/bin; install bun 1.4.x, then push again (the hook runs CI's first gate, bun run check:push)" >&2; exit 1; }
+export PATH
 bun scripts/pre-push.ts "$@"
