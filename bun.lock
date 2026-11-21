@@ -12,6 +12,7 @@
         "@types/bun": "1.4.5",
         "acorn": "8.19.0",
         "gpt-tokenizer": "4.1.2",
+        "husky": "9.1.7",
         "oxc-parser": "0.159.0",
         "oxfmt": "^0.79.0",
         "oxlint": "^1.94.0",
@@ -186,6 +187,8 @@
     "bun-types": ["bun-types@1.4.5", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-ECHn+9dhL3wv0G6u0+7dQvrnaimXiRDxxerYBmhTaLyJEEuvTPWk2Fye3XIf5Y++JIIiHKfQw4Z7V5D8KuiXbg=="],
 
     "gpt-tokenizer": ["gpt-tokenizer@4.1.2", "", {}, "sha512-5GwcLcZd6IqCdrGTTPcoKqbJk8cCWHHsoTHR/uQGZKT29CFcnJEg69qisGbKesQpzxRq9yQO4lBgsaZ8SawcGQ=="],
+
+    "husky": ["husky@9.1.7", "", { "bin": { "husky": "bin.js" } }, "sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA=="],
 
     "oxc-parser": ["oxc-parser@0.159.0", "", { "dependencies": { "@oxc-project/types": "^0.159.0" }, "optionalDependencies": { "@oxc-parser/binding-android-arm-eabi": "0.159.0", "@oxc-parser/binding-android-arm64": "0.159.0", "@oxc-parser/binding-darwin-arm64": "0.159.0", "@oxc-parser/binding-darwin-x64": "0.159.0", "@oxc-parser/binding-freebsd-x64": "0.159.0", "@oxc-parser/binding-linux-arm-gnueabihf": "0.159.0", "@oxc-parser/binding-linux-arm-musleabihf": "0.159.0", "@oxc-parser/binding-linux-arm64-gnu": "0.159.0", "@oxc-parser/binding-linux-arm64-musl": "0.159.0", "@oxc-parser/binding-linux-ppc64-gnu": "0.159.0", "@oxc-parser/binding-linux-riscv64-gnu": "0.159.0", "@oxc-parser/binding-linux-riscv64-musl": "0.159.0", "@oxc-parser/binding-linux-s390x-gnu": "0.159.0", "@oxc-parser/binding-linux-x64-gnu": "0.159.0", "@oxc-parser/binding-linux-x64-musl": "0.159.0", "@oxc-parser/binding-openharmony-arm64": "0.159.0", "@oxc-parser/binding-win32-arm64-msvc": "0.159.0", "@oxc-parser/binding-win32-ia32-msvc": "0.159.0", "@oxc-parser/binding-win32-x64-msvc": "0.159.0" } }, "sha512-Z1OaHU1EeTtobDHlYOAijfCTZr13PpWs/ZvwbJHaz5zOHfV6fLSmYZwB6klE8cggz51syi8HmLikHju0orJr4g=="],
 
