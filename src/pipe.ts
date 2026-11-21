@@ -136,6 +136,10 @@ export class PipeCdpClient implements CdpTransport {
   #malformedFrameCount = 0;
   #events = new Emittery<PipeEventEnvelope>();
   #connected = false;
+  // Set by close(), cleared by an explicit ensureConnected(). While set, send() rejects instead of relaunching: a late
+  // command (an event handler, a page still settling) would otherwise start a browser nobody owns or closes, and
+  // its pipes keep the caller's process alive after it is done.
+  #closedByCaller = false;
   #commandTimeoutMs: number;
   #readinessTimeoutMs: number;
   #browserPath: string;
@@ -184,6 +188,7 @@ export class PipeCdpClient implements CdpTransport {
   }
 
   async ensureConnected() {
+    this.#closedByCaller = false;
     if (this.#connected) return;
     // Never inherit stdout/stderr: Chromium writes startup noise to both (e.g.
     // the PartitionAlloc shim's "Trying to load the allocator multiple times"
@@ -388,6 +393,15 @@ export class PipeCdpClient implements CdpTransport {
     if (String(method).startsWith("OmO.")) {
       throw Error(`Extension commands are unavailable over pipe transport: ${method}`);
     }
+    if (this.#closedByCaller) {
+      throw this.#commandError(CdpPipeClosedError, "CDP pipe client closed", {
+        method,
+        sessionId,
+        targetId: this.#sessionTargets.get(sessionId),
+        sentAt: performance.now(),
+        receivedBytes: this.#receivedBytes,
+      });
+    }
     await this.ensureConnected();
     return this.#dispatch(method, params, sessionId, opts);
   }
@@ -454,14 +468,16 @@ export class PipeCdpClient implements CdpTransport {
   }
 
   async close() {
+    this.#closedByCaller = true;
     const child = this.#child;
     this.#child = undefined;
     if (child && child.exitCode === null) {
       const exited = new Promise<unknown>((resolve) => child.once("exit", resolve));
       let quitRequested = false;
       if (this.#connected) {
+        // #dispatch, not send(): the client is already marked closed, and send() refuses a closed client.
         await Promise.race([
-          this.send("Browser.close", undefined, undefined, {
+          this.#dispatch("Browser.close", undefined, undefined, {
             timeoutMs: GRACEFUL_CLOSE_TIMEOUT_MS,
           }).then(
             () => {
