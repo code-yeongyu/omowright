@@ -41,7 +41,10 @@ jobs:
         run: bun audit --prod
 
       # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
+      # Bounded: an unreachable package mirror makes apt wait ~20 s per package and once held the job to its
+      # 30-minute limit; a healthy install takes under a minute (6 min at the slowest observed success).
       - name: Install ffmpeg
+        timeout-minutes: 8
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       # Ubuntu 24.04 runners restrict unprivileged user namespaces via AppArmor,
@@ -72,7 +75,9 @@ jobs:
           bun run build
           git diff --exit-code HEAD --
 
+      # Step bounds below are about 3x the slowest observed success, so a hang costs minutes, not the job limit.
       - name: bun test
+        timeout-minutes: 12
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
@@ -82,6 +87,7 @@ jobs:
       # The same suite under real Node: bun is the development runner, and a package
       # Node consumers install has to keep working there (see packages' exports).
       - name: node test
+        timeout-minutes: 6
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
@@ -186,6 +192,7 @@ jobs:
 
       # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
       - name: Install ffmpeg
+        timeout-minutes: 8
         run: choco install ffmpeg --no-progress -y
 
       - name: Install chrome-headless-shell
@@ -199,6 +206,7 @@ jobs:
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
       - name: bun test
+        timeout-minutes: 18
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
