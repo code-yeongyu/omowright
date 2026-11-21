@@ -42,11 +42,32 @@ jobs:
         run: bun audit --prod
 
       # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
-      # Bounded: an unreachable package mirror makes apt wait ~20 s per package and once held the job to its
-      # 30-minute limit; a healthy install takes under a minute (6 min at the slowest observed success).
-      - name: Install ffmpeg
+      # A pinned static build (checksum-verified) kept in the Actions cache, the same shape as the windows job:
+      # apt took 19 s at p50 and 96 s at p95 on every run, and an unreachable mirror once held the job to its limit.
+      # No sudo, apt or dpkg: a cache hit restores one binary, a miss downloads the same pinned archive.
+      - name: Restore ffmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ffmpeg
+          key: ffmpeg-6.0.1-linux64-static-28268bf4
+
+      - name: Download ffmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        shell: bash
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz
+          echo "28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5  $RUNNER_TEMP/ffmpeg.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1 ffmpeg-6.0.1-amd64-static/ffmpeg
+
+      - name: Verify ffmpeg can run the page-video test
+        shell: bash
+        run: |
+          echo "$RUNNER_TEMP/ffmpeg" >> "$GITHUB_PATH"
+          f="$RUNNER_TEMP/ffmpeg/ffmpeg"
+          "$f" -hide_banner -encoders | grep -E '^ *V\S* +libvpx ' && "$f" -hide_banner -muxers | grep -E '^ *E +null '
 
       # Ubuntu 24.04 runners restrict unprivileged user namespaces via AppArmor,
       # which makes Chromium's sandbox abort (SIGTRAP) at launch.
@@ -206,9 +227,29 @@ jobs:
       - run: bun install --frozen-lockfile
 
       # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
-      - name: Install ffmpeg
+      # A pinned release (checksum-verified) kept in the Actions cache: choco took 23 s at p50 on every run.
+      - name: Restore ffmpeg
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ffmpeg
+          key: ffmpeg-9.1-essentials-win64-b9bbbb3a
+
+      - name: Download ffmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
-        run: choco install ffmpeg --no-progress -y
+        shell: bash
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.zip" https://github.com/GyanD/codexffmpeg/releases/download/9.1/ffmpeg-9.1-essentials_build.zip
+          echo "b9bbbb3acece000cbeec994f856649354e52c773807841e78908374b24d658fd  $RUNNER_TEMP/ffmpeg.zip" | sha256sum -c -
+          unzip -q -j "$RUNNER_TEMP/ffmpeg.zip" 'ffmpeg-9.1-essentials_build/bin/ffmpeg.exe' -d "$RUNNER_TEMP/ffmpeg"
+
+      - name: Verify ffmpeg can run the page-video test
+        shell: bash
+        run: |
+          echo "$RUNNER_TEMP/ffmpeg" >> "$GITHUB_PATH"
+          f="$RUNNER_TEMP/ffmpeg/ffmpeg.exe"
+          "$f" -hide_banner -encoders | grep -E '^ *V\S* +libvpx ' && "$f" -hide_banner -muxers | grep -E '^ *E +null '
 
       - name: Install chrome-headless-shell
         id: browser
