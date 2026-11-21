@@ -156,6 +156,10 @@ test("Turnstile shape: OOPIF inside a closed shadow root is appended as an orpha
     await waitForChildTarget(connection);
     const page = await connection.attachPage(targetId);
     const framesPage = treeFramesPage(page);
+    // The child target existing is not the child frame being onboarded: on a slow runner the snapshot below ran
+    // before the frame's isolated world answered, and the iframe block was absent. Wait for the same precondition
+    // the sibling tests wait for.
+    await waitForChildContent(page);
 
     assert.deepEqual(await reconcileFrames(framesPage), []);
 
