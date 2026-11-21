@@ -93,13 +93,30 @@ jobs:
         run: bun run check:push
 
       # Step bounds below are about 3x the slowest observed success, so a hang costs minutes, not the job limit.
+      # Per-file durations from the latest run on main: --parallel starts the slowest files first. Runs on main
+      # record a fresh copy; pull requests only read it. A missing record only loses the ordering.
+      - name: Restore test timings
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/bun-test-timings.json
+          key: bun-test-timings-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: bun-test-timings-${{ runner.os }}-
+
       - name: bun test
         timeout-minutes: 12
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
+          RECORD: ${{ github.event_name != 'pull_request' && '--update-timings' || '' }}
         shell: bash
-        run: bun run test 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
+        run: bun run test --timings="$RUNNER_TEMP/bun-test-timings.json" $RECORD 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
+
+      - name: Save test timings
+        if: github.event_name != 'pull_request' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/bun-test-timings.json
+          key: bun-test-timings-${{ runner.os }}-${{ github.run_id }}
 
       # The same suite under real Node: bun is the development runner, and a package
       # Node consumers install has to keep working there (see packages' exports).
@@ -244,13 +261,30 @@ jobs:
           "$bin" --version
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
+      # Per-file durations from the latest run on main: --parallel starts the slowest files first. Runs on main
+      # record a fresh copy; pull requests only read it. A missing record only loses the ordering.
+      - name: Restore test timings
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/bun-test-timings.json
+          key: bun-test-timings-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: bun-test-timings-${{ runner.os }}-
+
       - name: bun test
         timeout-minutes: 18
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
+          RECORD: ${{ github.event_name != 'pull_request' && '--update-timings' || '' }}
         shell: bash
-        run: bun run test 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
+        run: bun run test --timings="$RUNNER_TEMP/bun-test-timings.json" $RECORD 2>&1 | tee "$RUNNER_TEMP/bun-test.log"
+
+      - name: Save test timings
+        if: github.event_name != 'pull_request' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/bun-test-timings.json
+          key: bun-test-timings-${{ runner.os }}-${{ github.run_id }}
 
       - name: Workflow summary
         if: always()

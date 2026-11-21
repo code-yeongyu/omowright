@@ -46,7 +46,7 @@
     "provenance": true
   },
   "scripts": {
-    "test": "bun test",
+    "test": "bun test --parallel",
     "test:node": "bun scripts/node-test.ts",
     "test:cloak-profile": "bun test test/cloak-profile.test.ts test/cloak-profile.integration.test.ts",
     "typecheck": "bun check --no-script --no-pretty -p tsconfig.json",
