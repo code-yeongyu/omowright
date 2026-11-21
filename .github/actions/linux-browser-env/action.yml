@@ -1,0 +1,52 @@
+name: Linux browser test environment
+description: ffmpeg with libvpx, the Chromium sandbox sysctl and chrome-headless-shell, shared by the ubuntu test jobs.
+outputs:
+  bin:
+    description: Path of the installed chrome-headless-shell
+    value: ${{ steps.browser.outputs.bin }}
+runs:
+  using: composite
+  steps:
+    # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
+    # A pinned static build (checksum-verified) kept in the Actions cache, the same shape as the windows job:
+    # apt took 19 s at p50 and 96 s at p95 on every run, and an unreachable mirror once held the job to its limit.
+    # No sudo, apt or dpkg: a cache hit restores one binary, a miss downloads the same pinned archive.
+    # The calling step bounds this action (timeout-minutes is not allowed on composite steps).
+    - name: Restore ffmpeg
+      id: ffmpeg-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/ffmpeg
+        key: ffmpeg-6.0.1-linux64-static-28268bf4
+
+    - name: Download ffmpeg
+      if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz
+        echo "28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5  $RUNNER_TEMP/ffmpeg.tar.xz" | sha256sum -c -
+        mkdir -p "$RUNNER_TEMP/ffmpeg"
+        tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1 ffmpeg-6.0.1-amd64-static/ffmpeg
+
+    - name: Verify ffmpeg can run the page-video test
+      shell: bash
+      run: |
+        echo "$RUNNER_TEMP/ffmpeg" >> "$GITHUB_PATH"
+        f="$RUNNER_TEMP/ffmpeg/ffmpeg"
+        "$f" -hide_banner -encoders | grep -E '^ *V\S* +libvpx ' && "$f" -hide_banner -muxers | grep -E '^ *E +null '
+
+    # Ubuntu 24.04 runners restrict unprivileged user namespaces via AppArmor,
+    # which makes Chromium's sandbox abort (SIGTRAP) at launch.
+    - name: Allow unprivileged user namespaces for the Chromium sandbox
+      shell: bash
+      run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+    - name: Install chrome-headless-shell
+      id: browser
+      shell: bash
+      run: |
+        out=$(bunx @puppeteer/browsers install chrome-headless-shell@stable --path "$RUNNER_TEMP/browsers")
+        bin=$(printf '%s\n' "$out" | tail -n 1 | awk '{print $2}')
+        test -x "$bin"
+        "$bin" --version
+        echo "bin=$bin" >> "$GITHUB_OUTPUT"
