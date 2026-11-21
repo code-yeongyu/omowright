@@ -24,6 +24,14 @@ export interface SharedConnectionHooks {
 // connection. Each caller gets a lease whose close() is a release; the last
 // release disconnects, because an open socket keeps the process alive.
 const shared = new Map<string, SharedEntry>();
+// Lease -> the connection it fronts. The connection looks up per-connection
+// state (its agent tab manager) under itself, so callers that key such state
+// must key it here, not under the lease a script holds.
+const leased = new WeakMap<object, BrowserConnection>();
+
+export function underlyingConnection(connection: BrowserConnection): BrowserConnection {
+  return leased.get(connection) ?? connection;
+}
 
 function withinTimeout<T>(pending: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -182,7 +190,7 @@ function lease(key: string, entry: SharedEntry, connection: BrowserConnection): 
       return bindTo(target, Reflect.get(target, property, target));
     }),
   );
-  return new Proxy(connection, {
+  const handle = new Proxy(connection, {
     get(target, property) {
       // Disposing a lease releases only this holder, like close() (#244).
       if (property === "close" || property === Symbol.asyncDispose) return close;
@@ -221,6 +229,8 @@ function lease(key: string, entry: SharedEntry, connection: BrowserConnection): 
         : Reflect.getOwnPropertyDescriptor(target, property);
     },
   });
+  leased.set(handle, connection);
+  return handle;
 }
 
 // Only plain data is compared structurally, and isDeepStrictEqual sees only

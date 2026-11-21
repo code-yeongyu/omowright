@@ -107,6 +107,6 @@ can also answer it (`dialog.accept(text)` / `dialog.dismiss()`) instead of the p
 
 ## Errors worth knowing
 
-- `RefStaleError` — the element vanished after your snapshot; re-snapshot.
+- `RefStaleError` — the element vanished after your snapshot, or the ref came from another script's snapshot; re-snapshot in this script.
 - `UnsupportedOperationError` — extension-bridge feature (password managers,
   `OmO.*` extension commands, MV3 write methods). Not available standalone.

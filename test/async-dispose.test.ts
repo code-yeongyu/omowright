@@ -188,3 +188,38 @@ test(
     });
   },
 );
+
+// Popup adoption contract (TOOLS.md): an agent tab with a popup waiter gets its
+// popup. The tab manager a script makes on its connect() handle must be the one
+// popup adoption consults, or waitForEvent("popup") times out on every tab the
+// script created.
+test(
+  "a tab created on a connect() handle delivers its popup to waitForEvent",
+  {
+    skip: !SHELL && "no chromium binary found",
+    timeout: 60_000,
+  },
+  async () => {
+    await withBrowser(async ({ url, ud }) => {
+      const result = await runScript(
+        ud,
+        "popup",
+        `
+      await using browser = await connect(${JSON.stringify(url)}, { storageRoot: ${JSON.stringify(ud)} });
+      const tabs = createAgentTabs(browser);
+      const { page } = await tabs.create("about:blank");
+      await page.setContent('<button onclick="window.open(\\'about:blank\\', \\'handle-popup\\')">open</button>');
+      const opened = page.waitForEvent("popup", { timeout: 5000 });
+      await page.locator("button").click();
+      const popup = await opened;
+      console.log(JSON.stringify({ windowName: popup.popupMetadata?.windowName, owned: tabs.get(popup.targetId) !== null }));
+    `,
+      );
+      assert.equal(result.code, 0, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout.trim().split("\n").at(-1) ?? ""), {
+        windowName: "handle-popup",
+        owned: true,
+      });
+    });
+  },
+);
