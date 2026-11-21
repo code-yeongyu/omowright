@@ -20,7 +20,8 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # About 2x this job's p95 over 150 PR runs (564 s, #320): a regression fails loudly instead of creeping.
+    timeout-minutes: 19
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -71,17 +72,12 @@ jobs:
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
 
       # One gate, as the repo defines it: the typecheck control first (it proves the compiler can
-      # still reject the deliberate error), then the typecheck, lint and format check. Running the
-      # three steps separately here would leave the control out of CI entirely.
-      - name: Check
+      # still reject the deliberate error), then the typecheck, lint and format check, then the build
+      # and a check that it left every tracked artifact unchanged. The pre-push hook runs this same
+      # script, so a check added here is checked before a push too.
+      - name: Check, build and verify tracked artifacts
         shell: bash
-        run: bun run check
-
-      - name: Build and verify tracked artifacts
-        shell: bash
-        run: |
-          bun run build
-          git diff --exit-code HEAD --
+        run: bun run check:push
 
       # Step bounds below are about 3x the slowest observed success, so a hang costs minutes, not the job limit.
       - name: bun test
@@ -158,7 +154,8 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'pull_request'
     runs-on: macos-latest
-    timeout-minutes: 30
+    # About 2x this job's p95 over 150 PR runs (78 s, #320).
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -183,7 +180,8 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'pull_request'
     runs-on: windows-latest
-    timeout-minutes: 45
+    # About 2x this job's p95 over 150 PR runs (580 s, #320).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

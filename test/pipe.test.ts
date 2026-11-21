@@ -116,6 +116,16 @@ test(
   },
 );
 
+// Lifecycle contract: close() is final for send(). A command that arrives after close (a late event handler, a page
+// still settling) used to relaunch the browser; nobody owned that browser, and its pipes kept the caller's process
+// alive, which held CI's node test step to the job limit. Only an explicit ensureConnected() starts a browser again.
+test("a command sent after close rejects and never relaunches the browser", async (t) => {
+  const client = await failureClient(t);
+  await client.close();
+  await assert.rejects(client.send("Browser.getVersion"), CdpPipeClosedError);
+  assert.equal(client.childProcess, undefined, "send after close spawned a browser");
+});
+
 test("pipe timeout distinguishes incoming traffic from an answered command", { timeout: 10_000 }, async (t) => {
   const client = await failureClient(t);
   await assert.rejects(client.send("Fixture.traffic", undefined, undefined, { timeoutMs: 100 }), (error) => {
