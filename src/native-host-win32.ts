@@ -123,12 +123,16 @@ const systemBinary = (...segments: string[]) => {
 };
 
 // Exit code of a finished child; a spawn failure, a timeout or a kill rejects (the caller fails closed).
+// The bound covers a cold Windows PowerShell 5.1 start: the first launch on a fresh machine loads .NET assemblies
+// under real-time AV scanning and has been measured past 15 s, which failed a valid install closed. This runs once
+// per install, so a minute stays a bound on a stuck child, not on a slow one.
+const RUN_TIMEOUT_MS = 60_000;
 function run(file: string, args: readonly string[]) {
   return new Promise<RunResult>((resolve, reject) => {
     execFile(
       file,
       args,
-      { timeout: 15_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" },
+      { timeout: RUN_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" },
       (error, stdout, stderr) => {
         if (error && (typeof error.code !== "number" || error.killed)) reject(error);
         else resolve({ code: error ? error.code : 0, stdout, stderr });

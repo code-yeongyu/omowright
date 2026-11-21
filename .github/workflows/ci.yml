@@ -20,7 +20,8 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # About 2x this job's p95 over 150 PR runs (564 s, #320): a regression fails loudly instead of creeping.
+    timeout-minutes: 19
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -41,7 +42,10 @@ jobs:
         run: bun audit --prod
 
       # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
+      # Bounded: an unreachable package mirror makes apt wait ~20 s per package and once held the job to its
+      # 30-minute limit; a healthy install takes under a minute (6 min at the slowest observed success).
       - name: Install ffmpeg
+        timeout-minutes: 8
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       # Ubuntu 24.04 runners restrict unprivileged user namespaces via AppArmor,
@@ -72,6 +76,7 @@ jobs:
           bun run build
           git diff --exit-code HEAD --
 
+      # Step bounds below are about 3x the slowest observed success, so a hang costs minutes, not the job limit.
       # Per-file durations from the latest run on main: --parallel starts the slowest files first. Runs on main
       # record a fresh copy; pull requests only read it. A missing record only loses the ordering.
       - name: Restore test timings
@@ -82,6 +87,7 @@ jobs:
           restore-keys: bun-test-timings-${{ runner.os }}-
 
       - name: bun test
+        timeout-minutes: 12
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
@@ -99,6 +105,7 @@ jobs:
       # The same suite under real Node: bun is the development runner, and a package
       # Node consumers install has to keep working there (see packages' exports).
       - name: node test
+        timeout-minutes: 6
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
@@ -161,7 +168,8 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'pull_request'
     runs-on: macos-latest
-    timeout-minutes: 30
+    # About 2x this job's p95 over 150 PR runs (78 s, #320).
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -186,7 +194,8 @@ jobs:
       github.event_name == 'schedule' ||
       github.event_name == 'pull_request'
     runs-on: windows-latest
-    timeout-minutes: 45
+    # About 2x this job's p95 over 150 PR runs (580 s, #320).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -203,6 +212,7 @@ jobs:
 
       # The page-video test (test/integration.test.ts) needs ffmpeg with libvpx; without it the test skips.
       - name: Install ffmpeg
+        timeout-minutes: 8
         run: choco install ffmpeg --no-progress -y
 
       - name: Install chrome-headless-shell
@@ -225,6 +235,7 @@ jobs:
           restore-keys: bun-test-timings-${{ runner.os }}-
 
       - name: bun test
+        timeout-minutes: 18
         env:
           SHELL_BIN: ${{ steps.browser.outputs.bin }}
           CLOAKBROWSER_BIN: ${{ steps.browser.outputs.bin }}
