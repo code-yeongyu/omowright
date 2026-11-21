@@ -66,16 +66,16 @@
     "preversion": "git diff --quiet HEAD --"
   },
   "dependencies": {
-    "ws": "^8.18.3",
-    "zod": "^4.6.6"
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
-    "acorn": "8.15.0",
-    "gpt-tokenizer": "4.1.0",
-    "oxc-parser": "0.148.0",
-    "oxfmt": "^0.77.0",
-    "oxlint": "^1.92.0",
+    "@types/bun": "1.4.5",
+    "acorn": "8.19.0",
+    "gpt-tokenizer": "4.1.2",
+    "oxc-parser": "0.159.0",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
     "typescript": "^7.0.2",
     "typescript-5": "npm:typescript@5.9.3"
   },
