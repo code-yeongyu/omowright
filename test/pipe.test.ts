@@ -319,6 +319,7 @@ test(
   "connectPipe quits the browser it spawned when the browser never becomes ready",
   { skip: process.platform === "win32" && "pgrep finds the browser by its argv marker", timeout: 20_000 },
   async () => {
+    const cleanup = new AbortController();
     const marker = `--omowright-test-marker=${randomUUID()}`;
     const running = () => {
       try {
@@ -333,7 +334,11 @@ test(
         connectPipe({
           browserPath: process.execPath,
           browserArgs: [fixture, marker],
-          spawnOptions: { env: { ...process.env, FAKE_BROWSER_MODE: "mute-cdp" } },
+          spawnOptions: {
+            signal: cleanup.signal,
+            killSignal: "SIGKILL",
+            env: { ...process.env, FAKE_BROWSER_MODE: "mute-cdp" },
+          },
           readinessTimeoutMs: 1500,
         }),
         /did not become ready over the CDP pipe/,
@@ -342,9 +347,7 @@ test(
         assert.fail("connectPipe rejected but left the browser it spawned running"),
       );
     } finally {
-      try {
-        execFileSync("pkill", ["-KILL", "-f", "--", marker], { stdio: "ignore" });
-      } catch {}
+      cleanup.abort();
     }
   },
 );

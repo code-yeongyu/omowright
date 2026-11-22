@@ -52,13 +52,21 @@ test(
     const marker = `--omowright-test-marker=${randomUUID()}`;
     const running = () => {
       try {
-        execFileSync("pgrep", ["-f", marker], { stdio: "ignore" });
+        execFileSync("pgrep", ["-f", "--", marker], { stdio: "ignore" });
         return true;
       } catch {
         return false;
       }
     };
-    const { client } = lifecycleClient(dir, "exit", [`--user-data-dir=${path.join(blocker, "profile")}`, marker]);
+    const cleanup = new AbortController();
+    const { client } = lifecycleClient(
+      dir,
+      "exit",
+      [`--user-data-dir=${path.join(blocker, "profile")}`, marker],
+      "signals.log",
+      "ignore",
+      cleanup.signal,
+    );
     try {
       await assert.rejects(client.ensureConnected());
       assert.equal(client.isConnected, false);
@@ -67,9 +75,7 @@ test(
       );
     } finally {
       await client.close();
-      try {
-        execFileSync("pkill", ["-KILL", "-f", marker], { stdio: "ignore" });
-      } catch {}
+      cleanup.abort();
       rmSync(dir, { recursive: true, force: true });
     }
   },
