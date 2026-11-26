@@ -67,6 +67,10 @@ Targets are a ref (`"e3"` / `"@e3"` from `session.observe()` or
 `session.snapshot()`), a CSS selector, or `{ captureId, x, y }` from a
 screenshot.
 
+On an extension older than 0.4.0 there is no shared control: `cooperate("sync")`
+resolves without a `context_id` and actions run ungated, so the loop above runs
+unchanged there.
+
 A `BskSession` is not a page: it has no `goto`, `locator` or `listTargets`.
 Read with `observe({ maxTokens })` first: it is the cheapest read, needs no
 sync context, and its `@eN` refs work inside shadow roots and frames. To wait,
