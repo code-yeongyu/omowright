@@ -38,7 +38,9 @@ type EntriesOf = (holder: object) => Entries;
  * kept as it is, on a copy too.
  * Not read: property names; symbols and functions; private fields; the own properties of a boxed
  * string, number or bigint;
- * what only a prototype accessor or a method computes (the text of a `URL`, `Headers` or `Request`);
+ * what only a prototype accessor or a method computes (the text of a `URL`, `Headers` or `Request`),
+ * except an error's `message`: when it is inherited (a `DOMException` serves it from its prototype) and
+ * the value is found in it, the scrubbed text is stored on the error itself, shadowing the inherited one;
  * and these objects, which are returned as they are with their own properties: `ArrayBuffer`,
  * `SharedArrayBuffer` and their views, `Date`, `RegExp`, `Promise`, `WeakMap`, `WeakSet`. A copy
  * stands in for a `Proxy` or another exotic object only as far as its prototype and own properties go.
@@ -132,6 +134,15 @@ function ownEntries(holder: object): Entries {
     if (Array.isArray(holder) && key === "length") continue;
     const own = ownValue(holder, key);
     if (own.readable) entries.push([key, own.value]);
+  }
+  // An error's message is read wherever it lives: a DOMException serves it from an accessor on its
+  // prototype, so it is no own property, yet it is what a caller logs (#376).
+  if (isError(holder) && Reflect.getOwnPropertyDescriptor(holder, "message") === undefined) {
+    try {
+      entries.push(["message", Reflect.get(holder, "message")]);
+    } catch {
+      // A message that cannot be read cannot carry the value to a reader either.
+    }
   }
   return entries;
 }
