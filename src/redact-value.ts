@@ -2,6 +2,8 @@
 const REMOVED_ANYWHERE_FROM_LENGTH = 4;
 
 type Scrub = (text: string) => string;
+type Entries = ReadonlyArray<readonly [key: string | symbol, value: unknown]>;
+type EntriesOf = (holder: object) => Entries;
 
 /**
  * Strips a value being entered (fill/type) out of the error its failure raised, so a secret typed
@@ -9,18 +11,23 @@ type Scrub = (text: string) => string;
  * BrowserSkill daemon) may quote the command they refused, raw or JSON-escaped, anywhere in what they
  * throw, so the whole graph of the error is read (#362, #366):
  *
- * - An error that does not carry the value is returned untouched.
- * - Every `Error` in the graph is rewritten in place and keeps its identity and class, wherever it sits:
- *   a cause, a member of an `AggregateError`, a field of a payload.
+ * - An error that does not carry the value is returned as it is; nothing in its graph is written.
+ * - An `Error` that carries the value and can be rewritten is rewritten in place, so it keeps its
+ *   identity and class wherever it sits: a cause, a member of an `AggregateError`, a field of a payload.
  * - Anything else that carries the value (a payload object, an array, a `Map`, a `Set`) is replaced by a
  *   scrubbed copy and never mutated: it may be an object the caller still uses, such as the command's
  *   own parameters. A part that does not carry the value stays the same object.
  * - An `Error` that cannot be rewritten (frozen, or holding a field that is neither writable nor
- *   configurable) is replaced by a scrubbed copy of the same class.
+ *   configurable) is replaced by a scrubbed copy: a native error with the same prototype, so it is an
+ *   instance of the same classes, but a different object.
  *
- * Reached: own properties (an accessor is read once and, when it carries the value, replaced by the
- * scrubbed result), array elements, `Map` and `Set` entries, numbers whose digits contain the value.
- * Not reached: property names, private fields, what only a prototype accessor computes, binary buffers.
+ * Reached: own properties, array elements, `Map` and `Set` entries, numbers whose digits contain the
+ * value. Each readable own property is read once per call; an accessor that returns the value becomes a
+ * data property holding the scrubbed result, and one that throws is left as it is.
+ * Not reached: property names; private fields; what only a prototype accessor computes; and objects that
+ * are returned as they are, own properties included: binary buffers, `Date`, `RegExp`, `Promise`,
+ * `WeakMap`, `WeakSet`. A copy stands in for a `Proxy` or an exotic object only as far as its
+ * prototype and own properties go.
  *
  * A value of four characters or more is removed even where it touches a letter or a digit
  * (`field7<value>`); a shorter one is removed only as a whole token, because taking one or two
@@ -40,7 +47,16 @@ export function redactValue(error: unknown, value: string): unknown {
     "gu",
   );
   const scrub: Scrub = (text) => text.replace(pattern, replacement);
-  return carries(error, scrub) ? scrubbed(error, scrub, replacement) : error;
+  // Both passes read an object's properties through this, so an accessor runs once per call.
+  const read = new Map<object, Entries>();
+  const entriesOf: EntriesOf = (holder) => {
+    const known = read.get(holder);
+    if (known !== undefined) return known;
+    const entries = ownEntries(holder);
+    read.set(holder, entries);
+    return entries;
+  };
+  return carries(error, scrub, entriesOf) ? scrubbed(error, scrub, replacement, entriesOf) : error;
 }
 
 // Objects that hold no text of their own and break when copied property by property.
@@ -68,8 +84,8 @@ function ownValue(holder: object, key: string | symbol): { readable: boolean; va
   }
 }
 
-function ownEntries(holder: object): Array<[key: string | symbol, value: unknown]> {
-  const entries: Array<[string | symbol, unknown]> = [];
+function ownEntries(holder: object): Entries {
+  const entries: Array<readonly [string | symbol, unknown]> = [];
   for (const key of Reflect.ownKeys(holder)) {
     if (Array.isArray(holder) && key === "length") continue;
     const own = ownValue(holder, key);
@@ -78,7 +94,7 @@ function ownEntries(holder: object): Array<[key: string | symbol, value: unknown
   return entries;
 }
 
-function carries(root: unknown, scrub: Scrub): boolean {
+function carries(root: unknown, scrub: Scrub, entriesOf: EntriesOf): boolean {
   const seen = new Set<object>();
   const visit = (member: unknown): boolean => {
     if (typeof member === "string") return scrub(member) !== member;
@@ -87,7 +103,7 @@ function carries(root: unknown, scrub: Scrub): boolean {
     seen.add(member);
     if (member instanceof Map && [...member].some(([key, entry]) => visit(key) || visit(entry))) return true;
     if (member instanceof Set && [...member].some((entry) => visit(entry))) return true;
-    return ownEntries(member).some(([, entry]) => visit(entry));
+    return entriesOf(member).some(([, entry]) => visit(entry));
   };
   return visit(root);
 }
@@ -101,14 +117,26 @@ function rewritable(error: Error) {
   });
 }
 
+// An empty object of the same kind, to receive the scrubbed properties.
 function emptyLike(member: object): object {
-  if (Array.isArray(member)) return [];
+  if (Array.isArray(member)) {
+    const copy: unknown[] = [];
+    copy.length = member.length;
+    return copy;
+  }
+  if (member instanceof Error) {
+    // A native error (Error.isError, "[object Error]"), stripped of what its own creation recorded.
+    const copy = new Error();
+    for (const key of Reflect.ownKeys(copy)) Reflect.deleteProperty(copy, key);
+    Reflect.setPrototypeOf(copy, Reflect.getPrototypeOf(member));
+    return copy;
+  }
   if (member instanceof Map) return new Map();
   if (member instanceof Set) return new Set();
   return Object.create(Reflect.getPrototypeOf(member));
 }
 
-function scrubbed(root: unknown, scrub: Scrub, replacement: string): unknown {
+function scrubbed(root: unknown, scrub: Scrub, replacement: string, entriesOf: EntriesOf): unknown {
   const results = new Map<object, object>();
   const clean = (member: unknown): unknown => {
     if (typeof member === "string") return scrub(member);
@@ -120,13 +148,13 @@ function scrubbed(root: unknown, scrub: Scrub, replacement: string): unknown {
     if (known !== undefined) return known;
     const inPlace = member instanceof Error && rewritable(member);
     // A part that carries nothing keeps its identity; an Error is still walked, in place, for the Errors below it.
-    if (!inPlace && !carries(member, scrub)) return member;
+    if (!inPlace && !carries(member, scrub, entriesOf)) return member;
     const target = inPlace ? member : emptyLike(member);
     results.set(member, target);
     if (member instanceof Map && target instanceof Map)
       for (const [key, entry] of member) target.set(clean(key), clean(entry));
     if (member instanceof Set && target instanceof Set) for (const entry of member) target.add(clean(entry));
-    for (const [key, entry] of ownEntries(member)) {
+    for (const [key, entry] of entriesOf(member)) {
       const next = clean(entry);
       if (inPlace && Object.is(next, entry)) continue;
       const descriptor = Reflect.getOwnPropertyDescriptor(member, key);
