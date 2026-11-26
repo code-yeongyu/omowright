@@ -77,6 +77,7 @@ export { createRoutes } from "./routes.ts";
 export { collectWhileScrolling } from "./scroll-collect.ts";
 export { createTrace } from "./trace.ts";
 export { BskIpcClient, BskRpcError, readDaemonInfo, resolveBskHome } from "./bsk/ipc-client.ts";
+export type { BskCallOptions, BskClient } from "./bsk/ipc-client.ts";
 export { BskSession } from "./bsk/session.ts";
 export { connectBrowserSkill, listBrowsers } from "./bsk/connect.ts";
 export { bskSnapshot, buildSnapshotExpression } from "./bsk/snapshot.ts";

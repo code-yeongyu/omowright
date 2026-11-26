@@ -5,10 +5,20 @@ import type { Screenshot, ScreenshotOptions } from "./screenshot.ts";
 import { BskRpcError } from "./ipc-client.ts";
 import type { BskClient } from "./ipc-client.ts";
 import { redactValue } from "../redact-value.ts";
+import { optionalProperty } from "./reply-fields.ts";
+import { sharedTab } from "./shared-tab.ts";
+import type { MetadataKey, SharedTabMethod, SharedTabOptions, ToolMethod, WireParams } from "./shared-tab.ts";
+import { isBootstrapRefusal, settleInitialTab } from "./first-navigate.ts";
+import { extractItems, readNodes, waitForElement } from "./dom-reads.ts";
+import type { ExtractOptions, ReadOptions, WaitForElementOptions } from "./dom-reads.ts";
 import type {
-  BskToolParams,
+  ControlPolicy,
   CooperateAction,
+  DragMode,
+  DragPoint,
+  DragTarget,
   EmulateOverrides,
+  ExtractAction,
   HelpCompletionCriteria,
   KeyModifier,
   MouseButton,
@@ -16,18 +26,30 @@ import type {
   WaitUntil,
 } from "./protocol/params.generated.ts";
 
-type ToolMethod = keyof BskToolParams;
-// What a typed call puts on the wire; tool() adds session_id.
-type WireParams<M extends ToolMethod> = Omit<BskToolParams[M], "session_id">;
-type MetadataKey = "context_id" | "depends_on";
-// The methods whose schema carries the cooperation metadata sharedTab() fills in.
-type SharedTabMethod = { [M in ToolMethod]: MetadataKey extends keyof BskToolParams[M] ? M : never }[ToolMethod];
+export type { SharedTabOptions } from "./shared-tab.ts";
 
 const SESSION_STOP_TIMEOUT_MS = 3_600_000;
 
-export interface SharedTabOptions {
-  context?: string | undefined;
-  dependsOn?: readonly string[] | undefined;
+// A target-policy sync answers the observation id actions accept at the top level and a legacy ref-map token under
+// observation.observation_id; a strict sync sends only the nested one (measured on BrowserSkill 0.5.0).
+// tool.cooperate's result schema is open (AnyValue), so only the fields an action needs are parsed; the rest of the
+// daemon's reply is kept as it came.
+export interface CooperateReply {
+  readonly context_id: string | undefined;
+  readonly observation_id: string | undefined;
+  readonly [field: string]: unknown;
+}
+
+const text = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+
+function cooperateReply(reply: unknown): CooperateReply {
+  const fields = typeof reply === "object" && reply !== null ? reply : {};
+  const nested = optionalProperty(optionalProperty(reply, "observation"), "observation_id");
+  return {
+    ...fields,
+    context_id: text(optionalProperty(reply, "context_id")),
+    observation_id: text(optionalProperty(reply, "observation_id")) ?? text(nested),
+  };
 }
 
 export interface BskSessionInit {
@@ -51,28 +73,14 @@ export interface TabTimeoutOptions extends SharedTabOptions {
 export interface EvaluateOptions extends TabTimeoutOptions {
   awaitPromise?: boolean;
   returnByValue?: boolean;
-}
-
-// BrowserSkill 0.4 refuses a page action (cooperation_sync_required) unless it
-// carries the single-use context_id of the latest tool.cooperate sync, and the
-// daemon never fills it in for the caller. Any other key left over after a method's own options
-// is a misspelling (for example `contextId`) that would otherwise send no context, so it throws.
-function sharedTab({ context, dependsOn, ...unknown }: SharedTabOptions): {
-  context_id: string | undefined;
-  depends_on: readonly string[] | undefined;
-} {
-  const extra = Object.keys(unknown);
-  if (extra.length > 0) {
-    throw new TypeError(
-      `unknown option ${extra.map((key) => JSON.stringify(key)).join(", ")}: a shared-tab action takes { context, dependsOn } besides its own options`,
-    );
-  }
-  return { context_id: context, depends_on: dependsOn };
+  unverified?: boolean;
 }
 
 export class BskSession {
   #client: BskClient;
   #stopped = false;
+  // Set once a guarded page action has been sent: only a session's first one can meet the bootstrap refusal.
+  #acted = false;
   declare sessionId: string;
   declare browserInstanceId: unknown;
   declare agentWindowId: unknown;
@@ -105,7 +113,9 @@ export class BskSession {
     params: Omit<WireParams<M>, MetadataKey>,
     shared: SharedTabOptions,
   ): Promise<unknown> {
-    return this.tool(name, { ...params, ...sharedTab(shared) });
+    const wire = { ...params, ...sharedTab(shared) };
+    this.#acted = true;
+    return this.tool(name, wire);
   }
 
   tool(name: string, params: Record<string, unknown> = {}): Promise<unknown> {
@@ -117,22 +127,43 @@ export class BskSession {
 
   cooperate(
     action: CooperateAction,
-    { tabId, timeoutMs, maxTokens }: { tabId?: number; timeoutMs?: number; maxTokens?: number } = {},
-  ): Promise<unknown> {
+    {
+      tabId,
+      timeoutMs,
+      maxTokens,
+      controlPolicy,
+    }: { tabId?: number; timeoutMs?: number; maxTokens?: number; controlPolicy?: ControlPolicy } = {},
+  ): Promise<CooperateReply> {
     // An extension before 0.4.0 has no shared control: it answers unknown_method here and runs actions without a
     // context. Degrade to "no context, ready" so a sync-then-act caller works unchanged; an absent context is
     // dropped from the wire by compact(). Every other error still rejects.
-    return this.#call("cooperate", { action, tab_id: tabId, timeout_ms: timeoutMs, max_tokens: maxTokens }).catch(
-      (error: unknown) => {
-        if (error instanceof BskRpcError && error.code === "unknown_method")
-          return { context_id: undefined, supported: false, ready: true };
-        throw error;
-      },
-    );
+    return this.#call("cooperate", {
+      action,
+      tab_id: tabId,
+      timeout_ms: timeoutMs,
+      max_tokens: maxTokens,
+      control_policy: controlPolicy,
+    }).then(cooperateReply, (error: unknown) => {
+      if (error instanceof BskRpcError && error.code === "unknown_method")
+        return { context_id: undefined, observation_id: undefined, supported: false, ready: true };
+      throw error;
+    });
   }
 
-  navigate(url: string, { tabId, waitUntil, timeoutMs, ...shared }: NavigationOptions = {}): Promise<unknown> {
-    return this.#act("navigate", { url, tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs }, shared);
+  // A session's first navigate can meet BrowserSkill's initial-tab bootstrap refusal (see first-navigate.ts). Only
+  // that refusal, with nothing sent to the page, on the session's first page action and without a caller context,
+  // is sent once more after the tab settles.
+  async navigate(url: string, { tabId, waitUntil, timeoutMs, ...shared }: NavigationOptions = {}): Promise<unknown> {
+    const send = () =>
+      this.#act("navigate", { url, tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs }, shared);
+    const first = !this.#acted && shared.context === undefined;
+    try {
+      return await send();
+    } catch (error) {
+      if (!first || !isBootstrapRefusal(error)) throw error;
+      await settleInitialTab(this, error, tabId);
+      return send();
+    }
   }
   back({ tabId, waitUntil, timeoutMs, ...shared }: NavigationOptions = {}): Promise<unknown> {
     return this.#act("navigate_back", { tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs }, shared);
@@ -315,11 +346,69 @@ export class BskSession {
 
   evaluate(
     expression: string,
-    { tabId, awaitPromise, returnByValue, timeoutMs, ...shared }: EvaluateOptions = {},
+    { tabId, awaitPromise, returnByValue, timeoutMs, unverified, ...shared }: EvaluateOptions = {},
   ): Promise<unknown> {
     return this.#act(
       "evaluate",
-      { expression, tab_id: tabId, await_promise: awaitPromise, return_by_value: returnByValue, timeout_ms: timeoutMs },
+      {
+        expression,
+        tab_id: tabId,
+        await_promise: awaitPromise,
+        return_by_value: returnByValue,
+        timeout_ms: timeoutMs,
+        unverified,
+      },
+      shared,
+    );
+  }
+
+  // Reads need no cooperate sync; a given context is checked without renewing control.
+  read(target?: ElementTargetInput, options?: ReadOptions): Promise<unknown> {
+    return readNodes(this, target, options);
+  }
+  extract(action: ExtractAction, options?: ExtractOptions): Promise<unknown> {
+    return extractItems(this, action, options);
+  }
+  waitForElement(target: ElementTargetInput, options: WaitForElementOptions): Promise<unknown> {
+    return waitForElement(this, target, options);
+  }
+  drag(
+    source: DragTarget,
+    {
+      target,
+      delta,
+      mode,
+      button,
+      durationMs,
+      holdMs,
+      modifiers,
+      tabId,
+      timeoutMs,
+      ...shared
+    }: TabTimeoutOptions & {
+      target?: DragTarget;
+      delta?: DragPoint;
+      mode?: DragMode;
+      button?: MouseButton;
+      durationMs?: number;
+      holdMs?: number;
+      modifiers?: readonly KeyModifier[];
+    } = {},
+  ): Promise<unknown> {
+    return this.#act(
+      "drag",
+      {
+        source,
+        target,
+        delta,
+        mode,
+        button,
+        duration_ms: durationMs,
+        hold_ms: holdMs,
+        modifiers,
+        tab_id: tabId,
+        timeout_ms: timeoutMs,
+      },
       shared,
     );
   }
