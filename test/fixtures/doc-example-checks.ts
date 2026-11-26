@@ -7,17 +7,23 @@ import { analyzeScopes } from "../source-scope.ts";
 
 export const PLATFORM_GLOBALS: ReadonlySet<string> = new Set([
   // the language and the runtimes an example runs on (Node, Bun)
-  ..."globalThis undefined NaN Infinity Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp".split(" "),
+  ..."globalThis undefined NaN Infinity Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp".split(
+    " ",
+  ),
   ..."Error TypeError RangeError AggregateError Promise Map Set WeakMap WeakSet Reflect Proxy Intl".split(" "),
   ..."parseInt parseFloat isNaN structuredClone encodeURIComponent decodeURIComponent URL URLSearchParams".split(" "),
   ..."TextEncoder TextDecoder AbortController AbortSignal fetch console performance crypto atob btoa".split(" "),
-  ..."setTimeout clearTimeout setInterval clearInterval queueMicrotask Uint8Array ArrayBuffer Buffer process Bun".split(" "),
+  ..."setTimeout clearTimeout setInterval clearInterval queueMicrotask Uint8Array ArrayBuffer Buffer process Bun".split(
+    " ",
+  ),
   // the helpers of the eval kernel the skill is written for
   ..."tool print display env read write parallel log".split(" "),
   // a page, inside a function handed to evaluate() or waitForFunction()
   ..."window document location navigator history localStorage sessionStorage innerWidth innerHeight".split(" "),
   ..."scrollX scrollY scrollTo scrollBy getComputedStyle matchMedia MutationObserver IntersectionObserver".split(" "),
-  ..."ResizeObserver requestAnimationFrame HTMLElement Element Node Event CustomEvent KeyboardEvent MouseEvent CSS".split(" "),
+  ..."ResizeObserver requestAnimationFrame HTMLElement Element Node Event CustomEvent KeyboardEvent MouseEvent CSS".split(
+    " ",
+  ),
 ]);
 
 const SLEEP_FUNCTIONS = new Set(["sleep"]);

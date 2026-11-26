@@ -123,14 +123,16 @@ function scrubbed(root: unknown, scrub: Scrub, replacement: string): unknown {
     if (!inPlace && !carries(member, scrub)) return member;
     const target = inPlace ? member : emptyLike(member);
     results.set(member, target);
-    if (member instanceof Map && target instanceof Map) for (const [key, entry] of member) target.set(clean(key), clean(entry));
+    if (member instanceof Map && target instanceof Map)
+      for (const [key, entry] of member) target.set(clean(key), clean(entry));
     if (member instanceof Set && target instanceof Set) for (const entry of member) target.add(clean(entry));
     for (const [key, entry] of ownEntries(member)) {
       const next = clean(entry);
       if (inPlace && Object.is(next, entry)) continue;
       const descriptor = Reflect.getOwnPropertyDescriptor(member, key);
       // A data field of an Error rewritten in place keeps its attributes; anything else becomes a plain data field.
-      if (inPlace && descriptor !== undefined && "value" in descriptor) Reflect.defineProperty(target, key, { value: next });
+      if (inPlace && descriptor !== undefined && "value" in descriptor)
+        Reflect.defineProperty(target, key, { value: next });
       else {
         const enumerable = descriptor?.enumerable === true;
         Reflect.defineProperty(target, key, { value: next, writable: true, enumerable, configurable: true });
