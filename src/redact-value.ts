@@ -7,27 +7,32 @@ type EntriesOf = (holder: object) => Entries;
 
 /**
  * Strips a value being entered (fill/type) out of the error its failure raised, so a secret typed
- * into a form never reaches an agent transcript (#335). The layers below (a CDP transport, the
- * BrowserSkill daemon) may quote the command they refused, raw or JSON-escaped, anywhere in what they
- * throw, so the whole graph of the error is read (#362, #366):
+ * into a form does not reach an agent transcript through that error (#335). The layers below (a CDP
+ * transport, the BrowserSkill daemon) may quote the command they refused, raw or JSON-escaped, anywhere
+ * in what they throw, so the graph of the error is read (#362, #366, #369).
  *
+ * What comes back:
  * - An error that does not carry the value is returned as it is; nothing in its graph is written.
  * - An `Error` that carries the value and can be rewritten is rewritten in place, so it keeps its
  *   identity and class wherever it sits: a cause, a member of an `AggregateError`, a field of a payload.
- * - Anything else that carries the value (a payload object, an array, a `Map`, a `Set`) is replaced by a
- *   scrubbed copy and never mutated: it may be an object the caller still uses, such as the command's
- *   own parameters. A part that does not carry the value stays the same object.
  * - An `Error` that cannot be rewritten (frozen, or holding a field that is neither writable nor
  *   configurable) is replaced by a scrubbed copy: a native error with the same prototype, so it is an
  *   instance of the same classes, but a different object.
+ * - Anything else that carries the value (a payload object, an array, a `Map`, a `Set`) is replaced by a
+ *   scrubbed copy with the same prototype and is never mutated: it may be an object the caller still
+ *   uses, such as the command's own parameters. A boxed string becomes a scrubbed string. A part that
+ *   does not carry the value stays the same object.
+ * - An error that cannot be read at all (a `Proxy` whose traps throw) is replaced by a plain error that
+ *   says so: what cannot be read cannot be shown to be clean.
  *
- * Reached: own properties, array elements, `Map` and `Set` entries, numbers whose digits contain the
- * value. Each readable own property is read once per call; an accessor that returns the value becomes a
- * data property holding the scrubbed result, and one that throws is left as it is.
- * Not reached: property names; private fields; what only a prototype accessor computes; and objects that
- * are returned as they are, own properties included: binary buffers, `Date`, `RegExp`, `Promise`,
- * `WeakMap`, `WeakSet`. A copy stands in for a `Proxy` or an exotic object only as far as its
- * prototype and own properties go.
+ * Reached: strings; numbers and bigints whose digits contain the value; own properties, string- and
+ * symbol-keyed, enumerable or not; array elements; `Map` and `Set` entries. Each own accessor is called
+ * once per call: one that returns the value becomes a data property holding the scrubbed result, and one
+ * that throws is kept as it is, on a copy too.
+ * Not reached: property names; symbols and functions; private fields; what only a prototype accessor or
+ * a method computes (the text of a `URL`, `Headers` or `Request`); and objects returned as they are, own
+ * properties included: binary buffers, `Date`, `RegExp`, `Promise`, `WeakMap`, `WeakSet`. A copy stands
+ * in for a `Proxy` or an exotic object only as far as its prototype and own properties go.
  *
  * A value of four characters or more is removed even where it touches a letter or a digit
  * (`field7<value>`); a shorter one is removed only as a whole token, because taking one or two
@@ -56,7 +61,22 @@ export function redactValue(error: unknown, value: string): unknown {
     read.set(holder, entries);
     return entries;
   };
-  return carries(error, scrub, entriesOf) ? scrubbed(error, scrub, replacement, entriesOf) : error;
+  try {
+    return carries(error, scrub, entriesOf) ? scrubbed(error, scrub, replacement, entriesOf) : error;
+  } catch {
+    return new Error("omowright: the error a failed fill raised could not be read for redaction, so it is withheld");
+  }
+}
+
+// The text of a boxed string; anything else as it is. Asking the string's own valueOf runs no code of the
+// object's (a class check or a tag lookup could), and it refuses everything that is not a boxed string.
+function unboxed(member: unknown) {
+  if (typeof member !== "object" || member === null) return member;
+  try {
+    return String.prototype.valueOf.call(member);
+  } catch {
+    return member;
+  }
 }
 
 // Objects that hold no text of their own and break when copied property by property.
@@ -96,7 +116,8 @@ function ownEntries(holder: object): Entries {
 
 function carries(root: unknown, scrub: Scrub, entriesOf: EntriesOf): boolean {
   const seen = new Set<object>();
-  const visit = (member: unknown): boolean => {
+  const visit = (boxed: unknown): boolean => {
+    const member = unboxed(boxed);
     if (typeof member === "string") return scrub(member) !== member;
     if (typeof member === "number" || typeof member === "bigint") return scrub(String(member)) !== String(member);
     if (typeof member !== "object" || member === null || seen.has(member) || isOpaque(member)) return false;
@@ -117,29 +138,30 @@ function rewritable(error: Error) {
   });
 }
 
-// An empty object of the same kind, to receive the scrubbed properties.
+// An empty object of the same kind and prototype, to receive the scrubbed properties.
 function emptyLike(member: object): object {
+  const prototype = Reflect.getPrototypeOf(member);
+  let copy: object;
   if (Array.isArray(member)) {
-    const copy: unknown[] = [];
-    copy.length = member.length;
-    return copy;
-  }
-  if (member instanceof Error) {
+    const list: unknown[] = [];
+    list.length = member.length;
+    copy = list;
+  } else if (member instanceof Error) {
     // A native error (Error.isError, "[object Error]"), stripped of what its own creation recorded.
-    const copy = new Error();
+    copy = new Error();
     for (const key of Reflect.ownKeys(copy)) Reflect.deleteProperty(copy, key);
-    Reflect.setPrototypeOf(copy, Reflect.getPrototypeOf(member));
-    return copy;
-  }
-  if (member instanceof Map) return new Map();
-  if (member instanceof Set) return new Set();
-  return Object.create(Reflect.getPrototypeOf(member));
+  } else if (member instanceof Map) copy = new Map();
+  else if (member instanceof Set) copy = new Set();
+  else return Object.create(prototype);
+  Reflect.setPrototypeOf(copy, prototype);
+  return copy;
 }
 
 function scrubbed(root: unknown, scrub: Scrub, replacement: string, entriesOf: EntriesOf): unknown {
   const results = new Map<object, object>();
-  const clean = (member: unknown): unknown => {
-    if (typeof member === "string") return scrub(member);
+  const clean = (boxed: unknown): unknown => {
+    const member = unboxed(boxed);
+    if (typeof member === "string") return scrub(member) === member ? boxed : scrub(member);
     if (typeof member === "number" || typeof member === "bigint") {
       return scrub(String(member)) === String(member) ? member : replacement;
     }
@@ -165,6 +187,13 @@ function scrubbed(root: unknown, scrub: Scrub, replacement: string, entriesOf: E
         const enumerable = descriptor?.enumerable === true;
         Reflect.defineProperty(target, key, { value: next, writable: true, enumerable, configurable: true });
       }
+    }
+    if (inPlace) return target;
+    // What could not be read (an accessor that throws) moves to the copy as it is.
+    for (const key of Reflect.ownKeys(member)) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(member, key);
+      const copied = Reflect.getOwnPropertyDescriptor(target, key) !== undefined;
+      if (descriptor !== undefined && !copied) Reflect.defineProperty(target, key, descriptor);
     }
     return target;
   };

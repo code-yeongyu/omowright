@@ -223,3 +223,57 @@ test("a copied array keeps its length, and a copied Error is a native error of t
   assert.equal(Object.prototype.toString.call(copy), "[object Error]");
   assert.equal(copy.message, "frozen <redacted, 22 chars>");
 });
+
+// Contract (#369): a string is a string whether or not it is boxed.
+test("a boxed string that carries the value is replaced by a scrubbed string", () => {
+  const refused = Object.assign(new Error("fill failed"), {
+    echo: new String(`sent ${SECRET}`),
+    note: new String("ok"),
+  });
+  const note = refused.note;
+
+  redactValue(refused, SECRET);
+
+  assert.equal(refused.echo, "sent <redacted, 22 chars>");
+  assert.equal(refused.note, note);
+});
+
+// Contract (#369): a copy has the prototype of what it replaces and keeps what could not be read.
+test("a copy keeps a subclass prototype and an accessor that throws", () => {
+  class Headers extends Map<string, string> {}
+  const payload = { value: SECRET };
+  Object.defineProperty(payload, "broken", {
+    get: () => {
+      throw new Error("unreadable");
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  const refused = Object.assign(new Error("fill failed"), { headers: new Headers([["x-echo", SECRET]]), payload });
+
+  redactValue(refused, SECRET);
+
+  assert.ok(refused.headers instanceof Headers);
+  assert.deepEqual([...refused.headers], [["x-echo", "<redacted, 22 chars>"]]);
+  assert.notEqual(refused.payload, payload);
+  assert.equal(refused.payload.value, "<redacted, 22 chars>");
+  assert.throws(() => Reflect.get(refused.payload, "broken"), /unreadable/);
+});
+
+// Security contract (#369): what cannot be read cannot be shown to be clean, so it is not passed on.
+test("an error that cannot be read is withheld", () => {
+  const unreadable = new Proxy(
+    { detail: SECRET },
+    {
+      ownKeys: () => {
+        throw new Error("no keys for you");
+      },
+    },
+  );
+
+  const error = redactValue(new Error(`refused ${SECRET}`, { cause: unreadable }), SECRET);
+
+  assert.ok(error instanceof Error);
+  assert.match(error.message, /could not be read for redaction/);
+  assert.equal(error.cause, undefined);
+});
