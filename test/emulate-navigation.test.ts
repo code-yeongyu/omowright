@@ -28,9 +28,6 @@ async function start(browserPath: string) {
   const address = server.address();
   assert.ok(address !== null && typeof address === "object", "the fixture server has no TCP port");
   const profile = mkdtempSync(path.join(tmpdir(), "omowright-emulate-nav-test-"));
-  // Removed at exit, not in after(): a run whose filter matches no test here never reaches after(), and the
-  // retries a just-closed browser needs on Windows can outlast a hook's limit.
-  process.once("exit", () => removeTreeSync(profile));
   const connection = await connectPipe({
     browserPath,
     browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`],
@@ -43,6 +40,7 @@ async function start(browserPath: string) {
     return result;
   });
   return {
+    profile,
     connection,
     tabs: createAgentTabs(connection),
     first: `http://127.0.0.1:${address.port}`,
@@ -53,7 +51,10 @@ async function start(browserPath: string) {
 const live = SHELL ? await start(SHELL) : undefined;
 
 after(async () => {
-  if (live) await live.connection.close();
+  if (live) {
+    await live.connection.close();
+    removeTreeSync(live.profile);
+  }
   server.close();
 });
 
