@@ -74,18 +74,37 @@ empty tree, not an error. A search does not move the diff baseline, and `find` c
 be combined with `diff`. `maxChars` still caps the whole captured tree before the
 search runs, so leave it off when searching a large page.
 
+## Wait for a state, never for a clock
+
+**NEVER WRITE A FIXED DELAY** (`Bun.sleep`, `setTimeout`, `waitForTimeout`). It fails on a
+slow page and wastes the whole delay on a fast one. Name the state you need and wait for
+it, starting the wait before the action that causes it:
+
+| You are waiting for                       | Call                                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Something to appear or change in the page | `page.waitForFunction(fn, arg, { timeout })` (options are the THIRD argument), or `page.locator(ref).waitFor({ state: "visible" })`               |
+| The request an action triggers            | `const got = page.waitForResponse(urlOrPredicate, { timeout })`, then act, then `await got`; `snoop.waitFor(match)` when a network snoop is open |
+| A navigation                              | `page.waitForURL(globOrRegExp)`, `page.waitForLoadState("networkidle")`                                                                           |
+| A new tab                                 | `page.waitForEvent("popup")`, subscribed before the click                                                                                         |
+| A person (login, OTP, CAPTCHA)            | `requestHuman(page, { prompt, until })`                                                                                                           |
+
+`goto` and `newTab` already wait for meaningful content, so nothing follows them. A wait
+that can outlast one tool call (a person, a deploy, a slow job) is not awaited in that call
+at all: start it, hand its completion to your harness's watcher, and keep working. Pattern
+in `references/eval-kernel.md`.
+
 ## Owned engine: CloakBrowser
 
 When omowright owns the browser, use the CloakBrowser binary, not a plain headless shell: most real
 targets sit behind WAFs or bot scoring, and CloakBrowser's source-level
 fingerprint patches (Cloudflare Turnstile, FingerprintJS, BrowserScan) make it
 the safe choice. Plain headless shell is the speed fallback for trivially open
-pages: any Chrome/Chromium or
-`~/Library/Caches/ms-playwright/chromium_headless_shell-*/.../chrome-headless-shell`.
+pages. Take either path from code, never from a guess:
 
-```bash
-python3 -c "import cloakbrowser; print(cloakbrowser.binary_info()['binary_path'])"
-# -> ~/.cloakbrowser/chromium-<ver>/Chromium.app/Contents/MacOS/Chromium
+```js
+const { findCloakBrowserPath, detectBrowsers } = await import("omowright");
+const browserPath = findCloakBrowserPath(); // newest ~/.cloakbrowser/chromium-*; throws when none is installed (set CLOAKBROWSER_BIN off macOS)
+const chrome = detectBrowsers().find((b) => b.installed)?.binary; // an installed Chrome-family binary, for the fallback
 ```
 
 For a reused authenticated profile, use `connectCloakProfile({ profileDir, fingerprintSeed })` from the package (or the `omowright-cloak --profile "$HOME/.local/share/omowright-cloak" --url <url> --once --snapshot` launcher). First use pins a fingerprint seed in a mode-`0600` metadata file inside the mode-`0700` profile; later runs reuse it and **REJECT a conflicting seed** instead of silently changing identity. It passes the fixed `--fingerprint=<seed>` plus the platform flag on every `connectPipe()` launch. The seed is an identity pin, not a credential store.
@@ -124,17 +143,14 @@ CUA acts in viewport pixels. When the render surface and coordinate space
 disagree, every coordinate is off by a constant and retrying repeats the miss:
 
 ```js
-await page._sendToTarget("Emulation.setDeviceMetricsOverride", {
-  width: 1440,
-  height: 900,
-  deviceScaleFactor: 1,
-  mobile: false,
-  screenWidth: 1440,
-  screenHeight: 900,
-  viewport: { x: 0, y: 0, width: 1440, height: 900, scale: 1 },
-});
-await page.refreshViewportSize(); // -> { width: 1440, height: 900 }
+const { repinViewport, DEFAULT_AGENT_VIEWPORT } = await import("omowright");
+await repinViewport(page, DEFAULT_AGENT_VIEWPORT); // -> { width: 1440, height: 900 }
 ```
+
+For a device instead of a box, `emulate(page, "iphone-14")` (also `pixel-7`, `ipad-air`,
+`desktop-1440`) sets metrics, touch and user agent together, and
+`page.emulateMedia({ colorScheme })` covers media features. Raw `Emulation.*` CDP is never
+needed for either.
 
 Pin every page you act on, including tabs you did not open, then take a fresh
 screenshot — coordinates read off an unpinned screenshot are stale.
@@ -166,9 +182,13 @@ Preset and `TOOLS.md` paths are relative to the package root.
   their own browser; 1Password sessions are device-bound and never work from
   cookies. Detail in `references/stealth.md`. Cookie reuse is fine for ordinary
   sessions (Grafana, internal tools).
-- **Always `compactSnapshot()`** before sending a snapshot to a model — the refs
-  map resolves in-page, so dropping it is free; it was 7% to 64% of the bytes
-  across pages measured on 2026-11-09.
+- **Read within a budget.** Always `compactSnapshot()` before a model reads a
+  snapshot — the refs map resolves in-page, so dropping it is free; it was 7% to
+  64% of the bytes across pages measured on 2026-11-09. `snapshotTokens(snapshot)`
+  returns `{ bytes, estTokens }`: check it before printing a tree you have not
+  measured, and narrow a large one with `find`, `selector`, `interactive: true` or
+  `maxChars`. From `page.evaluate`, return the fields you need, never `innerHTML`
+  or the whole document's `innerText`.
 - **Refs die on every new snapshot.** Pass `page.locator("e1")` straight from the
   latest snapshot; never reuse a ref across snapshots, never put one in CSS.
 - **Refs stay page-level.** Child-frame refs look like `f1e3` and still go to

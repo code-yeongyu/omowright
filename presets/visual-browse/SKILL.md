@@ -36,16 +36,8 @@ disagree, every coordinate is wrong by the same constant offset and retrying
 repeats the miss. Pin both to one box:
 
 ```js
-await page._sendToTarget("Emulation.setDeviceMetricsOverride", {
-  width: 1440,
-  height: 900,
-  deviceScaleFactor: 1,
-  mobile: false,
-  screenWidth: 1440,
-  screenHeight: 900,
-  viewport: { x: 0, y: 0, width: 1440, height: 900, scale: 1 },
-});
-const size = await page.refreshViewportSize(); // -> { width: 1440, height: 900 }
+const { repinViewport, DEFAULT_AGENT_VIEWPORT } = await import("omowright");
+const size = await repinViewport(page, DEFAULT_AGENT_VIEWPORT); // -> { width: 1440, height: 900 }
 ```
 
 Pin every page you act on, including tabs you did not open, then take a fresh
