@@ -379,45 +379,52 @@ test("bskOnboard never launches a headless browser when no browser is found; it 
   }
 });
 
-test("bskDoctor is not ready while the only connected extension is the tab-grouping BrowserSkill 0.4.0", async () => {
-  const daemon = await startFakeBskDaemon({
-    handlers: {
-      "system.status": () => ({
-        result: {
-          daemon_version: "0.4.0-fake",
-          protocol_version: "1.7",
-          browsers: [
-            { instance_id: "abc", browser_name: "chrome", browser_version: "153", extension_version: "0.4.0" },
-          ],
-          sessions: [],
-        },
-      }),
-    },
-  });
-  const home = macHomeWithChrome();
-  try {
-    const client = new BskIpcClient({ home: daemon.home, autoStart: false });
-    const report = await bskDoctor({
-      platform: "darwin",
-      home,
-      client,
-      ...scoped(home),
-      bskBin: "/fake/bsk",
-      cliVersion: async () => "bsk 0.4.0",
-      waitForBrowserMs: 0,
+// The same decision connectBrowserSkill refuses with extension_outdated: 0.4.0 leaves tab groups behind, and anything
+// before 0.4.0 has no tool.cooperate.
+for (const { version, why } of [
+  { version: "0.4.0", why: /tab group/i },
+  { version: "0.3.0", why: /tool\.cooperate/ },
+]) {
+  test(`bskDoctor is not ready while the only connected extension is the outdated BrowserSkill ${version}`, async () => {
+    const daemon = await startFakeBskDaemon({
+      handlers: {
+        "system.status": () => ({
+          result: {
+            daemon_version: "0.4.0-fake",
+            protocol_version: "1.7",
+            browsers: [
+              { instance_id: "abc", browser_name: "chrome", browser_version: "153", extension_version: version },
+            ],
+            sessions: [],
+          },
+        }),
+      },
     });
-    assert.equal(report.ready, false);
-    assert.deepEqual(
-      report.outdatedExtensions.map((b) => field(b, "instance_id")),
-      ["abc"],
-    );
-    assert.match(String(report.nextStep), /0\.4\.1/);
-    assert.match(String(report.nextStep), /tab group/i);
-  } finally {
-    await daemon.close();
-    rmSync(home, { recursive: true, force: true });
-  }
-});
+    const home = macHomeWithChrome();
+    try {
+      const client = new BskIpcClient({ home: daemon.home, autoStart: false });
+      const report = await bskDoctor({
+        platform: "darwin",
+        home,
+        client,
+        ...scoped(home),
+        bskBin: "/fake/bsk",
+        cliVersion: async () => "bsk 0.4.0",
+        waitForBrowserMs: 0,
+      });
+      assert.equal(report.ready, false);
+      assert.deepEqual(
+        report.outdatedExtensions.map((b) => field(b, "instance_id")),
+        ["abc"],
+      );
+      assert.match(String(report.nextStep), /0\.4\.1/);
+      assert.match(String(report.nextStep), why);
+    } finally {
+      await daemon.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+}
 
 test("bskOnboard is not ready while the only connected extension is the tab-grouping BrowserSkill 0.4.0, and hands the user the update step", async () => {
   const daemon = await startFakeBskDaemon({

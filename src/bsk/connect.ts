@@ -7,22 +7,53 @@ import { compact } from "./targets.ts";
 
 const DEFAULT_WAIT_FOR_BROWSER_MS = 15_000;
 
-// BrowserSkill extension 0.4.0 put every task tab into a native "BrowserSkill" tab group. Chrome saves and syncs
-// native groups, so each task leaves a group in the user's own browser (and in every browser signed into the same
-// account) after it ends. Upstream removed the grouping in 0.4.1 and does not delete groups already saved.
-const TAB_GROUPING_EXTENSION_VERSIONS: ReadonlySet<unknown> = new Set(["0.4.0"]);
+const UPDATE_STEP =
+  "Update the BrowserSkill extension to 0.4.1 or later (chrome://extensions -> Developer mode -> Update, or wait for the store update).";
 
-export function isTabGroupingExtension(browser: unknown): boolean {
-  return TAB_GROUPING_EXTENSION_VERSIONS.has(optionalProperty(browser, "extension_version"));
+// Extensions before 0.4.0 have no shared control: they answer tool.cooperate with "not implemented", so the first
+// gated action of a session fails mid-task. BrowserSkill extension 0.4.0 put every task tab into a native
+// "BrowserSkill" tab group; Chrome saves and syncs native groups, so each task leaves a group in the user's own
+// browser (and in every browser signed into the same account) after it ends. Upstream removed the grouping in 0.4.1
+// and does not delete groups already saved. system.status lists no tools per browser, so the version decides; a
+// version this cannot read is left to the daemon.
+interface OutdatedExtension {
+  problem: string;
+  step: string;
 }
 
-export const TAB_GROUPING_EXTENSION_STEP =
-  'Update the BrowserSkill extension to 0.4.1 or later (chrome://extensions -> Developer mode -> Update, or wait for the store update). Version 0.4.0 puts each task\'s tabs into a "BrowserSkill" tab group that the browser saves and syncs, so the group stays after the task ends; delete any saved "BrowserSkill" tab groups by hand.';
+function outdatedExtension(browser: unknown): OutdatedExtension | null {
+  const version = optionalProperty(browser, "extension_version");
+  const parts = typeof version === "string" ? /^(\d+)\.(\d+)\.(\d+)/.exec(version) : null;
+  if (!parts) return null;
+  const [major, minor, patch] = parts.slice(1).map(Number);
+  if (major === 0 && (minor ?? 0) < 4) {
+    return {
+      problem: `is ${version}, which has no shared control (tool.cooperate), so the first page action of a task fails.`,
+      step: `${UPDATE_STEP} Versions before 0.4.0 do not implement tool.cooperate, which every page action needs.`,
+    };
+  }
+  if (major === 0 && minor === 4 && patch === 0) {
+    return {
+      problem: `is 0.4.0, which leaves a "BrowserSkill" tab group behind in the user's browser after each task.`,
+      step: `${UPDATE_STEP} Version 0.4.0 puts each task's tabs into a "BrowserSkill" tab group that the browser saves and syncs, so the group stays after the task ends; delete any saved "BrowserSkill" tab groups by hand.`,
+    };
+  }
+  return null;
+}
 
-function outdatedError(browser: unknown): BskRpcError {
+export function isOutdatedExtension(browser: unknown): boolean {
+  return outdatedExtension(browser) !== null;
+}
+
+// The step the user owes for an extension isOutdatedExtension accepts; null for an up-to-date one.
+export function outdatedExtensionStep(browser: unknown): string | null {
+  return outdatedExtension(browser)?.step ?? null;
+}
+
+function outdatedError(browser: unknown, { problem, step }: OutdatedExtension): BskRpcError {
   return new BskRpcError(
     "extension_outdated",
-    `the BrowserSkill extension in ${textField(browser, "browser_name") ?? "the browser"} [${textField(browser, "instance_id") ?? "unknown id"}] is 0.4.0, which leaves a "BrowserSkill" tab group behind in the user's browser after each task. ${TAB_GROUPING_EXTENSION_STEP}`,
+    `the BrowserSkill extension in ${textField(browser, "browser_name") ?? "the browser"} [${textField(browser, "instance_id") ?? "unknown id"}] ${problem} ${step}`,
   );
 }
 
@@ -33,18 +64,22 @@ function namesBrowser(b: unknown, browser: unknown): boolean {
   );
 }
 
-// A named browser on 0.4.0 is refused; with no browser named, an up-to-date one is chosen over a 0.4.0 one.
+// A named browser with an outdated extension is refused; with no browser named, an up-to-date one is chosen.
 function chooseBrowser(browser: string | null | undefined, browsers: unknown[]): unknown {
   const resolved = resolveBrowser(browser, browsers);
   if (resolved !== undefined && resolved !== null) {
     const entry = browsers.find((b) => namesBrowser(b, resolved));
-    if (entry && isTabGroupingExtension(entry)) throw outdatedError(entry);
+    const outdated = outdatedExtension(entry);
+    if (outdated) throw outdatedError(entry, outdated);
     return resolved;
   }
-  const outdated = browsers.filter(isTabGroupingExtension);
-  if (outdated.length === 0) return resolved;
-  const usable = browsers.find((b) => !isTabGroupingExtension(b));
-  if (!usable) throw outdatedError(outdated[0]);
+  const refusals = browsers.flatMap((b) => {
+    const outdated = outdatedExtension(b);
+    return outdated ? [outdatedError(b, outdated)] : [];
+  });
+  if (refusals.length === 0) return resolved;
+  const usable = browsers.find((b) => !isOutdatedExtension(b));
+  if (!usable) throw refusals[0];
   return readProperty(usable, "instance_id");
 }
 
