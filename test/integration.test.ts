@@ -619,6 +619,51 @@ window.rerender = () => {
 
 // Public snapshot contract: identities survive value/state and sibling changes; a renamed or
 // replaced element gets a new ref. This also exercises the allocator without changing recovery.
+// Security contract (#335): a failed fill() never echoes the value it was entering, whatever the
+// layer below put in its error, so a secret typed into a form cannot reach an agent transcript.
+test(
+  "a failed fill() redacts the value from the error, its data and its cause chain",
+  { skip: !SHELL && "no chromium binary found" },
+  async () => {
+    const secret = "sk-fill-sentinel-335";
+    const ud = mkdtempSync(path.join(tmpdir(), "omowright-fill-redact-"));
+    let browser;
+    try {
+      browser = await connectPipe({
+        browserPath: SHELL,
+        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+        storageRoot: ud,
+      });
+      const page = await browser.newTab("data:text/html,<input id=key>");
+      // A transport that echoes the command it refused, the way a daemon or proxy error can.
+      const send = page.cdp.send.bind(page.cdp);
+      Reflect.set(page.cdp, "send", async (method: string, params?: object, sessionId?: string, options?: object) => {
+        const echoed = JSON.stringify(params ?? null);
+        if (!echoed.includes(secret)) return await send(method, params, sessionId, options);
+        const cause = new Error(`wire refused ${echoed}`);
+        throw Object.assign(new Error(`${method} failed: ${echoed}`, { cause }), { data: params });
+      });
+      const error = await page
+        .locator("#key")
+        .fill(secret)
+        .then(
+          () => assert.fail("fill() resolved through a rejecting transport"),
+          (reason: unknown) => reason,
+        );
+      const seen: string[] = [];
+      for (let link: unknown = error; link instanceof Error; link = link.cause)
+        seen.push(link.message, String(link.stack), JSON.stringify(Reflect.get(link, "data") ?? null));
+      assert.equal(seen.length, 6, "the error and its cause were both read");
+      assert.ok(!seen.join("\n").includes(secret), "the fill() error chain echoes the entered value");
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /<redacted, 20 chars>/);
+    } finally {
+      await browser?.close();
+      removeTreeSync(ud);
+    }
+  },
+);
+
 test(
   "snapshot refs survive fills and insertions but not identity changes",
   { skip: !SHELL && "no chromium binary found", timeout: 60000 },

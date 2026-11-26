@@ -463,3 +463,46 @@ test("connectBrowserSkill never starts a session on the tab-grouping BrowserSkil
     "with no browser named, the up-to-date extension is chosen",
   );
 });
+
+// Security contract (#335): the daemon may quote the request it refused; BskSession.fill() never
+// lets the entered value through in the error, its data or its cause.
+test("a failed fill() redacts the value from the daemon's error", async () => {
+  const secret = "sk-bsk-sentinel-335";
+  const cause = new Error(`extension said: no field for "${secret}"`);
+  const refused = Object.assign(new BskRpcError("tool_error", `fill ${secret} failed`, { value: secret }), { cause });
+  const session = new BskSession(stubClient({ "tool.fill": refused }), { sessionId: "abcd" });
+
+  const error = await session.fill("@e3", secret).then(
+    () => assert.fail("fill() resolved through a refusing daemon"),
+    (reason: unknown) => reason,
+  );
+  assert.ok(error instanceof BskRpcError);
+  assert.equal(error.message, "fill <redacted, 19 chars> failed");
+  assert.deepEqual(error.data, { value: "<redacted, 19 chars>" });
+  assert.ok(
+    !`${String(error.stack)}\n${String(Reflect.get(cause, "message"))}\n${String(cause.stack)}`.includes(secret),
+  );
+});
+
+// The redaction replaces the value only where it stands as a token, in one pass: a short value
+// leaves the words around it readable, and regex metacharacters in the value match literally.
+test("a failed fill() redacts the value as a token, literally and once", async () => {
+  const refuse = async (value: string, message: string) => {
+    const session = new BskSession(stubClient({ "tool.fill": new BskRpcError("tool_error", message) }), {
+      sessionId: "abcd",
+    });
+    return await session.fill("@e3", value).then(
+      () => assert.fail("fill() resolved through a refusing daemon"),
+      (reason: unknown) => (reason instanceof Error ? reason.message : String(reason)),
+    );
+  };
+
+  assert.equal(
+    await refuse("a", 'locator.fill: timed out after 30000ms waiting for locator("e3") to accept "a"'),
+    'locator.fill: timed out after 30000ms waiting for locator("e3") to accept "<redacted, 1 chars>"',
+  );
+  assert.equal(
+    await refuse("a.b*c(1)", 'refused "a.b*c(1)" next to "aXb*c(1)"'),
+    'refused "<redacted, 8 chars>" next to "aXb*c(1)"',
+  );
+});
