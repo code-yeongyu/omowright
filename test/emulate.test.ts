@@ -317,7 +317,9 @@ test(
           repins.push(resolve);
           signal.addEventListener("abort", () => reject(new Error(`no viewport re-pin after goto ${url}`)));
         });
-        await page.goto(url);
+        // domcontentloaded is event-driven; the default "interactive" readiness adds a fixed DOM-quiet window per
+        // navigation, which is not under test and pushed four navigations past the test timeout on slow runners.
+        await page.goto(url, { waitUntil: "domcontentloaded" });
         await repinned;
         return await page.evaluate(() => innerWidth);
       };
