@@ -1,4 +1,6 @@
 import { test } from "node:test";
+import { types } from "node:util";
+import { runInNewContext } from "node:vm";
 import assert from "node:assert/strict";
 import { redactValue } from "../src/redact-value.ts";
 
@@ -276,4 +278,68 @@ test("an error that cannot be read is withheld", () => {
   assert.ok(error instanceof Error);
   assert.match(error.message, /could not be read for redaction/);
   assert.equal(error.cause, undefined);
+});
+
+// Contract (#372): what an object is does not depend on which realm made it.
+test("an error, a Date and a shared buffer from another realm are treated as what they are", () => {
+  const foreign: unknown = runInNewContext("new RangeError('out of range for ' + secret)", { secret: SECRET });
+  const frozen: unknown = runInNewContext("Object.freeze(new RangeError('frozen ' + secret))", { secret: SECRET });
+  const when: unknown = runInNewContext("Object.assign(new Date(0), { note: secret })", { secret: SECRET });
+  const shared = Object.assign(new SharedArrayBuffer(8), { note: SECRET });
+  const refused = Object.assign(new Error(`refused ${SECRET}`), { foreign, when, shared });
+
+  redactValue(refused, SECRET);
+  const copy = redactValue(frozen, SECRET);
+
+  assert.equal(refused.foreign, foreign);
+  assert.ok(types.isNativeError(refused.foreign));
+  assert.equal(Reflect.get(refused.foreign, "message"), "out of range for <redacted, 22 chars>");
+  assert.equal(refused.when, when);
+  assert.equal(refused.shared, shared);
+  assert.equal(refused.shared.byteLength, 8);
+  assert.notEqual(copy, frozen);
+  assert.ok(types.isNativeError(frozen));
+  assert.ok(types.isNativeError(copy));
+  assert.equal(Reflect.getPrototypeOf(copy), Reflect.getPrototypeOf(frozen));
+  assert.equal(Reflect.get(copy, "message"), "frozen <redacted, 22 chars>");
+});
+
+// Contract (#372): the whole-token rule counts what a reader sees as characters (code points), so two
+// emoji are a short value, and the count in the placeholder is in the same unit.
+test("a value of fewer than four code points is short even when it is four UTF-16 units", () => {
+  assert.equal(redactValue("a🙂🙂b", "🙂🙂"), "a🙂🙂b");
+  assert.equal(redactValue("say 🙂🙂 now", "🙂🙂"), "say <redacted, 2 chars> now");
+  assert.equal(redactValue("x🙂🙂🙂🙂y", "🙂🙂🙂🙂"), "x<redacted, 4 chars>y");
+});
+
+// Contract (#372): a boxed number is read as the number it holds, and a copy is filled through the built-in
+// Map methods, so a subclass that overrides its own is neither run nor trusted.
+test("a boxed number is scrubbed like a number; a Map subclass's own methods are not called", () => {
+  let calls = 0;
+  class Counting extends Map<string, string> {
+    override set(key: string, value: string) {
+      calls += 1;
+      return super.set(key, value);
+    }
+    override entries() {
+      calls += 1;
+      return super.entries();
+    }
+    override [Symbol.iterator]() {
+      calls += 1;
+      return super[Symbol.iterator]();
+    }
+  }
+  const headers = new Counting();
+  Map.prototype.set.call(headers, "x-pin", "pin 2345");
+  const kept = new Number(7);
+  const refused = Object.assign(new Error("fill failed"), { code: new Number(123456), kept, headers });
+
+  redactValue(refused, "2345");
+
+  assert.equal(refused.code, "<redacted, 4 chars>");
+  assert.equal(refused.kept, kept);
+  assert.ok(refused.headers instanceof Counting);
+  assert.deepEqual([...Map.prototype.entries.call(refused.headers)], [["x-pin", "pin <redacted, 4 chars>"]]);
+  assert.equal(calls, 0);
 });
