@@ -6,7 +6,8 @@ import { test } from "node:test";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const self = fileURLToPath(import.meta.url);
-const SKIP_DIRS = new Set([".git", "node_modules"]);
+// tmp/ is git-ignored scratch that other test files write to and remove while this scan runs (#359).
+const SKIP_DIRS = new Set([".git", "node_modules", "tmp"]);
 // The source tree is TypeScript, so .ts/.mts sit beside .js/.mjs in the scanned set.
 const TEXT = /\.(?:m?[jt]s|json|md|html|ya?ml|txt)$|^(?:LICENSE|NOTICE|\.gitignore)$/;
 
