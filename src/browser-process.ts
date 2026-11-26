@@ -140,8 +140,10 @@ export async function reapOrphanedBrowser(profileDir: string | null | undefined)
     process.kill(pid, "SIGTERM");
   } catch {}
   if (!(await processGone(pid, TERM_GRACE_MS)) && !(await processIsDefunct(pid))) {
-    // The pid may have passed to another process during the grace window: only what is still the recorded
-    // browser is killed. `false` means it is gone or the pid is someone else's now, and the reap is done.
+    // The pid may have passed to another process during the grace window, so it is compared with the recorded
+    // start time again right before SIGKILL. The comparison and the signal are two steps: a pid that changes
+    // hands between them is not protected. `false` means the browser is gone or the pid is someone else's
+    // now, and the reap is done.
     const stillTheBrowser = await sameProcessAlive(pid, start);
     if (stillTheBrowser === true) {
       try {
