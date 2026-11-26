@@ -185,3 +185,41 @@ test("an accessor, a Map and a Set that carry the value are scrubbed", () => {
   assert.deepEqual([...refused.seen], ["<redacted, 22 chars>", "plain"]);
   assert.ok(refused.bytes instanceof Uint8Array);
 });
+
+// Contract (#369): reading an error's property can have an effect, so each readable property is read once.
+test("an accessor is read once, whether or not what it returns carries the value", () => {
+  let plainReads = 0;
+  let echoReads = 0;
+  const refused = new TypeError(`refused ${SECRET}`);
+  Object.defineProperty(refused, "attempt", { get: () => (plainReads += 1), enumerable: true, configurable: true });
+  Object.defineProperty(refused, "echo", {
+    get: () => {
+      echoReads += 1;
+      return `sent ${SECRET}`;
+    },
+    enumerable: true,
+    configurable: true,
+  });
+
+  redactValue(refused, SECRET);
+
+  assert.deepEqual([plainReads, echoReads], [1, 1]);
+});
+
+// Contract (#369): a copy keeps the shape of what it replaces.
+test("a copied array keeps its length, and a copied Error is a native error of the same class", () => {
+  const sparse: string[] = [SECRET];
+  sparse.length = 4;
+  const refused = Object.assign(new Error("fill failed"), { rows: sparse });
+  const frozen = Object.freeze(new RangeError(`frozen ${SECRET}`));
+
+  redactValue(refused, SECRET);
+  const copy = redactValue(frozen, SECRET);
+
+  assert.notEqual(refused.rows, sparse);
+  assert.equal(refused.rows.length, 4);
+  assert.deepEqual(Object.keys(refused.rows), ["0"]);
+  assert.ok(copy instanceof RangeError);
+  assert.equal(Object.prototype.toString.call(copy), "[object Error]");
+  assert.equal(copy.message, "frozen <redacted, 22 chars>");
+});
