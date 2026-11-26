@@ -138,20 +138,20 @@ export async function reapOrphanedBrowser(profileDir: string | null | undefined)
   try {
     process.kill(pid, "SIGTERM");
   } catch {}
-  if (!(await exited(pid, TERM_GRACE_MS))) {
+  if (!(await processGone(pid, TERM_GRACE_MS))) {
     try {
       process.kill(pid, "SIGKILL");
     } catch {}
     // SIGKILL lands at once, but the process leaves the table only when its parent collects it. Wait for
     // that, so the profile is free before the caller launches on it (#361). What is still listed after the
     // bound is an entry nothing collects (a zombie under an init that does not reap); it holds no files.
-    await exited(pid, KILL_SETTLE_MS);
+    await processGone(pid, KILL_SETTLE_MS);
   }
   rmSync(pidFilePath(profileDir), { force: true });
 }
 
 // A process this one did not spawn raises no exit event here, so its exit is observed by polling.
-async function exited(pid: number, withinMs: number) {
+async function processGone(pid: number, withinMs: number) {
   const deadline = Date.now() + withinMs;
   while (isPidAlive(pid) && Date.now() < deadline) await sleep(REAP_POLL_MS);
   return !isPidAlive(pid);
