@@ -463,3 +463,23 @@ test("connectBrowserSkill never starts a session on the tab-grouping BrowserSkil
     "with no browser named, the up-to-date extension is chosen",
   );
 });
+
+// Security contract (#335): the daemon may quote the request it refused; BskSession.fill() never
+// lets the entered value through in the error, its data or its cause.
+test("a failed fill() redacts the value from the daemon's error", async () => {
+  const secret = "sk-bsk-sentinel-335";
+  const cause = new Error(`extension said: no field for "${secret}"`);
+  const refused = Object.assign(new BskRpcError("tool_error", `fill ${secret} failed`, { value: secret }), { cause });
+  const session = new BskSession(stubClient({ "tool.fill": refused }), { sessionId: "abcd" });
+
+  const error = await session.fill("@e3", secret).then(
+    () => assert.fail("fill() resolved through a refusing daemon"),
+    (reason: unknown) => reason,
+  );
+  assert.ok(error instanceof BskRpcError);
+  assert.equal(error.message, "fill <redacted, 19 chars> failed");
+  assert.deepEqual(error.data, { value: "<redacted, 19 chars>" });
+  assert.ok(
+    !`${String(error.stack)}\n${String(Reflect.get(cause, "message"))}\n${String(cause.stack)}`.includes(secret),
+  );
+});
