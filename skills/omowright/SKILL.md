@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (compactSnapshot drops the refs map), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA input helpers for reCAPTCHA, Turnstile, hCaptcha, slider and text OCR, with a human fallback (not a solver), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in priority order: the user's agent browser (Aside, Ego Lite), then the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports; each engine has its own setup check (asideOnboard, bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The default code-driven browser path for interactive browsing work: token-efficient a11y snapshots (compactSnapshot drops the refs map), ref-based clicks, condition waits instead of fixed delays, coordinate control (CUA), viewport pinning, CAPTCHA input helpers (reCAPTCHA, Turnstile, hCaptcha, slider, text OCR) with a human fallback, Chrome MV3 APIs, network snoop (read API JSON instead of DOM), flight-recorder trace, OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in order: the user's agent browser (Aside, Ego Lite), the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports. MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
@@ -74,18 +74,37 @@ empty tree, not an error. A search does not move the diff baseline, and `find` c
 be combined with `diff`. `maxChars` still caps the whole captured tree before the
 search runs, so leave it off when searching a large page.
 
+## Wait for a state, never for a clock
+
+**NEVER WRITE A FIXED DELAY** (`Bun.sleep`, `setTimeout`, `waitForTimeout`): it fails on a
+slow page and wastes itself on a fast one. Wait for the state you need, and start the
+wait before the action that causes it.
+
+| Waiting for | Call |
+| --- | --- |
+| Something appearing or changing in the page | `page.waitForFunction(fn, arg, { timeout })` (options are the THIRD argument), `page.locator(ref).waitFor({ state: "visible" })` |
+| The request an action triggers | `const got = page.waitForResponse(urlOrPredicate)`, act, `await got`; `snoop.waitFor(match)` with a snoop open |
+| A navigation | `page.waitForURL(globOrRegExp)`, `page.waitForLoadState("networkidle")` |
+| A new tab | `page.waitForEvent("popup")`, subscribed before the click |
+| A person (login, OTP, CAPTCHA) | `requestHuman(page, { prompt, until })` |
+
+Nothing follows `goto` or `newTab`: both already wait for content. A wait that can outlast
+one tool call (a person, a deploy, a slow job) is not awaited in that call: start it, hand
+its completion to your harness's watcher, keep working. Pattern in
+`references/eval-kernel.md`.
+
 ## Owned engine: CloakBrowser
 
 When omowright owns the browser, use the CloakBrowser binary, not a plain headless shell: most real
 targets sit behind WAFs or bot scoring, and CloakBrowser's source-level
 fingerprint patches (Cloudflare Turnstile, FingerprintJS, BrowserScan) make it
 the safe choice. Plain headless shell is the speed fallback for trivially open
-pages: any Chrome/Chromium or
-`~/Library/Caches/ms-playwright/chromium_headless_shell-*/.../chrome-headless-shell`.
+pages. Take either path from code, never from a guess:
 
-```bash
-python3 -c "import cloakbrowser; print(cloakbrowser.binary_info()['binary_path'])"
-# -> ~/.cloakbrowser/chromium-<ver>/Chromium.app/Contents/MacOS/Chromium
+```js
+const { findCloakBrowserPath, detectBrowsers } = await import("omowright");
+const browserPath = findCloakBrowserPath(); // newest ~/.cloakbrowser/chromium-*; throws when none is installed (set CLOAKBROWSER_BIN off macOS)
+const chrome = detectBrowsers().find((b) => b.installed)?.binary; // an installed Chrome-family binary, for the fallback
 ```
 
 For a reused authenticated profile, use `connectCloakProfile({ profileDir, fingerprintSeed })` from the package (or the `omowright-cloak --profile "$HOME/.local/share/omowright-cloak" --url <url> --once --snapshot` launcher). First use pins a fingerprint seed in a mode-`0600` metadata file inside the mode-`0700` profile; later runs reuse it and **REJECT a conflicting seed** instead of silently changing identity. It passes the fixed `--fingerprint=<seed>` plus the platform flag on every `connectPipe()` launch. The seed is an identity pin, not a credential store.
@@ -124,17 +143,14 @@ CUA acts in viewport pixels. When the render surface and coordinate space
 disagree, every coordinate is off by a constant and retrying repeats the miss:
 
 ```js
-await page._sendToTarget("Emulation.setDeviceMetricsOverride", {
-  width: 1440,
-  height: 900,
-  deviceScaleFactor: 1,
-  mobile: false,
-  screenWidth: 1440,
-  screenHeight: 900,
-  viewport: { x: 0, y: 0, width: 1440, height: 900, scale: 1 },
-});
-await page.refreshViewportSize(); // -> { width: 1440, height: 900 }
+const { repinViewport, DEFAULT_AGENT_VIEWPORT } = await import("omowright");
+await repinViewport(page, DEFAULT_AGENT_VIEWPORT); // -> { width: 1440, height: 900 }
 ```
+
+For a device instead of a box, `emulate(page, "iphone-14")` (also `pixel-7`, `ipad-air`,
+`desktop-1440`) sets metrics, touch and user agent together, and
+`page.emulateMedia({ colorScheme })` covers media features. Raw `Emulation.*` CDP is never
+needed for either.
 
 Pin every page you act on, including tabs you did not open, then take a fresh
 screenshot — coordinates read off an unpinned screenshot are stale.
@@ -166,9 +182,12 @@ Preset and `TOOLS.md` paths are relative to the package root.
   their own browser; 1Password sessions are device-bound and never work from
   cookies. Detail in `references/stealth.md`. Cookie reuse is fine for ordinary
   sessions (Grafana, internal tools).
-- **Always `compactSnapshot()`** before sending a snapshot to a model — the refs
-  map resolves in-page, so dropping it is free; it was 7% to 64% of the bytes
-  across pages measured on 2026-11-09.
+- **Read within a budget.** `compactSnapshot()` before a model reads any snapshot
+  (the refs map resolves in-page; it was 7% to 64% of the bytes, measured
+  2026-11-09). Check `snapshotTokens(snapshot)` (`{ bytes, estTokens }`) before
+  printing a tree you have not measured, and narrow a large one with `find`,
+  `selector`, `interactive: true` or `maxChars`. `page.evaluate` returns the
+  fields you need, never `innerHTML` or a whole document's `innerText`.
 - **Refs die on every new snapshot.** Pass `page.locator("e1")` straight from the
   latest snapshot; never reuse a ref across snapshots, never put one in CSS.
 - **Refs stay page-level.** Child-frame refs look like `f1e3` and still go to
