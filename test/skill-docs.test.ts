@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { fixedDelays, undeclaredNodeModules } from "./fixtures/doc-example-checks.ts";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -74,13 +75,9 @@ function importedNames(block: string) {
   return names;
 }
 
-// A wait on a clock in one line of an example: a sleep call, a timer that only settles a promise (callback is a
-// bare name), a timer with a positive literal delay whatever its callback, or the promise form `setTimeout(ms)`.
-const FIXED_DELAY =
-  /\b(?:Bun\.sleep(?:Sync)?|waitForTimeout)\s*\(|(?<![\w.])sleep\s*\(|\bsetTimeout\s*\(\s*[\w$]+\s*,|\bsetTimeout\s*\(.*,\s*[1-9][\d_]*\s*\)|\bsetTimeout\s*\(\s*[1-9]/;
-
 // The guard below is only as good as this matcher: every way an example can wait on a clock is flagged,
-// whatever the timer's callback is called, and a wait on a state is not (#352).
+// whatever the timer's callback is called, however its delay is spelled and however many lines the call
+// takes, and a wait on a state is not (#352, #362).
 test("the fixed-delay matcher flags a wait on a clock and passes a wait on a state", () => {
   const waitsOnAClock = [
     "await Bun.sleep(1000);",
@@ -91,22 +88,44 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
     "await sleep(500);",
     "await setTimeout(1000);",
     "await new Promise((resolve) => setTimeout(resolve, delayMs));",
+    "await new Promise(done => setTimeout(\n  () => done(),\n  1000\n));",
+    "await new Promise((done) => setTimeout((v) => done(v), 1000, true));",
+    "await new Promise((done) => setTimeout(() => done(), 1e3));",
+    "await new Promise((done) => setTimeout(() => done(), 0x3e8));",
+    "await new Promise((done) => setTimeout(() => done(), 1.5));",
+    'await new Promise((done) => setTimeout(() => done("a, b"), /* ms */ 250));',
   ];
   const waitsOnAState = [
     "await page.waitForFunction(() => window.ready === true, undefined, { timeout: 5000 });",
     "const saved = page.waitForResponse('**/api/cart');",
     "await snoop.waitFor({ url: /search/ }, { timeoutMs: 10_000 });",
     "await requestHuman(page, { prompt, timeoutMs: 300000 });",
+    "setTimeout(() => controller.abort(), 0);",
   ];
 
   assert.deepEqual(
-    waitsOnAClock.filter((line) => !FIXED_DELAY.test(line)),
+    waitsOnAClock.filter((example) => fixedDelays(example).length === 0),
     [],
   );
   assert.deepEqual(
-    waitsOnAState.filter((line) => FIXED_DELAY.test(line)),
+    waitsOnAState.filter((example) => fixedDelays(example).length > 0),
     [],
   );
+});
+
+// An example runs as written in an eval cell, where no Node module is in scope (#362).
+test("the module check reports a Node module an example calls without declaring it", () => {
+  const flagLine = "const flag = path.join(os.tmpdir(), `handoff-${Date.now()}.flag`);";
+
+  assert.deepEqual(undeclaredNodeModules([flagLine, "fs.writeFileSync(flag, 'done');"]), ["os", "path", "fs"]);
+  assert.deepEqual(
+    undeclaredNodeModules([
+      'const fs = await import("node:fs");\nconst os = await import("node:os");\nimport path from "node:path";',
+      `${flagLine}\nfs.writeFileSync(flag, "done");`,
+    ]),
+    [],
+  );
+  assert.deepEqual(undeclaredNodeModules(["const where = page.url(); await session.path.join(where);"]), []);
 });
 
 const docs = await listDocs();
@@ -125,8 +144,11 @@ for (const doc of [...docs, path.join(repoRoot, "README.md"), path.join(repoRoot
   });
 
   test(`${rel}: no example waits on a fixed delay`, () => {
-    const delayed = blocks.flatMap((block) => block.split("\n").filter((line) => FIXED_DELAY.test(line)));
-    assert.deepEqual(delayed, [], `${rel} waits on a clock; wait for the state instead`);
+    assert.deepEqual(blocks.flatMap(fixedDelays), [], `${rel} waits on a clock; wait for the state instead`);
+  });
+
+  test(`${rel}: examples declare the Node modules they call`, () => {
+    assert.deepEqual(undeclaredNodeModules(blocks), [], `${rel} calls a Node module no example declares`);
   });
 }
 

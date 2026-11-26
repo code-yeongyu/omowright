@@ -20,6 +20,47 @@ function everythingIn(error: unknown): string {
   return parts.join("\n");
 }
 
+function everyStringIn(root: unknown): string[] {
+  const strings: string[] = [];
+  const seen = new Set<unknown>();
+  const visit = (value: unknown) => {
+    if (typeof value === "string") strings.push(value);
+    if (typeof value !== "object" || value === null || seen.has(value)) return;
+    seen.add(value);
+    for (const key of Reflect.ownKeys(value)) visit(Reflect.get(value, key));
+  };
+  visit(root);
+  return strings;
+}
+
+// Security contract (#335, #362): the value is gone from every string reachable from the error, whatever
+// subtype it is and whatever fields the layer that raised it added.
+test("an aggregate error's members and any added field lose the value, and stay the same errors", () => {
+  const member = new Error(`attempt 1 quoted ${SECRET}`);
+  const aggregate = new AggregateError([member, `attempt 2: ${SECRET}`, { detail: SECRET }], "every attempt failed");
+  const retried = new Error(`retry sent ${SECRET}`);
+  const refused = Object.assign(new Error("fill failed", { cause: aggregate }), {
+    request: { method: "tool.fill", params: { value: SECRET } },
+    attempts: [retried],
+    status: 422,
+  });
+
+  const error = redactValue(refused, SECRET);
+
+  assert.deepEqual(
+    everyStringIn(error).filter((text) => text.includes(SECRET)),
+    [],
+  );
+  assert.equal(error, refused);
+  assert.equal(aggregate.errors[0], member);
+  assert.equal(member.message, "attempt 1 quoted <redacted, 22 chars>");
+  assert.deepEqual(aggregate.errors.slice(1), ["attempt 2: <redacted, 22 chars>", { detail: "<redacted, 22 chars>" }]);
+  assert.deepEqual(refused.request, { method: "tool.fill", params: { value: "<redacted, 22 chars>" } });
+  assert.equal(refused.attempts[0], retried);
+  assert.equal(retried.message, "retry sent <redacted, 22 chars>");
+  assert.equal(refused.status, 422);
+});
+
 test("a cause that is not an Error loses the value too", () => {
   const stringCause = redactValue(new Error("field rejected", { cause: SECRET }), SECRET);
   assert.ok(stringCause instanceof Error);

@@ -12,10 +12,10 @@ import { removeTreeSync } from "./fixtures/remove-tree.ts";
 // Public contract (#338): a device set with emulate() stays the page's viewport across same-origin and
 // cross-origin navigation until emulate(page, null). Each read waits for the agent tab's own viewport
 // re-pin after the navigation, the command that used to put the desktop default back.
-// The browser and the fixture server start once, while the module loads, and each test opens its own agent tab.
-// A launch is not the behaviour under test and has no place in a test's time limit: inside a test that also
-// navigated four times it outran the limit on a loaded host, and inside a before() hook it outran the same limit
-// on a Windows runner, because bun gives hooks the test limit and ignores a hook's timeout option (#352).
+// One browser and one fixture server serve the file, started by the first test that runs and closed in
+// after(). Not in a before() hook: bun gives hooks the test limit and ignores a hook's timeout option, and
+// that hook timed out on a Windows runner. Not while the module loads either: a run whose filter selects
+// no test here would launch a browser and leave its profile behind (#352, #362).
 const skip = !SHELL && "no chromium binary found";
 const server = createServer((_request, response) => {
   response.setHeader("content-type", "text/html");
@@ -32,6 +32,9 @@ async function start(browserPath: string) {
     browserPath,
     browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`],
     storageRoot: profile,
+  }).catch((error: unknown) => {
+    removeTreeSync(profile);
+    throw error;
   });
   const send = connection.cdp.send.bind(connection.cdp);
   Reflect.set(connection.cdp, "send", async (method: string, params?: object, sessionId?: string, options?: object) => {
@@ -48,10 +51,12 @@ async function start(browserPath: string) {
   };
 }
 
-const live = SHELL ? await start(SHELL) : undefined;
+let shared: ReturnType<typeof start> | undefined;
 
 after(async () => {
-  if (live) {
+  if (shared === undefined) return;
+  const live = await shared.catch(() => undefined);
+  if (live !== undefined) {
     await live.connection.close();
     removeTreeSync(live.profile);
   }
@@ -59,7 +64,9 @@ after(async () => {
 });
 
 async function openAgentTab() {
-  assert.ok(live, "the shared browser did not start");
+  assert.ok(SHELL, "no chromium binary found");
+  shared ??= start(SHELL);
+  const live = await shared;
   const page = (await live.tabs.create("about:blank")).page;
   const widthAfterGoto = async (url: string) => {
     const signal = AbortSignal.timeout(10_000);
@@ -76,18 +83,6 @@ async function openAgentTab() {
   return { page, widthAfterGoto, first: live.first, second: live.second };
 }
 
-test("an emulated device survives same-origin and cross-origin navigation", { skip }, async () => {
-  const { page, widthAfterGoto, first, second } = await openAgentTab();
-  try {
-    await emulate(page, "iphone-14");
-
-    assert.equal(await widthAfterGoto(`${first}/same-origin`), 390, "same-origin goto kept the device");
-    assert.equal(await widthAfterGoto(`${second}/cross-origin`), 390, "cross-origin goto kept the device");
-  } finally {
-    await page.close();
-  }
-});
-
 test("emulate(page, null) gives the agent tab its default viewport back on the next navigation", { skip }, async () => {
   const { page, widthAfterGoto, first } = await openAgentTab();
   try {
@@ -97,6 +92,20 @@ test("emulate(page, null) gives the agent tab its default viewport back on the n
     await emulate(page, null);
 
     assert.equal(await widthAfterGoto(`${first}/restored`), 1440, "emulate(page, null) gave the default back");
+  } finally {
+    await page.close();
+  }
+});
+
+test("an emulated device survives same-origin and cross-origin navigation", { skip }, async () => {
+  const { page, widthAfterGoto, first, second } = await openAgentTab();
+  try {
+    assert.equal(await widthAfterGoto(`${first}/start`), 1440, "the agent tab starts at its default viewport");
+
+    await emulate(page, "iphone-14");
+
+    assert.equal(await widthAfterGoto(`${first}/same-origin`), 390, "same-origin goto kept the device");
+    assert.equal(await widthAfterGoto(`${second}/cross-origin`), 390, "cross-origin goto kept the device");
   } finally {
     await page.close();
   }
