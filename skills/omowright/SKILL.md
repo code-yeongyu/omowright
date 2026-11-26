@@ -1,6 +1,6 @@
 ---
 name: omowright
-description: "The default code-driven browser path for interactive browsing work: drives any browser from code with token-efficient a11y snapshots (compactSnapshot drops the refs map), ref-based clicks, coordinate control (CUA), viewport pinning, CAPTCHA input helpers for reCAPTCHA, Turnstile, hCaptcha, slider and text OCR, with a human fallback (not a solver), Chrome MV3 APIs (tabs/bookmarks/history/downloads/topSites), network snoop (read API JSON instead of DOM), flight-recorder trace (jsonl + HAR + screenshots), OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in priority order: the user's agent browser (Aside, Ego Lite), then the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports; each engine has its own setup check (asideOnboard, bskOnboard). MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
+description: "The default code-driven browser path for interactive browsing work: token-efficient a11y snapshots (compactSnapshot drops the refs map), ref-based clicks, condition waits instead of fixed delays, coordinate control (CUA), viewport pinning, CAPTCHA input helpers (reCAPTCHA, Turnstile, hCaptcha, slider, text OCR) with a human fallback, Chrome MV3 APIs, network snoop (read API JSON instead of DOM), flight-recorder trace, OOPIF-aware snapshots, dialog policy, human handoff for login/OTP, device emulation, request routes, and one connectBrowser() entry that picks the engine in order: the user's agent browser (Aside, Ego Lite), the user's own browser through BrowserSkill, then the owned stealth CloakBrowser with zero exposed CDP ports. MUST USE for interactive browser work: scraping, blocked/WAF/JS-rendered pages, logins, the user's logged-in sites and open tabs, extension popups, form filling, screenshots, web QA, CAPTCHAs. The ulw-research browsing lane runs on ultimate-browsing, not this skill."
 ---
 
 # OmOWright
@@ -76,22 +76,22 @@ search runs, so leave it off when searching a large page.
 
 ## Wait for a state, never for a clock
 
-**NEVER WRITE A FIXED DELAY** (`Bun.sleep`, `setTimeout`, `waitForTimeout`). It fails on a
-slow page and wastes the whole delay on a fast one. Name the state you need and wait for
-it, starting the wait before the action that causes it:
+**NEVER WRITE A FIXED DELAY** (`Bun.sleep`, `setTimeout`, `waitForTimeout`): it fails on a
+slow page and wastes itself on a fast one. Wait for the state you need, and start the
+wait before the action that causes it.
 
-| You are waiting for                       | Call                                                                                                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Something to appear or change in the page | `page.waitForFunction(fn, arg, { timeout })` (options are the THIRD argument), or `page.locator(ref).waitFor({ state: "visible" })`               |
-| The request an action triggers            | `const got = page.waitForResponse(urlOrPredicate, { timeout })`, then act, then `await got`; `snoop.waitFor(match)` when a network snoop is open |
-| A navigation                              | `page.waitForURL(globOrRegExp)`, `page.waitForLoadState("networkidle")`                                                                           |
-| A new tab                                 | `page.waitForEvent("popup")`, subscribed before the click                                                                                         |
-| A person (login, OTP, CAPTCHA)            | `requestHuman(page, { prompt, until })`                                                                                                           |
+| Waiting for | Call |
+| --- | --- |
+| Something appearing or changing in the page | `page.waitForFunction(fn, arg, { timeout })` (options are the THIRD argument), `page.locator(ref).waitFor({ state: "visible" })` |
+| The request an action triggers | `const got = page.waitForResponse(urlOrPredicate)`, act, `await got`; `snoop.waitFor(match)` with a snoop open |
+| A navigation | `page.waitForURL(globOrRegExp)`, `page.waitForLoadState("networkidle")` |
+| A new tab | `page.waitForEvent("popup")`, subscribed before the click |
+| A person (login, OTP, CAPTCHA) | `requestHuman(page, { prompt, until })` |
 
-`goto` and `newTab` already wait for meaningful content, so nothing follows them. A wait
-that can outlast one tool call (a person, a deploy, a slow job) is not awaited in that call
-at all: start it, hand its completion to your harness's watcher, and keep working. Pattern
-in `references/eval-kernel.md`.
+Nothing follows `goto` or `newTab`: both already wait for content. A wait that can outlast
+one tool call (a person, a deploy, a slow job) is not awaited in that call: start it, hand
+its completion to your harness's watcher, keep working. Pattern in
+`references/eval-kernel.md`.
 
 ## Owned engine: CloakBrowser
 
@@ -182,13 +182,12 @@ Preset and `TOOLS.md` paths are relative to the package root.
   their own browser; 1Password sessions are device-bound and never work from
   cookies. Detail in `references/stealth.md`. Cookie reuse is fine for ordinary
   sessions (Grafana, internal tools).
-- **Read within a budget.** Always `compactSnapshot()` before a model reads a
-  snapshot — the refs map resolves in-page, so dropping it is free; it was 7% to
-  64% of the bytes across pages measured on 2026-11-09. `snapshotTokens(snapshot)`
-  returns `{ bytes, estTokens }`: check it before printing a tree you have not
-  measured, and narrow a large one with `find`, `selector`, `interactive: true` or
-  `maxChars`. From `page.evaluate`, return the fields you need, never `innerHTML`
-  or the whole document's `innerText`.
+- **Read within a budget.** `compactSnapshot()` before a model reads any snapshot
+  (the refs map resolves in-page; it was 7% to 64% of the bytes, measured
+  2026-11-09). Check `snapshotTokens(snapshot)` (`{ bytes, estTokens }`) before
+  printing a tree you have not measured, and narrow a large one with `find`,
+  `selector`, `interactive: true` or `maxChars`. `page.evaluate` returns the
+  fields you need, never `innerHTML` or a whole document's `innerText`.
 - **Refs die on every new snapshot.** Pass `page.locator("e1")` straight from the
   latest snapshot; never reuse a ref across snapshots, never put one in CSS.
 - **Refs stay page-level.** Child-frame refs look like `f1e3` and still go to

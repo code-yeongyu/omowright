@@ -129,4 +129,5 @@ fields (`width, height, deviceScaleFactor, mobile, hasTouch, userAgent,
 platform`) for a custom device. The original UA is captured on the first call
 per page, so `null` always returns to where you started. Re-snapshot after
 switching: layout changes move refs, and a mobile layout often swaps a nav bar
-for a menu button.
+for a menu button. Media features are separate:
+`page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" })`.
