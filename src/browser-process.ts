@@ -14,6 +14,7 @@ import { readProperty } from "./read-property.ts";
 export const TERM_GRACE_MS = 5_000;
 const PID_FILE_NAME = "omowright-browser.pid";
 const REAP_POLL_MS = 50;
+const KILL_SETTLE_MS = 2_000;
 
 // Own process group on POSIX: a group-wide SIGKILL of the caller (an eval cell
 // settling, `timeout -s KILL`) no longer takes the browser with it; the browser
@@ -137,12 +138,21 @@ export async function reapOrphanedBrowser(profileDir: string | null | undefined)
   try {
     process.kill(pid, "SIGTERM");
   } catch {}
-  const deadline = Date.now() + TERM_GRACE_MS;
-  while (isPidAlive(pid) && Date.now() < deadline) await sleep(REAP_POLL_MS);
-  if (isPidAlive(pid)) {
+  if (!(await exited(pid, TERM_GRACE_MS))) {
     try {
       process.kill(pid, "SIGKILL");
     } catch {}
+    // SIGKILL lands at once, but the process leaves the table only when its parent collects it. Wait for
+    // that, so the profile is free before the caller launches on it (#361). What is still listed after the
+    // bound is an entry nothing collects (a zombie under an init that does not reap); it holds no files.
+    await exited(pid, KILL_SETTLE_MS);
   }
   rmSync(pidFilePath(profileDir), { force: true });
+}
+
+// A process this one did not spawn raises no exit event here, so its exit is observed by polling.
+async function exited(pid: number, withinMs: number) {
+  const deadline = Date.now() + withinMs;
+  while (isPidAlive(pid) && Date.now() < deadline) await sleep(REAP_POLL_MS);
+  return !isPidAlive(pid);
 }
