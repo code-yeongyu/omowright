@@ -1,0 +1,228 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "HoverProbeReport": {
+      "description": "Reports what active hover probing did during an observation, so the agent\ncan judge how far the live page may have drifted from the returned text.",
+      "properties": {
+        "performed": {
+          "description": "The real cursor was moved over page content during this observation.",
+          "type": "boolean"
+        },
+        "revealed_content": {
+          "description": "Hovering surfaced content the static tree does not contain, so the page\nreacts to the cursor and may not have fully reverted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "performed",
+        "revealed_content"
+      ],
+      "type": "object"
+    },
+    "JavaScriptDialogHandledAction": {
+      "description": "How the extension resolved the dialog so CDP could continue.",
+      "enum": [
+        "accepted",
+        "dismissed"
+      ],
+      "type": "string"
+    },
+    "JavaScriptDialogInfo": {
+      "description": "One observed + handled JavaScript dialog during a tool call.",
+      "properties": {
+        "default_prompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handled": {
+          "$ref": "#/definitions/JavaScriptDialogHandledAction"
+        },
+        "has_browser_handler": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "sequence": {
+          "description": "Monotonic per-tab sequence for ordering within a session.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tab_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "type": {
+          "$ref": "#/definitions/JavaScriptDialogType"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tab_id",
+        "type",
+        "message",
+        "handled",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "JavaScriptDialogType": {
+      "description": "Native JS dialog kind reported by CDP.",
+      "enum": [
+        "alert",
+        "confirm",
+        "prompt",
+        "beforeunload"
+      ],
+      "type": "string"
+    },
+    "ObserveDebug": {
+      "properties": {
+        "surface_probes": {
+          "items": {
+            "$ref": "#/definitions/SurfaceProbeDebug"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SurfaceProbeDebug": {
+      "properties": {
+        "confidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sub_items": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "trigger_action": {
+          "type": "string"
+        },
+        "trigger_backend_node_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "trigger_point": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SurfaceProbePoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "trigger_backend_node_id",
+        "trigger_action",
+        "sub_items"
+      ],
+      "type": "object"
+    },
+    "SurfaceProbePoint": {
+      "properties": {
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "debug": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ObserveDebug"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dialogs": {
+      "items": {
+        "$ref": "#/definitions/JavaScriptDialogInfo"
+      },
+      "type": "array"
+    },
+    "hover_probe": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HoverProbeReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Present only when `probe_hover` was requested and probing actually ran."
+    },
+    "next_cursor": {
+      "description": "Continue omitted content from this same observation.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "observation_id": {
+      "description": "Token identifying the current ref map; pass to drag to reject stale refs.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ref_count": {
+      "description": "Number of `@e<N>` refs registered for this session by this\nobservation. Equivalent to the size of the new ref-store map.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tab_id": {
+      "description": "Tab the observation was computed for.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "text": {
+      "description": "Semantic VOM observation text. Refs are rendered as `@e<N>` so\nthe agent can copy them into subsequent interaction tools.",
+      "type": "string"
+    },
+    "truncated": {
+      "default": false,
+      "description": "Whether the rendered tree was truncated because of `max_depth` /\n`max_tokens`. Agents may re-run with looser caps.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "text",
+    "ref_count",
+    "tab_id"
+  ],
+  "title": "ObserveResult",
+  "type": "object"
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "BrowserPeerInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Current handshake envelope. The flattened identity remains source-compatible\nwith older Rust callers constructing `HandshakeParams` directly.",
+  "properties": {
+    "audit_enabled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "browser": {
+      "$ref": "#/definitions/BrowserPeerInfo"
+    },
+    "client": {
+      "type": "string"
+    },
+    "instance_id": {
+      "type": "string"
+    },
+    "label": {
+      "type": "string"
+    },
+    "min_compatible_peer": {
+      "description": "**Deprecated** — legacy app-semver floor kept for wire compat with\npre-protocol peers. New code sends `\"0.0.0\"` and ignores on read.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "min_compatible_protocol": {
+      "description": "Lowest peer **protocol** version this side accepts (e.g. `\"1.0\"`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "protocol_version": {
+      "description": "Logical protocol revision (for example `\"1.0\"`), independent of SemVer app releases.",
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "client",
+    "version",
+    "protocol_version",
+    "instance_id",
+    "browser",
+    "label"
+  ],
+  "title": "HandshakeRequest",
+  "type": "object"
+}

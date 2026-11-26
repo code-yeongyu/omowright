@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "JavaScriptDialogHandledAction": {
+      "description": "How the extension resolved the dialog so CDP could continue.",
+      "enum": [
+        "accepted",
+        "dismissed"
+      ],
+      "type": "string"
+    },
+    "JavaScriptDialogInfo": {
+      "description": "One observed + handled JavaScript dialog during a tool call.",
+      "properties": {
+        "default_prompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handled": {
+          "$ref": "#/definitions/JavaScriptDialogHandledAction"
+        },
+        "has_browser_handler": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "sequence": {
+          "description": "Monotonic per-tab sequence for ordering within a session.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tab_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "type": {
+          "$ref": "#/definitions/JavaScriptDialogType"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tab_id",
+        "type",
+        "message",
+        "handled",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "JavaScriptDialogType": {
+      "description": "Native JS dialog kind reported by CDP.",
+      "enum": [
+        "alert",
+        "confirm",
+        "prompt",
+        "beforeunload"
+      ],
+      "type": "string"
+    },
+    "ScreenshotScope": {
+      "enum": [
+        "follow",
+        "current"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "byte_size": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "capture_id": {
+      "description": "Opaque, session-scoped export capability. Never an agent filesystem path.",
+      "type": "string"
+    },
+    "dialogs": {
+      "items": {
+        "$ref": "#/definitions/JavaScriptDialogInfo"
+      },
+      "type": "array"
+    },
+    "format": {
+      "type": "string"
+    },
+    "height": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ScreenshotScope"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tab_id": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "width": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "capture_id",
+    "width",
+    "height",
+    "format",
+    "tab_id",
+    "byte_size"
+  ],
+  "title": "ScreenshotFullPageResult",
+  "type": "object"
+}

@@ -1,14 +1,17 @@
 import { readProperty } from "../read-property.ts";
+import type { BskToolParams, ScreenshotScope } from "./protocol/params.generated.ts";
+
+type CaptureMethod = "screenshot" | "screenshot_full_page" | "screenshot_read" | "screenshot_release";
 
 export interface ToolSession {
-  tool(name: string, params?: Record<string, unknown>): Promise<unknown>;
+  tool<M extends CaptureMethod>(name: M, params: Omit<BskToolParams[M], "session_id">): Promise<unknown>;
 }
 
 export interface ScreenshotOptions {
   ref?: string;
   tabId?: number;
   fullPage?: boolean;
-  scope?: string;
+  scope?: ScreenshotScope;
   timeoutMs?: number;
   context?: string;
   dependsOn?: readonly string[];
@@ -56,20 +59,22 @@ export async function captureScreenshot(
     context_id: context,
     depends_on: dependsOn,
   });
-  const buffer = await readCapture(session, readProperty(started, "capture_id"), readProperty(started, "byte_size"));
+  const captureId = readProperty(started, "capture_id");
+  if (typeof captureId !== "string") throw new TypeError("screenshot_full_page returned no capture_id");
+  const buffer = await readCapture(session, captureId, readProperty(started, "byte_size"));
   return {
     buffer,
     width: readProperty(started, "width"),
     height: readProperty(started, "height"),
     format: readProperty(started, "format"),
-    captureId: readProperty(started, "capture_id"),
+    captureId,
     scope: readProperty(started, "scope") ?? scope ?? null,
     tabId: readProperty(started, "tab_id"),
     dialogs: readProperty(started, "dialogs") ?? [],
   };
 }
 
-async function readCapture(session: ToolSession, captureId: unknown, byteSize: unknown): Promise<Buffer> {
+async function readCapture(session: ToolSession, captureId: string, byteSize: unknown): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let offset = 0;
   try {

@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EmulateOverrides": {
+      "description": "Concrete emulation overrides for one tab. Field presence drives the\nextension: only the overrides whose fields are set are touched, so a\ncall may change just the UA, just the viewport, or any combination.",
+      "properties": {
+        "accept_language": {
+          "description": "`Accept-Language` header override. Requires `user_agent`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "device_scale_factor": {
+          "description": "Device scale factor (device pixel ratio). Only meaningful with\n`width`/`height`; the extension maps `None` to CDP's `0`\n(\"use the display's native factor\").",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "height": {
+          "description": "Viewport height in CSS pixels. Requires `width`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_touch_points": {
+          "description": "Touch points reported while touch emulation is on (CDP defaults\nto 1 when omitted).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mobile": {
+          "description": "Emulate a mobile viewport (meta-viewport handling, overlay\nscrollbars). Only meaningful with `width`/`height`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "touch": {
+          "description": "Enable/disable touch emulation\n(`Emulation.setTouchEmulationEnabled`). When omitted while\n`max_touch_points` is set, touch is enabled.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "user_agent": {
+          "description": "UA string for `Emulation.setUserAgentOverride`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_agent_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UserAgentMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "UA client-hints metadata. Requires `user_agent`."
+        },
+        "width": {
+          "description": "Viewport width in CSS pixels. Requires `height`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "UserAgentBrandVersion": {
+      "description": "One entry of CDP `Emulation.UserAgentBrandVersion` (UA client hints).",
+      "properties": {
+        "brand": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "brand",
+        "version"
+      ],
+      "type": "object"
+    },
+    "UserAgentMetadata": {
+      "description": "Mirror of CDP `Emulation.UserAgentMetadata`; every field is optional\nand only sent when present.",
+      "properties": {
+        "architecture": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brands": {
+          "items": {
+            "$ref": "#/definitions/UserAgentBrandVersion"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "full_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mobile": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "applied": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EmulateOverrides"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Echo of the overrides that were applied. Absent when cleared."
+    },
+    "cleared": {
+      "description": "True when overrides were cleared (`off`); false when applied.",
+      "type": "boolean"
+    },
+    "note": {
+      "description": "Scope note: emulation overrides are per-tab (CDP target) and are\nnot inherited by new tabs.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tab_id": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tab_id",
+    "cleared"
+  ],
+  "title": "EmulateResult",
+  "type": "object"
+}

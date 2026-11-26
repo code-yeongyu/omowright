@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "capture_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "capture_id"
+  ],
+  "title": "ScreenshotReleaseParams",
+  "type": "object"
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "browser_path": {
+      "description": "Extension-internal completed Chrome download path, stripped by the daemon.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "byte_size": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "danger": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mime": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suggested_filename": {
+      "type": "string"
+    },
+    "tab_id": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "transfer_id": {
+      "description": "Opaque id returned by the daemon to the CLI.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "used_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "used_selector": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "tab_id",
+    "suggested_filename",
+    "byte_size"
+  ],
+  "title": "DownloadResult",
+  "type": "object"
+}

@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "UserAgentBrandVersion": {
+      "description": "One entry of CDP `Emulation.UserAgentBrandVersion` (UA client hints).",
+      "properties": {
+        "brand": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "brand",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Mirror of CDP `Emulation.UserAgentMetadata`; every field is optional\nand only sent when present.",
+  "properties": {
+    "architecture": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "brands": {
+      "items": {
+        "$ref": "#/definitions/UserAgentBrandVersion"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "full_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mobile": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "platform": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "platform_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "UserAgentMetadata",
+  "type": "object"
+}

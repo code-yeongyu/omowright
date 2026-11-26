@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "data_base64": {
+      "description": "At most 256 KiB of PNG bytes, base64 encoded.",
+      "type": "string"
+    },
+    "eof": {
+      "type": "boolean"
+    },
+    "next_offset": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "data_base64",
+    "next_offset",
+    "eof"
+  ],
+  "title": "ScreenshotReadResult",
+  "type": "object"
+}

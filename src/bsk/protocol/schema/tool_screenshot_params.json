@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Parameters for `tool.screenshot`. Omit `ref` to capture the visible\ntab; pass an `@e<N>` ref from the last `tool.snapshot` to crop to\nthat element.",
+  "properties": {
+    "ref": {
+      "description": "Optional `@e<N>` ref allocated by the last `tool.snapshot`.\nAccepts both `\"e3\"` and `\"@e3\"`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "tab_id": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "session_id"
+  ],
+  "title": "ScreenshotParams",
+  "type": "object"
+}

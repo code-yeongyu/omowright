@@ -1,10 +1,27 @@
-import { compact, optionalTarget, resolveTarget } from "./targets.ts";
-import type { Target } from "./targets.ts";
+import { compact, optionalElementTarget, resolveElementTarget, resolveTarget } from "./targets.ts";
+import type { ElementTargetInput, Target } from "./targets.ts";
 import { captureScreenshot } from "./screenshot.ts";
 import type { Screenshot, ScreenshotOptions } from "./screenshot.ts";
 import { BskRpcError } from "./ipc-client.ts";
 import type { BskClient } from "./ipc-client.ts";
 import { redactValue } from "../redact-value.ts";
+import type {
+  BskToolParams,
+  CooperateAction,
+  EmulateOverrides,
+  HelpCompletionCriteria,
+  KeyModifier,
+  MouseButton,
+  TabScope,
+  WaitUntil,
+} from "./protocol/params.generated.ts";
+
+type ToolMethod = keyof BskToolParams;
+// What a typed call puts on the wire; tool() adds session_id.
+type WireParams<M extends ToolMethod> = Omit<BskToolParams[M], "session_id">;
+type MetadataKey = "context_id" | "depends_on";
+// The methods whose schema carries the cooperation metadata sharedTab() fills in.
+type SharedTabMethod = { [M in ToolMethod]: MetadataKey extends keyof BskToolParams[M] ? M : never }[ToolMethod];
 
 const SESSION_STOP_TIMEOUT_MS = 3_600_000;
 
@@ -22,7 +39,7 @@ export interface BskSessionInit {
 
 export interface NavigationOptions extends SharedTabOptions {
   tabId?: number;
-  waitUntil?: string;
+  waitUntil?: WaitUntil;
   timeoutMs?: number;
 }
 
@@ -80,6 +97,17 @@ export class BskSession {
     return this.#stopped;
   }
 
+  #call<M extends ToolMethod>(name: M, params: WireParams<M>): Promise<unknown> {
+    return this.tool(name, params);
+  }
+  #act<M extends SharedTabMethod>(
+    name: M,
+    params: Omit<WireParams<M>, MetadataKey>,
+    shared: SharedTabOptions,
+  ): Promise<unknown> {
+    return this.tool(name, { ...params, ...sharedTab(shared) });
+  }
+
   tool(name: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (this.#stopped) return Promise.reject(new Error(`BrowserSkill session ${this.sessionId} is stopped`));
     return this.#client.call(`tool.${name}`, compact({ session_id: this.sessionId, ...params }), {
@@ -88,13 +116,13 @@ export class BskSession {
   }
 
   cooperate(
-    action: string,
+    action: CooperateAction,
     { tabId, timeoutMs, maxTokens }: { tabId?: number; timeoutMs?: number; maxTokens?: number } = {},
   ): Promise<unknown> {
     // An extension before 0.4.0 has no shared control: it answers unknown_method here and runs actions without a
     // context. Degrade to "no context, ready" so a sync-then-act caller works unchanged; an absent context is
     // dropped from the wire by compact(). Every other error still rejects.
-    return this.tool("cooperate", { action, tab_id: tabId, timeout_ms: timeoutMs, max_tokens: maxTokens }).catch(
+    return this.#call("cooperate", { action, tab_id: tabId, timeout_ms: timeoutMs, max_tokens: maxTokens }).catch(
       (error: unknown) => {
         if (error instanceof BskRpcError && error.code === "unknown_method")
           return { context_id: undefined, supported: false, ready: true };
@@ -104,29 +132,13 @@ export class BskSession {
   }
 
   navigate(url: string, { tabId, waitUntil, timeoutMs, ...shared }: NavigationOptions = {}): Promise<unknown> {
-    return this.tool("navigate", {
-      url,
-      tab_id: tabId,
-      wait_until: waitUntil,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act("navigate", { url, tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs }, shared);
   }
   back({ tabId, waitUntil, timeoutMs, ...shared }: NavigationOptions = {}): Promise<unknown> {
-    return this.tool("navigate_back", {
-      tab_id: tabId,
-      wait_until: waitUntil,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act("navigate_back", { tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs }, shared);
   }
   forward({ tabId, waitUntil, timeoutMs, ...shared }: NavigationOptions = {}): Promise<unknown> {
-    return this.tool("navigate_forward", {
-      tab_id: tabId,
-      wait_until: waitUntil,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act("navigate_forward", { tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs }, shared);
   }
   reload({
     tabId,
@@ -135,13 +147,7 @@ export class BskSession {
     hard,
     ...shared
   }: NavigationOptions & { hard?: boolean } = {}): Promise<unknown> {
-    return this.tool("reload", {
-      tab_id: tabId,
-      wait_until: waitUntil,
-      timeout_ms: timeoutMs,
-      hard,
-      ...sharedTab(shared),
-    });
+    return this.#act("reload", { tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs, hard }, shared);
   }
 
   observe({
@@ -160,25 +166,28 @@ export class BskSession {
     debugSurfaces?: boolean;
     probeHover?: boolean;
   } = {}): Promise<unknown> {
-    return this.tool("observe", {
-      cursor,
-      tab_id: tabId,
-      max_depth: maxDepth,
-      max_tokens: maxTokens,
-      debug_surfaces: debugSurfaces,
-      probe_hover: probeHover,
-      ...sharedTab(shared),
-    });
+    return this.#act(
+      "observe",
+      {
+        cursor,
+        tab_id: tabId,
+        max_depth: maxDepth,
+        max_tokens: maxTokens,
+        debug_surfaces: debugSurfaces,
+        probe_hover: probeHover,
+      },
+      shared,
+    );
   }
   snapshot({
     tabId,
     maxDepth,
     maxTokens,
   }: { tabId?: number; maxDepth?: number; maxTokens?: number } = {}): Promise<unknown> {
-    return this.tool("snapshot", { tab_id: tabId, max_depth: maxDepth, max_tokens: maxTokens });
+    return this.#call("snapshot", { tab_id: tabId, max_depth: maxDepth, max_tokens: maxTokens });
   }
   getHtml({ ref, tabId, maxBytes }: { ref?: string; tabId?: number; maxBytes?: number } = {}): Promise<unknown> {
-    return this.tool("get_html", { ref, tab_id: tabId, max_bytes: maxBytes });
+    return this.#call("get_html", { ref, tab_id: tabId, max_bytes: maxBytes });
   }
   screenshot(options?: ScreenshotOptions): Promise<Screenshot> {
     return captureScreenshot(this, options);
@@ -193,56 +202,50 @@ export class BskSession {
       tabId,
       timeoutMs,
       ...shared
-    }: TabTimeoutOptions & { button?: string | undefined; clickCount?: number; modifiers?: string[] } = {},
+    }: TabTimeoutOptions & {
+      button?: MouseButton | undefined;
+      clickCount?: number;
+      modifiers?: readonly KeyModifier[];
+    } = {},
   ): Promise<unknown> {
-    return this.tool("click", {
-      ...resolveTarget(target),
-      button,
-      click_count: clickCount,
-      modifiers,
-      tab_id: tabId,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act(
+      "click",
+      { ...resolveTarget(target), button, click_count: clickCount, modifiers, tab_id: tabId, timeout_ms: timeoutMs },
+      shared,
+    );
   }
   hover(
-    target: Target,
+    target: ElementTargetInput,
     {
       modifiers,
       settleMs,
       tabId,
       timeoutMs,
       ...shared
-    }: TabTimeoutOptions & { modifiers?: string[]; settleMs?: number } = {},
+    }: TabTimeoutOptions & { modifiers?: readonly KeyModifier[]; settleMs?: number } = {},
   ): Promise<unknown> {
-    return this.tool("hover", {
-      ...resolveTarget(target),
-      modifiers,
-      settle_ms: settleMs,
-      tab_id: tabId,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act(
+      "hover",
+      { ...resolveElementTarget(target), modifiers, settle_ms: settleMs, tab_id: tabId, timeout_ms: timeoutMs },
+      shared,
+    );
   }
-  focus(target: Target, { tabId, timeoutMs, ...shared }: TabTimeoutOptions = {}): Promise<unknown> {
-    return this.tool("focus", { ...resolveTarget(target), tab_id: tabId, timeout_ms: timeoutMs, ...sharedTab(shared) });
+  focus(target: ElementTargetInput, { tabId, timeoutMs, ...shared }: TabTimeoutOptions = {}): Promise<unknown> {
+    return this.#act("focus", { ...resolveElementTarget(target), tab_id: tabId, timeout_ms: timeoutMs }, shared);
   }
-  blur(target: Target, { tabId, timeoutMs, ...shared }: TabTimeoutOptions = {}): Promise<unknown> {
-    return this.tool("blur", { ...resolveTarget(target), tab_id: tabId, timeout_ms: timeoutMs, ...sharedTab(shared) });
+  blur(target: ElementTargetInput, { tabId, timeoutMs, ...shared }: TabTimeoutOptions = {}): Promise<unknown> {
+    return this.#act("blur", { ...resolveElementTarget(target), tab_id: tabId, timeout_ms: timeoutMs }, shared);
   }
   fill(
-    target: Target,
+    target: ElementTargetInput,
     value: string,
     { clearBefore, tabId, timeoutMs, ...shared }: TabTimeoutOptions & { clearBefore?: boolean } = {},
   ): Promise<unknown> {
-    return this.tool("fill", {
-      ...resolveTarget(target),
-      value,
-      clear_before: clearBefore,
-      tab_id: tabId,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    }).catch((error: unknown) => {
+    return this.#act(
+      "fill",
+      { ...resolveElementTarget(target), value, clear_before: clearBefore, tab_id: tabId, timeout_ms: timeoutMs },
+      shared,
+    ).catch((error: unknown) => {
       throw redactValue(error, value);
     });
   }
@@ -255,38 +258,32 @@ export class BskSession {
       tabId,
       timeoutMs,
       ...shared
-    }: TabTimeoutOptions & { target?: Target; modifiers?: string[]; holdMs?: number } = {},
+    }: TabTimeoutOptions & { target?: ElementTargetInput; modifiers?: readonly KeyModifier[]; holdMs?: number } = {},
   ): Promise<unknown> {
-    return this.tool("press", {
-      key,
-      ...optionalTarget(target),
-      modifiers,
-      hold_ms: holdMs,
-      tab_id: tabId,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act(
+      "press",
+      { key, ...optionalElementTarget(target), modifiers, hold_ms: holdMs, tab_id: tabId, timeout_ms: timeoutMs },
+      shared,
+    );
   }
   select(
-    target: Target,
+    target: ElementTargetInput,
     values: string | string[],
     { tabId, timeoutMs, ...shared }: TabTimeoutOptions = {},
   ): Promise<unknown> {
-    return this.tool("select", {
-      ...resolveTarget(target),
-      values: Array.isArray(values) ? values : [values],
-      tab_id: tabId,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act(
+      "select",
+      {
+        ...resolveElementTarget(target),
+        values: Array.isArray(values) ? values : [values],
+        tab_id: tabId,
+        timeout_ms: timeoutMs,
+      },
+      shared,
+    );
   }
-  scrollTo(target: Target, { tabId, timeoutMs, ...shared }: TabTimeoutOptions = {}): Promise<unknown> {
-    return this.tool("scroll_to", {
-      ...resolveTarget(target),
-      tab_id: tabId,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+  scrollTo(target: ElementTargetInput, { tabId, timeoutMs, ...shared }: TabTimeoutOptions = {}): Promise<unknown> {
+    return this.#act("scroll_to", { ...resolveElementTarget(target), tab_id: tabId, timeout_ms: timeoutMs }, shared);
   }
   wheel({
     deltaX = 0,
@@ -299,59 +296,59 @@ export class BskSession {
   }: TabTimeoutOptions & {
     deltaX?: number;
     deltaY?: number;
-    target?: Target;
-    modifiers?: string[];
+    target?: ElementTargetInput;
+    modifiers?: readonly KeyModifier[];
   } = {}): Promise<unknown> {
-    return this.tool("wheel", {
-      ...optionalTarget(target),
-      delta_x: deltaX,
-      delta_y: deltaY,
-      modifiers,
-      tab_id: tabId,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act(
+      "wheel",
+      {
+        ...optionalElementTarget(target),
+        delta_x: deltaX,
+        delta_y: deltaY,
+        modifiers,
+        tab_id: tabId,
+        timeout_ms: timeoutMs,
+      },
+      shared,
+    );
   }
 
   evaluate(
     expression: string,
     { tabId, awaitPromise, returnByValue, timeoutMs, ...shared }: EvaluateOptions = {},
   ): Promise<unknown> {
-    return this.tool("evaluate", {
-      expression,
-      tab_id: tabId,
-      await_promise: awaitPromise,
-      return_by_value: returnByValue,
-      timeout_ms: timeoutMs,
-      ...sharedTab(shared),
-    });
+    return this.#act(
+      "evaluate",
+      { expression, tab_id: tabId, await_promise: awaitPromise, return_by_value: returnByValue, timeout_ms: timeoutMs },
+      shared,
+    );
   }
 
-  tabList({ scope }: { scope?: string } = {}): Promise<unknown> {
-    return this.tool("tab_list", { scope });
+  tabList({ scope }: { scope?: TabScope } = {}): Promise<unknown> {
+    return this.#call("tab_list", { scope });
   }
   tabCreate({ url, active, index }: { url?: string; active?: boolean; index?: number } = {}): Promise<unknown> {
-    return this.tool("tab_create", { url, active, index });
+    return this.#call("tab_create", { url, active, index });
   }
   tabClose(tabId: number, shared: SharedTabOptions = {}): Promise<unknown> {
-    return this.tool("tab_close", { tab_id: tabId, ...sharedTab(shared) });
+    return this.#act("tab_close", { tab_id: tabId }, shared);
   }
   tabSelect(tabId: number): Promise<unknown> {
-    return this.tool("tab_select", { tab_id: tabId });
+    return this.#call("tab_select", { tab_id: tabId });
   }
   tabBorrow(tabId: number, { confirmationTimeoutMs }: { confirmationTimeoutMs?: number } = {}): Promise<unknown> {
-    return this.tool("tab_borrow", { tab_id: tabId, confirmation_timeout_ms: confirmationTimeoutMs });
+    return this.#call("tab_borrow", { tab_id: tabId, confirmation_timeout_ms: confirmationTimeoutMs });
   }
   tabReturn(tabId: number): Promise<unknown> {
-    return this.tool("tab_return", { tab_id: tabId });
+    return this.#call("tab_return", { tab_id: tabId });
   }
 
   waitForNavigation({
     tabId,
     waitUntil,
     timeoutMs,
-  }: { tabId?: number; waitUntil?: string; timeoutMs?: number } = {}): Promise<unknown> {
-    return this.tool("wait_for_navigation", { tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs });
+  }: { tabId?: number; waitUntil?: WaitUntil; timeoutMs?: number } = {}): Promise<unknown> {
+    return this.#call("wait_for_navigation", { tab_id: tabId, wait_until: waitUntil, timeout_ms: timeoutMs });
   }
   requestHelp({
     prompt,
@@ -361,19 +358,19 @@ export class BskSession {
     tabId,
     timeoutMs,
   }: {
-    prompt?: string;
+    prompt: string;
     title?: string;
-    targets?: Target[];
-    completionCriteria?: unknown;
+    targets?: ElementTargetInput[];
+    completionCriteria?: HelpCompletionCriteria;
     tabId?: number;
     timeoutMs?: number;
-  } = {}): Promise<unknown> {
-    return this.tool("request_help", {
+  }): Promise<unknown> {
+    return this.#call("request_help", {
       prompt,
       title,
       tab_id: tabId,
       timeout_ms: timeoutMs,
-      targets: targets?.map((t) => resolveTarget(t)),
+      targets: targets?.map((t) => resolveElementTarget(t)),
       completion_criteria: completionCriteria,
     });
   }
@@ -390,7 +387,7 @@ export class BskSession {
     maxTextChars?: number;
     includeStack?: boolean;
   } = {}): Promise<unknown> {
-    return this.tool("console", {
+    return this.#call("console", {
       tab_id: tabId,
       since,
       limit,
@@ -404,18 +401,18 @@ export class BskSession {
     limit,
     maxTextChars,
   }: { tabId?: number; since?: number; limit?: number; maxTextChars?: number } = {}): Promise<unknown> {
-    return this.tool("network", { tab_id: tabId, since, limit, max_text_chars: maxTextChars });
+    return this.#call("network", { tab_id: tabId, since, limit, max_text_chars: maxTextChars });
   }
   resize(width: number, height: number, shared: SharedTabOptions = {}): Promise<unknown> {
-    return this.tool("window_resize", { width, height, ...sharedTab(shared) });
+    return this.#act("window_resize", { width, height }, shared);
   }
   emulate({
     tabId,
     off,
     overrides,
     ...shared
-  }: SharedTabOptions & { tabId?: number; off?: boolean; overrides?: Record<string, unknown> } = {}): Promise<unknown> {
-    return this.tool("emulate", { tab_id: tabId, off, overrides, ...sharedTab(shared) });
+  }: SharedTabOptions & { tabId?: number; off?: boolean; overrides?: EmulateOverrides } = {}): Promise<unknown> {
+    return this.#act("emulate", { tab_id: tabId, off, overrides }, shared);
   }
 
   async stop(): Promise<unknown> {

@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EvaluateError": {
+      "properties": {
+        "column": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "line": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "JavaScriptDialogHandledAction": {
+      "description": "How the extension resolved the dialog so CDP could continue.",
+      "enum": [
+        "accepted",
+        "dismissed"
+      ],
+      "type": "string"
+    },
+    "JavaScriptDialogInfo": {
+      "description": "One observed + handled JavaScript dialog during a tool call.",
+      "properties": {
+        "default_prompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handled": {
+          "$ref": "#/definitions/JavaScriptDialogHandledAction"
+        },
+        "has_browser_handler": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "sequence": {
+          "description": "Monotonic per-tab sequence for ordering within a session.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tab_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "type": {
+          "$ref": "#/definitions/JavaScriptDialogType"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tab_id",
+        "type",
+        "message",
+        "handled",
+        "sequence"
+      ],
+      "type": "object"
+    },
+    "JavaScriptDialogType": {
+      "description": "Native JS dialog kind reported by CDP.",
+      "enum": [
+        "alert",
+        "confirm",
+        "prompt",
+        "beforeunload"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Outcome of an `evaluate` call.\n\n* `ok: true` → expression evaluated successfully; `value` holds the\n  JSON-serialised return value (`null` is meaningful and distinct\n  from \"missing\").\n* `ok: false` → the expression threw; `error.text` holds the\n  stringified `exceptionDetails.text` / `exception.description`.\n  The RPC itself still succeeds — the daemon does NOT map JS throws\n  to top-level RPC errors so agents can act on the throw text.",
+  "properties": {
+    "dialogs": {
+      "description": "Native JS dialogs observed and auto-handled during this call.",
+      "items": {
+        "$ref": "#/definitions/JavaScriptDialogInfo"
+      },
+      "type": "array"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EvaluateError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "tab_id": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "value": true,
+    "verified": {
+      "description": "Present, and `false`, only when the script ran with `unverified`: nothing\nabout the page was compared before it ran.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "ok",
+    "tab_id"
+  ],
+  "title": "EvaluateResult",
+  "type": "object"
+}

@@ -1,0 +1,2079 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "DebugActivity": {
+      "description": "Daemon-owned execution status. Waiting observes completion; it never resends a command.",
+      "properties": {
+        "command_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "wait_complete": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "wait_timed_out": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugAnalysis": {
+      "properties": {
+        "coverage": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "excluded_controlled": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "groups": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "included": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "matched": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retained": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "semantics": {
+          "type": "string"
+        },
+        "slow_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "suspected_extra_requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uncomparable": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_ms": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retained",
+        "matched",
+        "included",
+        "excluded_controlled",
+        "uncomparable",
+        "groups",
+        "suspected_extra_requests",
+        "window_ms",
+        "slow_ms",
+        "coverage",
+        "semantics"
+      ],
+      "type": "object"
+    },
+    "DebugBody": {
+      "properties": {
+        "chars": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "next_offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "redacted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "replay_safe": {
+          "description": "True only for complete retained text identical to the captured body.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugConsole": {
+      "properties": {
+        "at": {
+          "format": "double",
+          "type": "number"
+        },
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "level": {
+          "type": "string"
+        },
+        "relation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stack": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "level",
+        "text",
+        "count",
+        "last_at"
+      ],
+      "type": "object"
+    },
+    "DebugDuplicate": {
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ended_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "extra_requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "operation_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "overlap_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "possible_retry": {
+          "type": "boolean"
+        },
+        "refs_truncated": {
+          "type": "boolean"
+        },
+        "request_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "started_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "url",
+        "count",
+        "extra_requests",
+        "started_at",
+        "ended_at",
+        "overlap_count",
+        "possible_retry",
+        "request_ids",
+        "operation_ids",
+        "refs_truncated"
+      ],
+      "type": "object"
+    },
+    "DebugDurationStats": {
+      "properties": {
+        "max": {
+          "format": "double",
+          "type": "number"
+        },
+        "mean": {
+          "format": "double",
+          "type": "number"
+        },
+        "min": {
+          "format": "double",
+          "type": "number"
+        },
+        "p50": {
+          "format": "double",
+          "type": "number"
+        },
+        "p95": {
+          "format": "double",
+          "type": "number"
+        },
+        "total": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "min",
+        "mean",
+        "p50",
+        "p95",
+        "max",
+        "total"
+      ],
+      "type": "object"
+    },
+    "DebugEndpoint": {
+      "properties": {
+        "cached": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "controlled": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DebugDurationStats"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "failed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "http_errors": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "interrupted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        },
+        "pending": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "refs_truncated": {
+          "type": "boolean"
+        },
+        "replayed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "request_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "service_worker": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "slow": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statuses": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "timing_samples": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transfer_bytes": {
+          "format": "double",
+          "type": "number"
+        },
+        "transfer_samples": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "endpoint",
+        "count",
+        "failed",
+        "http_errors",
+        "pending",
+        "interrupted",
+        "statuses",
+        "slow",
+        "timing_samples",
+        "transfer_bytes",
+        "transfer_samples",
+        "cached",
+        "service_worker",
+        "controlled",
+        "replayed",
+        "request_ids",
+        "refs_truncated"
+      ],
+      "type": "object"
+    },
+    "DebugEvidence": {
+      "properties": {
+        "changes": {
+          "$ref": "#/definitions/DebugTextChanges"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/definitions/DebugFieldTrace"
+          },
+          "type": "array"
+        },
+        "gaps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/definitions/DebugRequestLink"
+          },
+          "type": "array"
+        },
+        "observations": {
+          "items": {
+            "$ref": "#/definitions/DebugPage"
+          },
+          "type": "array"
+        },
+        "payloads": {
+          "items": {
+            "$ref": "#/definitions/DebugPayload"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "fields",
+        "payloads",
+        "links",
+        "gaps",
+        "changes",
+        "observations"
+      ],
+      "type": "object"
+    },
+    "DebugField": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugFieldTrace": {
+      "properties": {
+        "before": {
+          "$ref": "#/definitions/DebugValue"
+        },
+        "input": {
+          "$ref": "#/definitions/DebugValue"
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "later": {
+          "$ref": "#/definitions/DebugValue"
+        },
+        "response": {
+          "items": {
+            "$ref": "#/definitions/DebugValue"
+          },
+          "type": "array"
+        },
+        "submitted": {
+          "items": {
+            "$ref": "#/definitions/DebugValue"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "before",
+        "input",
+        "submitted",
+        "response",
+        "later"
+      ],
+      "type": "object"
+    },
+    "DebugIntervention": {
+      "properties": {
+        "changes": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/DebugInterventionKind"
+        }
+      },
+      "required": [
+        "rule_id",
+        "type",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugInterventionKind": {
+      "enum": [
+        "block",
+        "modify",
+        "mock"
+      ],
+      "type": "string"
+    },
+    "DebugJsonEdit": {
+      "additionalProperties": false,
+      "properties": {
+        "remove": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "rename": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "set": {
+          "additionalProperties": true,
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DebugLongTask": {
+      "properties": {
+        "at": {
+          "format": "double",
+          "type": "number"
+        },
+        "duration_ms": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "duration_ms"
+      ],
+      "type": "object"
+    },
+    "DebugMetric": {
+      "properties": {
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "type": "string"
+        },
+        "value": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "reasons"
+      ],
+      "type": "object"
+    },
+    "DebugOperation": {
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DebugPage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DebugPage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "console_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finished_at": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "observation_end": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "observation_limited": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "observations": {
+          "items": {
+            "$ref": "#/definitions/DebugPage"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "request_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "state": {
+          "$ref": "#/definitions/DebugOperationState"
+        },
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "window_end": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "sequence",
+        "method",
+        "started_at",
+        "state",
+        "request_ids",
+        "console_ids",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "DebugOperationState": {
+      "enum": [
+        "running",
+        "completed",
+        "error",
+        "interrupted"
+      ],
+      "type": "string"
+    },
+    "DebugOutput": {
+      "description": "Reports how the requested output budget affected a debug response.",
+      "properties": {
+        "budget": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "omitted": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "budget",
+        "truncated",
+        "omitted"
+      ],
+      "type": "object"
+    },
+    "DebugPage": {
+      "properties": {
+        "at": {
+          "format": "double",
+          "type": "number"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/definitions/DebugField"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "fields_partial": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "navigation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugPayload": {
+      "properties": {
+        "part": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "part",
+        "path",
+        "value"
+      ],
+      "type": "object"
+    },
+    "DebugPerformance": {
+      "properties": {
+        "coverage": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "document_key": {
+          "type": "string"
+        },
+        "early": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "long_tasks": {
+          "items": {
+            "$ref": "#/definitions/DebugLongTask"
+          },
+          "type": "array"
+        },
+        "long_tasks_truncated": {
+          "type": "boolean"
+        },
+        "metrics": {
+          "additionalProperties": {
+            "$ref": "#/definitions/DebugMetric"
+          },
+          "type": "object"
+        },
+        "navigation": {
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "started_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "state": {
+          "type": "string"
+        },
+        "time_origin": {
+          "format": "double",
+          "type": "number"
+        },
+        "url": {
+          "type": "string"
+        },
+        "visibility": {
+          "items": {
+            "$ref": "#/definitions/DebugVisibility"
+          },
+          "type": "array"
+        },
+        "visibility_truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "document_key",
+        "sequence",
+        "time_origin",
+        "started_at",
+        "observed_at",
+        "url",
+        "navigation",
+        "state",
+        "early",
+        "scope",
+        "visibility",
+        "visibility_truncated",
+        "metrics",
+        "long_tasks",
+        "long_tasks_truncated",
+        "coverage"
+      ],
+      "type": "object"
+    },
+    "DebugRecording": {
+      "properties": {
+        "console": {
+          "items": {
+            "$ref": "#/definitions/DebugConsole"
+          },
+          "type": "array"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/definitions/DebugOperation"
+          },
+          "type": "array"
+        },
+        "pages": {
+          "items": {
+            "$ref": "#/definitions/DebugPage"
+          },
+          "type": "array"
+        },
+        "performance": {
+          "items": {
+            "$ref": "#/definitions/DebugPerformance"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "replays": {
+          "items": {
+            "$ref": "#/definitions/DebugReplay"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "requests": {
+          "items": {
+            "$ref": "#/definitions/DebugRequest"
+          },
+          "type": "array"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/definitions/DebugRule"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "run": {
+          "$ref": "#/definitions/DebugRun"
+        },
+        "saved_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "saved_at",
+        "run",
+        "requests",
+        "operations",
+        "console",
+        "pages"
+      ],
+      "type": "object"
+    },
+    "DebugReplay": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_request_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "key",
+        "source_request_id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugRequest": {
+      "properties": {
+        "decoded_bytes": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finished_at": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "frame_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from_cache": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "from_service_worker": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "initiator": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "integrity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DebugRequestIntegrity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intervention": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DebugIntervention"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loader_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pinned": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "redirect_from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replay_from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replay_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_body": {
+          "$ref": "#/definitions/DebugBody"
+        },
+        "request_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "resource_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "response_body": {
+          "$ref": "#/definitions/DebugBody"
+        },
+        "response_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "started_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "state": {
+          "type": "string"
+        },
+        "status": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "timing": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "transfer_bytes": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "run_id",
+        "sequence",
+        "started_at",
+        "method",
+        "url",
+        "state",
+        "request_body",
+        "response_body"
+      ],
+      "type": "object"
+    },
+    "DebugRequestIntegrity": {
+      "properties": {
+        "metadata": {
+          "description": "Request metadata needed for replay; excludes response headers.",
+          "type": "string"
+        },
+        "response_headers": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "DebugRequestLink": {
+      "properties": {
+        "relation": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "relation"
+      ],
+      "type": "object"
+    },
+    "DebugRule": {
+      "properties": {
+        "created_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "effect": {
+          "$ref": "#/definitions/DebugRuleEffect"
+        },
+        "failures": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hits": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "match": {
+          "$ref": "#/definitions/DebugRuleMatch"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/DebugRuleState"
+        },
+        "times": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "match",
+        "effect",
+        "id",
+        "state",
+        "hits",
+        "failures",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "DebugRuleEffect": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "block",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "json": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DebugJsonEdit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "method": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "modify",
+              "type": "string"
+            },
+            "url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "type": "string"
+            },
+            "delay_ms": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "status": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "mock",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "status",
+            "body"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DebugRuleMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resource_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "DebugRuleState": {
+      "enum": [
+        "enabled",
+        "disabled",
+        "exhausted",
+        "removed",
+        "stopped"
+      ],
+      "type": "string"
+    },
+    "DebugRun": {
+      "properties": {
+        "active_rules": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "coverage": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dropped_console": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dropped_operations": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dropped_requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "errors": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "next_since": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operations": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "saved_at": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "format": "double",
+          "type": "number"
+        },
+        "state": {
+          "$ref": "#/definitions/DebugRunState"
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stopped_at": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "storage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DebugStorage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "storage_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tab_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "session_id",
+        "tab_id",
+        "name",
+        "url",
+        "started_at",
+        "state",
+        "requests",
+        "operations",
+        "errors",
+        "dropped_requests",
+        "dropped_operations",
+        "dropped_console",
+        "coverage",
+        "next_since"
+      ],
+      "type": "object"
+    },
+    "DebugRunState": {
+      "enum": [
+        "capturing",
+        "stopped"
+      ],
+      "type": "string"
+    },
+    "DebugStorage": {
+      "description": "Bounded local retention statistics included in debug run metadata.",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "dropped": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pins": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "requests",
+        "bytes",
+        "dropped",
+        "pins"
+      ],
+      "type": "object"
+    },
+    "DebugTextChanges": {
+      "properties": {
+        "added": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "removed": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "added",
+        "removed",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "DebugValue": {
+      "properties": {
+        "at": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "DebugVisibility": {
+      "properties": {
+        "at": {
+          "format": "double",
+          "type": "number"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "state"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "activity": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugActivity"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "aggregates": {
+      "items": {
+        "$ref": "#/definitions/DebugEndpoint"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "analysis": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugAnalysis"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capabilities": true,
+    "console": {
+      "items": {
+        "$ref": "#/definitions/DebugConsole"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "duplicates": {
+      "items": {
+        "$ref": "#/definitions/DebugDuplicate"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_offset": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "next_since": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "operation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugOperation"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "operations": {
+      "items": {
+        "$ref": "#/definitions/DebugOperation"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugOutput"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pages": {
+      "items": {
+        "$ref": "#/definitions/DebugPage"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "performance": {
+      "items": {
+        "$ref": "#/definitions/DebugPerformance"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "recording": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugRecording"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "replay": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugReplay"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "replays": {
+      "items": {
+        "$ref": "#/definitions/DebugReplay"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "request": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugRequest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "requests": {
+      "items": {
+        "$ref": "#/definitions/DebugRequest"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "rules": {
+      "items": {
+        "$ref": "#/definitions/DebugRule"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "run": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DebugRun"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "runs": {
+      "items": {
+        "$ref": "#/definitions/DebugRun"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "truncated": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "session_id"
+  ],
+  "title": "DebugResult",
+  "type": "object"
+}
