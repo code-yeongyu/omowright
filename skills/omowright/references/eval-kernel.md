@@ -7,11 +7,15 @@ parallel. It does not keep child processes alive for you.
 **ONLY `globalThis.*` SURVIVES ACROSS CELLS.** Top-level `const`/`let` bindings do
 not; re-import or read from `globalThis` in later cells.
 
-**A BROWSER SPAWNED IN A CELL CAN DIE WHEN THAT CELL SETTLES.** Measured, not
-assumed: `Bun.spawn` children were killed with SIGKILL at cell completion, and
-`connectPipe` (which uses `child_process.spawn` without detaching) lost a
-browser between two cells. A `globalThis.omw` handle whose process is gone
-rejects every call. Two patterns hold up:
+**CONNECT ONCE AND KEEP THE HANDLE ON `globalThis`.** A new connect in every
+cell throws away the page state and pays the launch again.
+
+**WHETHER A BROWSER SPAWNED IN A CELL OUTLIVES IT DEPENDS ON THE HARNESS.**
+Measured both ways: an older eval kernel killed `Bun.spawn` children with
+SIGKILL at cell completion and lost a `connectPipe` browser between two cells;
+omo's kernel kept a `connectPipe` browser and an unawaited `waitForFunction`
+alive across cells (2026-11-26). A `globalThis.omw` handle whose process is gone
+rejects every call, so probe before reuse. Two patterns hold up everywhere:
 
 1. **One cell, whole job.** Connect, act, close in the same cell. Right for any
    job that fits in one cell's runtime; the parallel lanes below are this shape.
@@ -80,6 +84,33 @@ console.log(omwTools.compactSnapshot(await omwPage.snapshot()));
 await omwPage.locator("e1").click();
 display(await omwPage.screenshot({ type: "png" })); // display() renders images inline
 ```
+
+## Waits that outlast a cell
+
+A cell that awaits a person, a deploy or a slow job is detached by the harness
+(after 30 s in omo) and then holds the kernel: every later cell queues behind
+it. Subscribe the harness watcher first, start the wait without awaiting it, and
+return:
+
+```js
+const flag = path.join(os.tmpdir(), `omowright-signed-in-${Date.now()}.flag`);
+await tool.monitor({ description: "sign-in finished", path: flag, event: "create" });
+globalThis.omwWait = omwPage
+  .waitForFunction(() => document.querySelector("[data-user]") !== null, undefined, { timeout: 600_000 })
+  .then(
+    () => fs.writeFileSync(flag, "ok"),
+    (error) => fs.writeFileSync(flag, `failed: ${error.message}`),
+  );
+```
+
+The cell returns at once, the kernel stays free for other cells on the same
+`omwPage`, and the file event wakes the turn on success and on timeout alike,
+so a wait never ends silently. Read the flag, then continue from the live page.
+Measured on 2026-11-26: the event arrived as the page state flipped, and a 2 s
+bound reported `WaitForFunctionTimeoutError` at 2004 ms. `tool.monitor` is omo's
+watcher; in another harness use its file or command watch. The same rule covers
+a dev server or a deploy the page depends on: watch it with a command monitor
+that prints one line when it is ready, never with a loop in a cell.
 
 ## Parallel lanes (research fan-out)
 
