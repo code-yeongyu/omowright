@@ -2,6 +2,7 @@ import { compact, optionalTarget, resolveTarget } from "./targets.ts";
 import type { Target } from "./targets.ts";
 import { captureScreenshot } from "./screenshot.ts";
 import type { Screenshot, ScreenshotOptions } from "./screenshot.ts";
+import { BskRpcError } from "./ipc-client.ts";
 import type { BskClient } from "./ipc-client.ts";
 import { redactValue } from "../redact-value.ts";
 
@@ -90,7 +91,16 @@ export class BskSession {
     action: string,
     { tabId, timeoutMs, maxTokens }: { tabId?: number; timeoutMs?: number; maxTokens?: number } = {},
   ): Promise<unknown> {
-    return this.tool("cooperate", { action, tab_id: tabId, timeout_ms: timeoutMs, max_tokens: maxTokens });
+    // An extension before 0.4.0 has no shared control: it answers unknown_method here and runs actions without a
+    // context. Degrade to "no context, ready" so a sync-then-act caller works unchanged; an absent context is
+    // dropped from the wire by compact(). Every other error still rejects.
+    return this.tool("cooperate", { action, tab_id: tabId, timeout_ms: timeoutMs, max_tokens: maxTokens }).catch(
+      (error: unknown) => {
+        if (error instanceof BskRpcError && error.code === "unknown_method")
+          return { context_id: undefined, supported: false, ready: true };
+        throw error;
+      },
+    );
   }
 
   navigate(url: string, { tabId, waitUntil, timeoutMs, ...shared }: NavigationOptions = {}): Promise<unknown> {
