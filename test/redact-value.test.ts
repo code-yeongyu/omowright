@@ -7,7 +7,7 @@ const SECRET = "sk-redact-sentinel-352";
 function everythingIn(error: unknown): string {
   const parts: string[] = [];
   const seen = new Set<unknown>();
-  for (let link: unknown = error; link !== undefined && link !== null && !seen.has(link); ) {
+  for (let link: unknown = error; link !== undefined && link !== null && !seen.has(link);) {
     seen.add(link);
     if (link instanceof Error) {
       parts.push(link.message, String(link.stack), JSON.stringify(Reflect.get(link, "data") ?? null));
@@ -60,6 +60,9 @@ test("a value of four characters or more is removed even against a letter or a d
 });
 
 test("a value shorter than four characters is removed only as a whole token", () => {
-  assert.equal(redactValue('locator("e3") would not accept "ab"', "ab"), 'locator("e3") would not accept "<redacted, 2 chars>"');
+  assert.equal(
+    redactValue('locator("e3") would not accept "ab"', "ab"),
+    'locator("e3") would not accept "<redacted, 2 chars>"',
+  );
   assert.equal(redactValue("label table abc", "ab"), "label table abc");
 });

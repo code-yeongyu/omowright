@@ -280,7 +280,9 @@ test(
 // re-pin after the navigation, the command that used to put the desktop default back.
 test(
   "an emulated device survives navigation until emulate(page, null)",
-  { skip: !SHELL && "no chromium binary found" },
+  // Outer bound only, as on the other live tests here: each step below waits on its own 10 s signal, which the
+  // runner's 5 s default cut short on a loaded host before any step could report (#352).
+  { skip: !SHELL && "no chromium binary found", timeout: 60_000 },
   async () => {
     const server = createServer((_request, response) => {
       response.setHeader("content-type", "text/html");
