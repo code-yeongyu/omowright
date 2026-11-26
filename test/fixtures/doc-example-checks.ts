@@ -88,7 +88,8 @@ export function undeclaredNodeModules(examples: readonly string[]): string[] {
   for (const example of examples) {
     for (const name of NODE_MODULES) {
       if (declares(example, name)) declared.add(name);
-      if (new RegExp(`(?<![\\w.$])${name}\\s*\\.\\s*\\w+\\s*\\(`).test(example) && !declared.has(name)) missing.add(name);
+      if (new RegExp(`(?<![\\w.$])${name}\\s*\\.\\s*\\w+\\s*\\(`).test(example) && !declared.has(name))
+        missing.add(name);
     }
   }
   return [...missing];
