@@ -70,7 +70,7 @@ await page.waitForFunction(() => window.ready === true, undefined, { timeout: 10
 const saved = page.waitForResponse("**/api/cart"); // start the wait, then act, then await it
 await page.locator("e7").click(); await saved;
 await page.waitForURL("**/dashboard"); await page.waitForLoadState("networkidle");
-await page.close();
+// when you are done with the tab: await page.close()   (the next example reads this page)
 ```
 
 Wait with these, never with a fixed delay; the full table is in `SKILL.md` ("Wait for a

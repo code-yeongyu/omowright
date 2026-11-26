@@ -112,6 +112,7 @@ responses and `collectWhileScrolling` drives the page until it has enough:
 ```js
 import { createNetworkSnoop, collectWhileScrolling } from "omowright";
 
+// given: page (a tab that is still open; the first example closed its browser)
 const snoop = createNetworkSnoop(page, { match: { url: /\/api\/feed/, mimeType: "json" } });
 await page.goto("https://example.com/feed");
 

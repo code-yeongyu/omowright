@@ -343,3 +343,18 @@ test("a boxed number is scrubbed like a number; a Map subclass's own methods are
   assert.deepEqual([...Map.prototype.entries.call(refused.headers)], [["x-pin", "pin <redacted, 4 chars>"]]);
   assert.equal(calls, 0);
 });
+
+// Security contract (#376): a DOMException (what fetch rejects with on abort) serves its message from an
+// accessor on its prototype. A caller logs error.message, so the value must not stay readable there.
+test("a DOMException's inherited message is scrubbed and the error stays the same object", () => {
+  const aborted = new DOMException(`cancel ${SECRET}`, "AbortError");
+
+  const error = redactValue(aborted, SECRET);
+
+  assert.equal(error, aborted);
+  assert.ok(aborted instanceof DOMException);
+  assert.equal(aborted.message, "cancel <redacted, 22 chars>");
+  assert.equal(aborted.name, "AbortError");
+  assert.ok(!String(aborted).includes(SECRET));
+  assert.ok(!String(aborted.stack).includes(SECRET));
+});
