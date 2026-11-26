@@ -74,7 +74,40 @@ function importedNames(block: string) {
   return names;
 }
 
-const FIXED_DELAY = /\b(?:Bun\.sleep|waitForTimeout)\s*\(|\bsetTimeout\s*\(\s*(?:r|res|resolve|done)\s*,/;
+// A wait on a clock in one line of an example: a sleep call, a timer that only settles a promise (callback is a
+// bare name), a timer with a positive literal delay whatever its callback, or the promise form `setTimeout(ms)`.
+const FIXED_DELAY =
+  /\b(?:Bun\.sleep(?:Sync)?|waitForTimeout)\s*\(|(?<![\w.])sleep\s*\(|\bsetTimeout\s*\(\s*[\w$]+\s*,|\bsetTimeout\s*\(.*,\s*[1-9][\d_]*\s*\)|\bsetTimeout\s*\(\s*[1-9]/;
+
+// The guard below is only as good as this matcher: every way an example can wait on a clock is flagged,
+// whatever the timer's callback is called, and a wait on a state is not (#352).
+test("the fixed-delay matcher flags a wait on a clock and passes a wait on a state", () => {
+  const waitsOnAClock = [
+    "await Bun.sleep(1000);",
+    "await page.waitForTimeout(1500);",
+    "await new Promise((r) => setTimeout(r, 800));",
+    "await new Promise(finish => setTimeout(finish, 1000));",
+    "await new Promise((ok) => setTimeout(() => ok(), 2_000));",
+    "await sleep(500);",
+    "await setTimeout(1000);",
+    "await new Promise((resolve) => setTimeout(resolve, delayMs));",
+  ];
+  const waitsOnAState = [
+    "await page.waitForFunction(() => window.ready === true, undefined, { timeout: 5000 });",
+    "const saved = page.waitForResponse('**/api/cart');",
+    "await snoop.waitFor({ url: /search/ }, { timeoutMs: 10_000 });",
+    "await requestHuman(page, { prompt, timeoutMs: 300000 });",
+  ];
+
+  assert.deepEqual(
+    waitsOnAClock.filter((line) => !FIXED_DELAY.test(line)),
+    [],
+  );
+  assert.deepEqual(
+    waitsOnAState.filter((line) => FIXED_DELAY.test(line)),
+    [],
+  );
+});
 
 const docs = await listDocs();
 assert.ok(docs.length >= 6, `expected skill + presets docs, found ${docs.length}`);
