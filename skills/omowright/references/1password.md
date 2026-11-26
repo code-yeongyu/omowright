@@ -73,6 +73,7 @@ without updating the title, so the title can read "sign in" while the vault is
 open.
 
 ```js
+// given: page
 const url = await page.evaluate(() => location.href);
 if (!url.includes("/app#/")) throw new Error("1password: not signed in");
 ```
@@ -94,6 +95,7 @@ click and type over `locator.fill()` on a tab another automation also drives:
 `fill()` installs an init script that can time out on a busy tab.
 
 ```js
+// given: searchRef, query (the search box's ref from the snapshot, and the item to look for)
 const { compactSnapshot } = await import("omowright");
 await page.locator(searchRef).click();
 await page.keyboard.press("Meta+a");

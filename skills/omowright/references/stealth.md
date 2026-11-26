@@ -44,6 +44,7 @@ Name-less launches keep the pipe and expose no port at all, so use a name only
 on a machine you trust and only when the instance is meant to be shared.
 
 ```js
+// given: browserPath, browserArgs, profileDir, registryRoot (each optional)
 const { connectNamed, listInstances } = await import("omowright");
 const browser = await connectNamed("cloak-main", {
   browserPath, // required only when a launch is needed (connectCloakProfile resolves it)
@@ -75,6 +76,7 @@ curl -s -m 2 http://127.0.0.1:9242/json/version   # Browser info -> an instance 
 ```
 
 ```js
+const { connect } = await import("omowright");
 const browser = await connect("http://127.0.0.1:9242");
 const page = await browser.newTab("https://target.com");
 // ... work ...
@@ -117,6 +119,8 @@ WAF trust builds with profile age. To import cookies from a real browser profile
 extract them to JSON and inject with the package helper:
 
 ```js
+import fs from "node:fs";
+// given: cookieFile, url
 import { injectCookies } from "omowright";
 const cookies = JSON.parse(await fs.promises.readFile(cookieFile, "utf8"));
 await injectCookies(page, cookies); // sanitize + Network.setCookies

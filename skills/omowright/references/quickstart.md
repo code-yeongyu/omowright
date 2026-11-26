@@ -8,7 +8,7 @@ Bun >= 1.4 recommended (`bun test` runs the suite as-is); Node >= 22 supported
 ## Two transports
 
 ```js
-const { connect, connectPipe } = await import("omowright");
+const { connect, connectPipe, compactSnapshot } = await import("omowright");
 ```
 
 - `connectPipe({ browserPath, browserArgs, storageRoot })` — launches a browser
@@ -55,13 +55,14 @@ slashes or `String.raw`: backslashes in a plain string literal are escapes
 ## Page essentials
 
 ```js
+// given: browser, url
 const page = await browser.newTab(url);        // waits for interactivity
 await page.goto(url);                          // content-probe readiness
 await page.goto(url, { waitUntil: "commit" }); // escape hatch for tiny pages
 await page.title(); page.url();
 await page.evaluate("document.readyState");
-await page.screenshot({ path, fullPage?, clip?, type?, quality? });
-await page.pdf({ path, format?, margin? });
+await page.screenshot({ path: "shot.png", fullPage: true }); // also clip, type, quality
+await page.pdf({ path: "page.pdf", format: "A4" });         // also margin
 await page.locator("e1").click();              // ref or CSS
 await page.locator("input[name=q]").fill("text");
 await page.keyboard.press("Enter"); await page.mouse.wheel(0, 400);

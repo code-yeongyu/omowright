@@ -9,6 +9,7 @@ description: Read this when you need Chrome MV3-shaped APIs — bookmarks, tabs,
 CDP and the browser's own profile files — no extension required.
 
 ```js
+// given: connection (what connectPipe or connect returned)
 import { createChromeApi } from "omowright";
 
 const chrome = createChromeApi(connection, {

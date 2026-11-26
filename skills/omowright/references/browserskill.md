@@ -163,6 +163,7 @@ bot detection; for WAF-heavy targets use the owned engine with CloakBrowser
 ## Onboarding: everything except one click
 
 ```js
+// given: knownBrowserOrUndefined (a browser id from an earlier report, or undefined)
 const { bskDoctor, bskOnboard } = await import("omowright");
 const report = await bskDoctor(); // {cli, daemon, browsers, primary, identification, browsersConnected, ready, nextStep}
 if (!report.ready) {

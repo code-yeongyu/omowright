@@ -19,6 +19,7 @@ export interface ScopeAnalysis {
   ast: Program;
   references: ScopeReference[];
   free: ScopeReference[];
+  declared: ReadonlySet<string>;
 }
 
 function isNode(value: unknown): value is AnyNode {
@@ -171,5 +172,5 @@ export function analyzeScopes(source: string): ScopeAnalysis {
     }
     return true;
   });
-  return { ast, references, free };
+  return { ast, references, free, declared: root.bindings };
 }
