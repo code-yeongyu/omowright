@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Params for `tool.tab_create`. The new tab is always created inside\nthe requesting session's Agent Window (design §6 sandbox rule —\nagents never spawn tabs in user windows).",
+  "properties": {
+    "active": {
+      "description": "Focus the new tab? Defaults to `true` (matches `chrome.tabs.create`).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "index": {
+      "description": "Insertion index within the Agent Window's tab strip. Omit to\nappend at the end.",
+      "format": "int32",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "url": {
+      "description": "Destination URL. Defaults to `chrome://newtab` when omitted.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "session_id"
+  ],
+  "title": "TabCreateParams",
+  "type": "object"
+}

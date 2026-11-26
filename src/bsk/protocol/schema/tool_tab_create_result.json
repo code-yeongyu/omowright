@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "tab_id": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "url": {
+      "default": "",
+      "description": "Best-effort URL of the newly created tab. May be empty if Chrome\nhas not yet committed the navigation (e.g. pending load).",
+      "type": "string"
+    },
+    "window_id": {
+      "format": "int64",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tab_id",
+    "window_id"
+  ],
+  "title": "TabCreateResult",
+  "type": "object"
+}

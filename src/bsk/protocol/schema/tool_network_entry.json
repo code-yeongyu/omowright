@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "NetworkEntryKind": {
+      "oneOf": [
+        {
+          "const": "response",
+          "description": "A response was received (`Network.responseReceived`).",
+          "type": "string"
+        },
+        {
+          "const": "failure",
+          "description": "The request failed before completing (`Network.loadingFailed`).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "error_text": {
+      "description": "CDP failure reason (`failure` entries only).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind": {
+      "$ref": "#/definitions/NetworkEntryKind"
+    },
+    "method": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mime_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resource_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sequence": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "status": {
+      "description": "HTTP status code (`response` entries only).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "status_text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "timestamp": {
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "truncated": {
+      "default": false,
+      "type": "boolean"
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "sequence",
+    "kind"
+  ],
+  "title": "NetworkEntry",
+  "type": "object"
+}

@@ -51,7 +51,7 @@
     "test:cloak-profile": "bun test test/cloak-profile.test.ts test/cloak-profile.integration.test.ts",
     "typecheck": "bun check --no-script --no-pretty -p tsconfig.json",
     "typecheck:control": "bun scripts/typecheck-control.ts",
-    "check": "bun run typecheck:control && bun run typecheck && bun run lint && bun run fmt:check",
+    "check": "bun scripts/bsk-protocol.ts --check && bun run typecheck:control && bun run typecheck && bun run lint && bun run fmt:check",
     "lint": "oxlint --deny-warnings src bin bridge test scripts && bun scripts/lint-ratchet.ts",
     "lint:ratchet:update": "bun scripts/lint-ratchet.ts --update",
     "lint:fix": "oxlint --fix src bin bridge test scripts",

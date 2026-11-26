@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "WaitUntil": {
+      "description": "Page-lifecycle checkpoint a navigation should wait on.\n\nMapping to CDP `Page.lifecycleEvent` names:\n* `Load` → `load`\n* `DomContentLoaded` → `DOMContentLoaded`\n* `NetworkIdle` → `networkIdle`\n* `Commit` → `commit` (earliest event after the navigation actually\n  commits to a new document)",
+      "enum": [
+        "load",
+        "domcontentloaded",
+        "networkidle",
+        "commit"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "tab_id": {
+      "description": "Target tab. Defaults to the Agent Window's currently active tab.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "timeout_ms": {
+      "description": "Hard upper bound on the wait. Defaults to 30s.",
+      "format": "uint32",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "wait_until": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/WaitUntil"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Lifecycle phase to wait on. Defaults to [`WaitUntil::Load`]."
+    }
+  },
+  "required": [
+    "session_id"
+  ],
+  "title": "WaitForNavigationParams",
+  "type": "object"
+}

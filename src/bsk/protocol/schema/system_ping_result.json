@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "`system.ping` response payload.",
+  "properties": {
+    "pong": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "pong"
+  ],
+  "title": "PingResult",
+  "type": "object"
+}

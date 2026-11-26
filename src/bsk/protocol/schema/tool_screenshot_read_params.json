@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "capture_id": {
+      "type": "string"
+    },
+    "offset": {
+      "description": "Byte offset, allowing an interrupted chunk request to be retried.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "capture_id",
+    "offset"
+  ],
+  "title": "ScreenshotReadParams",
+  "type": "object"
+}

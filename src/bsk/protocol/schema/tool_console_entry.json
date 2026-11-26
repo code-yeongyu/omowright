@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ConsoleEntryKind": {
+      "enum": [
+        "console",
+        "exception",
+        "log"
+      ],
+      "type": "string"
+    },
+    "ConsoleStackFrame": {
+      "properties": {
+        "column": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "function_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "column": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "kind": {
+      "$ref": "#/definitions/ConsoleEntryKind"
+    },
+    "level": {
+      "type": "string"
+    },
+    "line": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sequence": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stack_trace": {
+      "items": {
+        "$ref": "#/definitions/ConsoleStackFrame"
+      },
+      "type": "array"
+    },
+    "text": {
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "truncated": {
+      "default": false,
+      "type": "boolean"
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "sequence",
+    "kind",
+    "level",
+    "text"
+  ],
+  "title": "ConsoleEntry",
+  "type": "object"
+}
