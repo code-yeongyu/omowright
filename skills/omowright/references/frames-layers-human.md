@@ -101,6 +101,12 @@ const result = await requestHuman(page, {
 if (result.outcome !== "continued") throw new Error(`handoff ${result.outcome}`);
 ```
 
+**IN AN EVAL CELL, DO NOT `await` THE HANDOFF.** A person takes longer than a
+cell, and an awaited handoff holds the kernel until they finish. Subscribe the
+harness watcher, start `requestHuman(...)` without `await`, write its outcome to
+the watched file in `.then`, and return; the page stays usable from other cells
+meanwhile. Pattern in `references/eval-kernel.md` ("Waits that outlast a cell").
+
 The call brings the window to the front, injects a shadow-DOM banner with your
 prompt and a Done button, then polls every `pollMs` for `until` or the button.
 Pass an `AbortSignal` as `signal` to cancel from your side. The banner is
