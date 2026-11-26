@@ -1,21 +1,28 @@
+import { runInNewContext } from "node:vm";
 import { parse } from "acorn";
 import type { AnyNode, Comment } from "acorn";
 import { analyzeScopes } from "../source-scope.ts";
 
 // Checks that test/skill-docs.test.ts applies to the js examples the package ships. Each example is parsed
 // as a module: text inside a comment or a string is never mistaken for code, and a call is read as a call
-// however it is laid out (#352, #362, #366).
+// however it is laid out (#352, #362, #366). They are heuristics sized for those examples, not a JavaScript
+// analysis: each comment below says what a check covers and what it leaves out, and the tables in
+// test/skill-docs.test.ts are the forms it is tested against.
 
 // Names an example may use without declaring them, by where the code runs.
-// The language: valid in the example and inside a function handed to the page.
+// The language: ECMAScript's own globals, read from a fresh realm so the list cannot go stale, plus what
+// Node, Bun and a page all provide. Valid in the example and inside a function handed to the page.
+function ecmascriptGlobals(): string[] {
+  const names: unknown = runInNewContext("Object.getOwnPropertyNames(globalThis)");
+  return Array.isArray(names) ? names.filter((name): name is string => typeof name === "string") : [];
+}
 const LANGUAGE_GLOBALS = new Set([
-  ..."globalThis undefined NaN Infinity Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp".split(
+  ...ecmascriptGlobals(),
+  ..."URL URLSearchParams TextEncoder TextDecoder AbortController AbortSignal fetch Headers Request Response".split(
     " ",
   ),
-  ..."Error TypeError RangeError AggregateError Promise Map Set WeakMap WeakSet Reflect Proxy Intl".split(" "),
-  ..."parseInt parseFloat isNaN structuredClone encodeURIComponent decodeURIComponent URL URLSearchParams".split(" "),
-  ..."TextEncoder TextDecoder AbortController AbortSignal fetch console performance crypto atob btoa".split(" "),
-  ..."setTimeout clearTimeout setInterval clearInterval queueMicrotask Uint8Array ArrayBuffer".split(" "),
+  ..."console performance crypto atob btoa structuredClone queueMicrotask Blob FormData Event EventTarget".split(" "),
+  ..."setTimeout clearTimeout setInterval clearInterval".split(" "),
 ]);
 // The host: Node or Bun, and the helpers of the eval kernel the skill is written for.
 const HOST_GLOBALS = new Set("Buffer process Bun tool print display env read write parallel log".split(" "));
@@ -77,7 +84,8 @@ function calleePath(callee: AnyNode): string | undefined {
       continue;
     }
     const name = memberName(node);
-    if (name === undefined) return undefined;
+    // A bracket string with a dot in it (`x["Bun.sleep"]`) is one property, not two steps of a path.
+    if (name === undefined || name.includes(".")) return undefined;
     segments.unshift(name);
     node = node.object;
   }
@@ -87,8 +95,8 @@ function calleePath(callee: AnyNode): string | undefined {
   return segments.join(".");
 }
 
-// The number an argument is written as: a numeric literal, with a sign, or arithmetic on such numbers
-// (`60 * 1000`). Undefined for anything that is only known at run time.
+// The number an argument is written as: a numeric literal, with a sign, or `* / % ** + -` on such numbers
+// (`60 * 1000`). Undefined for anything else, including what is only known at run time.
 function numericValue(node: AnyNode | undefined): number | undefined {
   if (node?.type === "UnaryExpression" && (node.operator === "+" || node.operator === "-")) {
     const operand = numericValue(node.argument);
@@ -102,15 +110,18 @@ function numericValue(node: AnyNode | undefined): number | undefined {
     if (node.operator === "*") return left * right;
     if (node.operator === "+") return left + right;
     if (node.operator === "-") return left - right;
-    return node.operator === "/" ? left / right : undefined;
+    if (node.operator === "/") return left / right;
+    if (node.operator === "%") return left % right;
+    return node.operator === "**" ? left ** right : undefined;
   }
   if (node?.type !== "Literal") return undefined;
   if (typeof node.value === "number") return node.value;
   return typeof node.value === "bigint" ? Number(node.value) : undefined;
 }
 
-// A timer waits on a clock when its delay is a positive number, or when its callback is a bare name (it
-// only settles a promise) and the delay is anything but a written zero. `setTimeout(ms)` is the promise form.
+// A timer is reported when its delay is written as a positive number (`numericValue`), or when its
+// callback is a bare name (it only settles a promise) and a delay is given that is not written as a number.
+// A delay written as zero or less is not a wait. `setTimeout(ms)`, one argument, is the promise form.
 function timerWaits(parts: readonly AnyNode[]) {
   const [first, second] = parts;
   if (second === undefined) return (numericValue(first) ?? 0) > 0;
@@ -118,15 +129,16 @@ function timerWaits(parts: readonly AnyNode[]) {
   return delay === undefined ? first?.type === "Identifier" : delay > 0;
 }
 
-// Whether a call waits on a clock. A sleep does unless its delay is a written zero, which only yields.
-// `Atomics.wait` waits on shared memory; it is a clock wait only when it carries a timeout, its 4th argument.
+// Whether a call waits on a clock. A sleep does unless its delay is written as zero, which only yields.
+// `Atomics.wait` waits on shared memory; it is a clock wait only when it carries a timeout, its 4th
+// argument, that is not written as zero.
 function waitsOnAClock(callee: AnyNode, parts: readonly AnyNode[]) {
   const path = calleePath(callee);
-  const method = memberName(callee);
+  const method = memberName(callee.type === "ChainExpression" ? callee.expression : callee);
   if ((method !== undefined && SLEEP_METHODS.has(method)) || (path !== undefined && SLEEP_PATHS.has(path))) {
     return numericValue(parts[0]) !== 0;
   }
-  if (path === FUTEX_PATH) return parts.length >= 4;
+  if (path === FUTEX_PATH) return parts.length >= 4 && numericValue(parts[3]) !== 0;
   return path !== undefined && TIMER_PATHS.has(path) && timerWaits(parts);
 }
 
@@ -140,15 +152,17 @@ export function parseFailure(example: string): string | undefined {
 }
 
 /**
- * The lines of one example that wait on a clock. A line is reported for a call, written with dots or with
- * strings in brackets and with or without a leading `globalThis`, `window` or `self`, to:
+ * The lines of one example that wait on a clock. A line is reported for a call whose callee is written out
+ * (dots, or strings in brackets; an optional chain and a leading `globalThis`, `window` or `self` are
+ * looked through) as:
  * - `sleep`, `Bun.sleep`, `Bun.sleepSync`, `scheduler.wait`, or a method named `waitForTimeout` on any
- *   receiver, unless its delay is a written zero;
- * - `Atomics.wait` with a timeout (a fourth argument);
- * - `setTimeout` or `setInterval` that `timerWaits` accepts.
+ *   receiver, unless its first argument is written as zero;
+ * - `Atomics.wait` with a fourth argument that is not written as zero;
+ * - `setTimeout` or `setInterval` that `timerWaits` reports.
  * Outside this check: an alias of one of these functions (an import under another name, `.call`, `.apply`,
- * `.bind`), a name built at run time, and a timer with an inline callback whose delay is not written as a
- * number. An example that does not parse yields one entry that says so, not its lines.
+ * `.bind`, a variable), a name built at run time, a timer with an inline callback whose delay is not
+ * written as a number, and any other way to wait. An example that does not parse yields one entry that
+ * says so, not its lines.
  */
 export function fixedDelays(example: string): string[] {
   const failure = parseFailure(example);
@@ -174,15 +188,16 @@ function assignedOnGlobalThis(root: AnyNode) {
   return names;
 }
 
-// Names listed in `// given: a, b` line comments. Only the comma-separated names count; words after them
-// are a note for the reader. The comments come from the parser, so the same text inside a string is not one.
+// Names listed in `// given: a, b` line comments. Only the comma-separated identifiers count; words after
+// them are a note for the reader. The comments come from the parser, so the same text inside a string is not one.
+const IDENTIFIER = String.raw`[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*`;
+const GIVEN = new RegExp(String.raw`^\s*given:\s*(${IDENTIFIER}(?:\s*,\s*${IDENTIFIER})*)`, "u");
 function givenNames(example: string) {
   const comments: Comment[] = [];
   parse(example, { ecmaVersion: "latest", sourceType: "module", onComment: comments });
   const names: string[] = [];
   for (const comment of comments) {
-    const list =
-      comment.type === "Line" ? /^\s*given:\s*([\w$]+(?:\s*,\s*[\w$]+)*)/.exec(comment.value)?.[1] : undefined;
+    const list = comment.type === "Line" ? GIVEN.exec(comment.value)?.[1] : undefined;
     for (const name of list?.split(",") ?? []) names.push(name.trim());
   }
   return names;
@@ -192,16 +207,22 @@ function isFunction(node: AnyNode) {
   return node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression";
 }
 
-// Source ranges of the functions handed to the page (an argument of one of PAGE_CALLS, written inline or
-// declared in the same example and passed by name): their bodies run in the browser.
+// Source ranges of the functions handed to the page: an argument of one of PAGE_CALLS, written inline, or
+// passed by a name the example declares as a function exactly once (a name declared twice is not resolved,
+// since this check does not follow scopes). Their bodies run in the browser.
 function pageFunctionRanges(root: AnyNode) {
-  const declared = new Map<string, readonly [start: number, end: number]>();
+  const found = new Map<string, Array<readonly [start: number, end: number]>>();
+  const note = (name: string, range: readonly [number, number]) => found.set(name, [...(found.get(name) ?? []), range]);
   everyNode(root, (node) => {
-    if (node.type === "FunctionDeclaration" && node.id !== null) declared.set(node.id.name, [node.start, node.end]);
+    if (node.type === "FunctionDeclaration" && node.id !== null) note(node.id.name, [node.start, node.end]);
     if (node.type === "VariableDeclarator" && node.id.type === "Identifier" && node.init && isFunction(node.init)) {
-      declared.set(node.id.name, [node.init.start, node.init.end]);
+      note(node.id.name, [node.init.start, node.init.end]);
     }
   });
+  const declaredOnce = (name: string) => {
+    const ranges = found.get(name) ?? [];
+    return ranges.length === 1 ? ranges[0] : undefined;
+  };
   const ranges: Array<readonly [start: number, end: number]> = [];
   everyNode(root, (node) => {
     if (node.type !== "CallExpression") return;
@@ -209,7 +230,7 @@ function pageFunctionRanges(root: AnyNode) {
     if (method === undefined || !PAGE_CALLS.has(method)) return;
     for (const argument of node.arguments) {
       if (isFunction(argument)) ranges.push([argument.start, argument.end]);
-      const byName = argument.type === "Identifier" ? declared.get(argument.name) : undefined;
+      const byName = argument.type === "Identifier" ? declaredOnce(argument.name) : undefined;
       if (byName !== undefined) ranges.push(byName);
     }
   });
@@ -218,13 +239,15 @@ function pageFunctionRanges(root: AnyNode) {
 
 /**
  * The names the examples of one document use without accounting for them, in document order. An example
- * runs as written in an eval cell, so each free name must be one of: declared in this example or an earlier
- * one of the document (a declaration, an import, an assignment on `globalThis`); a language global; a host
- * global, outside a function handed to the page; a page global, inside one (written inline as an argument
- * of `evaluate`, `waitForFunction` and the like, or declared in the same example and passed by name); or
- * listed in a `// given: a, b` line comment, which is how an example names what its reader supplies. A given name holds for the rest of the
- * document, as a declaration does. Not modelled: a function handed to the page cannot see the example's own
- * variables, and code passed to the page as a string is not read. Examples that do not parse are skipped here.
+ * runs as written in an eval cell, so each free name must be one of:
+ * - declared at the top level of this example or an earlier one of the document (a declaration, an import),
+ *   or assigned on `globalThis` anywhere in one;
+ * - a language global (`LANGUAGE_GLOBALS`);
+ * - a host global, outside a function handed to the page, or a page global, inside one (`pageFunctionRanges`);
+ * - listed in a `// given: a, b` line comment, which is how an example names what its reader supplies.
+ * A declared or given name holds for the rest of the document. Not modelled: whether a declaration has run
+ * by the time a name is used; that a function handed to the page cannot see the example's own variables;
+ * code passed to the page as a string. Examples that do not parse are skipped here.
  */
 export function unaccountedNames(examples: readonly string[]): string[] {
   const known = new Set<string>();
