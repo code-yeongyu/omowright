@@ -109,6 +109,9 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
     "await window.scheduler.wait(1000);",
     "await new Promise((ok) => setTimeout(() => ok(), 60 * 1000));",
     "Atomics.wait(view, 0, 0, 500);",
+    "setInterval(() => step(), 2 ** 3);",
+    "setTimeout(() => step(), 5 % 3);",
+    "(page?.waitForTimeout)(50);",
   ];
   const waitsOnAState = [
     "await page.waitForFunction(() => window.ready === true, undefined, { timeout: 5000 });",
@@ -121,6 +124,9 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
     "await Bun.sleep(0);",
     "Atomics.wait(view, 0, 0);",
     "await timers.setTimeout(delayMs);",
+    'globalThis["Bun.sleep"](2);',
+    "Atomics.wait(view, 0, 0, 0);",
+    "setTimeout(next, -1);",
     "await page.waitForFunction(() => window.ready); // never use sleep(500)",
     'await page.waitForFunction(() => document.body.innerText.includes("setTimeout(done, 1000)"));',
     "const timers = { sleep: 500, setTimeout: 1000 };",
@@ -169,6 +175,10 @@ test("the name check reports what an example uses without accounting for it", ()
     ]),
     [],
   );
+  assert.deepEqual(unaccountedNames(["// given: π\nconsole.log(π, SyntaxError.name, EvalError.name);"]), []);
+  // A name declared as a function twice is not resolved to either, so neither body counts as page code.
+  const twice = "function readIt() { return document.title; }\n{ function readIt() { return process.pid; } }";
+  assert.deepEqual(unaccountedNames([`// given: page\n${twice}\nawait page.evaluate(readIt);`]), ["document"]);
 });
 
 const docs = await listDocs();
