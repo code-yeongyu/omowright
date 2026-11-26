@@ -43,10 +43,11 @@ async function start(browserPath: string, release: Release[]) {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
   });
-  release.push(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
+  // Two steps, so a failure to drop the open connections cannot keep the listener from being closed.
+  release.push(
+    () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  );
+  release.push(() => server.closeAllConnections());
   const address = server.address();
   assert.ok(address !== null && typeof address === "object", "the fixture server has no TCP port");
   const profile = mkdtempSync(path.join(tmpdir(), "omowright-emulate-nav-test-"));
