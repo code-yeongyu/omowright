@@ -49,8 +49,14 @@ The sync result carries `context_id` and, when the daemon sends one,
 good for one action. `expect` is a list of literal facts the extension checks
 right before the input, for example
 `[{ target: "#total", field: "text", equals: "3" }]` (`field` is `text`,
-`value`, `checked`, `attribute` or `exists`); a false fact refuses the action
-with `reason: "precondition_failed"` and nothing is sent to the page.
+`value`, `checked`, `attribute` or `exists`). A false fact refuses the action
+with `permission_denied`, a message starting `Precondition failed:` that names
+the fact (for example `Precondition failed: #total text`), and
+`effect_state: "none"`: nothing is sent to the page. `data.reason` depends on
+the policy: `"precondition_failed"` under `target`, and
+`"cooperation_sync_required"` under `strict`, the same reason a stale context
+gets. Under strict, tell the two apart by the message, then sync and decide
+again from the live page.
 
 ```js
 const { connectBrowserSkill } = await import("omowright");
