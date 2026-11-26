@@ -51,9 +51,8 @@ per-user `bsk-daemon-<hash>` scheduled task that runs `bsk daemon start
 --foreground` under `conhost.exe --headless`, so no console window opens.
 It never falls back to a headless browser: when no
 extension is connected it throws `no_browser_connected` and `bskDoctor()`
-tells you the one step that is missing. It also refuses an extension older than
-0.4.1 with `extension_outdated`: before 0.4.0 there is no shared control
-(`tool.cooperate`), and 0.4.0 puts each task's tabs into a "BrowserSkill"
+tells you the one step that is missing. It also refuses extension 0.4.0 with
+`extension_outdated`: that release puts each task's tabs into a "BrowserSkill"
 tab group the browser saves and syncs, so the group outlives the task. With no
 `browser` named, an up-to-date connected browser is picked instead; otherwise
 the user updates the extension to 0.4.1 or later and deletes any saved
