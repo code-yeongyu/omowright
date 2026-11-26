@@ -139,18 +139,29 @@ export async function reapOrphanedBrowser(profileDir: string | null | undefined)
   try {
     process.kill(pid, "SIGTERM");
   } catch {}
-  if (!(await processGone(pid, TERM_GRACE_MS))) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {}
+  if (!(await processGone(pid, TERM_GRACE_MS)) && !(await processIsDefunct(pid))) {
+    // The pid may have passed to another process during the grace window: only what is still the recorded
+    // browser is killed. `false` means it is gone or the pid is someone else's now, and the reap is done.
+    const stillTheBrowser = await sameProcessAlive(pid, start);
+    if (stillTheBrowser === true) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
     // SIGKILL lands at once, but the process leaves the table only when its parent collects it. Wait for
     // that, bounded, so the profile is free before the caller launches on it (#361). What is still listed
     // after the bound is either an entry nothing collects (a zombie under an init that does not reap), which
-    // holds no files, or a process that is still running. Only the first is safe to pass: for the second the
+    // holds no files, or a process that is still running. Only the first is passed: for the second the
     // caller is told and the pidfile stays, so the next launch tries again (#369).
-    if (!(await processGone(pid, KILL_SETTLE_MS)) && !(await processIsDefunct(pid)) && isPidAlive(pid)) {
+    const stillRunning =
+      stillTheBrowser !== false &&
+      !(await processGone(pid, KILL_SETTLE_MS)) &&
+      !(await processIsDefunct(pid)) &&
+      isPidAlive(pid);
+    if (stillRunning) {
+      const sent = stillTheBrowser === true ? "SIGTERM and SIGKILL" : "SIGTERM";
       throw new Error(
-        `omowright: the orphaned browser (pid ${pid}) is still running ${KILL_SETTLE_MS} ms after SIGKILL; its profile ${profileDir} is not reused`,
+        `omowright: the orphaned browser (pid ${pid}) is still running after ${sent}; its profile ${profileDir} is not reused`,
       );
     }
   }
