@@ -148,10 +148,13 @@ test("the name check reports what an example uses without accounting for it", ()
   );
   assert.deepEqual(unaccountedNames(["for (const item of items) console.log(item.id);"]), ["items"]);
   assert.deepEqual(unaccountedNames(['const label = "// given: missing";\nmissing(label);']), ["missing"]);
-  assert.deepEqual(unaccountedNames(["// given: page\nconsole.log(document.title, await page.evaluate(() => document.title));"]), [
-    "document",
+  assert.deepEqual(
+    unaccountedNames(["// given: page\nconsole.log(document.title, await page.evaluate(() => document.title));"]),
+    ["document"],
+  );
+  assert.deepEqual(unaccountedNames(["// given: page\nawait page.waitForFunction(() => process.env.READY);"]), [
+    "process",
   ]);
-  assert.deepEqual(unaccountedNames(["// given: page\nawait page.waitForFunction(() => process.env.READY);"]), ["process"]);
 });
 
 const docs = await listDocs();

@@ -23,19 +23,23 @@ function skipReason() {
 
 // Platform contract (#369): an exited process its parent has not collected still answers kill(pid, 0). It
 // holds no files, so the orphan reap has to tell it apart from a browser that is still running.
-test("a process that exited without being collected is defunct; a running one is not", { skip: skipReason() }, async () => {
-  const holder = spawn("python3", ["-c", HOLDER], { stdio: ["pipe", "pipe", "inherit"] });
-  const exited = once(holder, "exit");
-  try {
-    const [line] = await once(holder.stdout, "data");
-    const child = Number(String(line).trim());
-    assert.ok(Number.isInteger(child) && child > 0, `the holder printed no child pid: ${String(line)}`);
-    assert.ok(holder.pid !== undefined, "the holder process has no pid");
+test(
+  "a process that exited without being collected is defunct; a running one is not",
+  { skip: skipReason() },
+  async () => {
+    const holder = spawn("python3", ["-c", HOLDER], { stdio: ["pipe", "pipe", "inherit"] });
+    const exited = once(holder, "exit");
+    try {
+      const [line] = await once(holder.stdout, "data");
+      const child = Number(String(line).trim());
+      assert.ok(Number.isInteger(child) && child > 0, `the holder printed no child pid: ${String(line)}`);
+      assert.ok(holder.pid !== undefined, "the holder process has no pid");
 
-    assert.equal(await processIsDefunct(holder.pid), false);
-    assert.equal(await processIsDefunct(child), true);
-  } finally {
-    holder.stdin.end();
-    await exited;
-  }
-});
+      assert.equal(await processIsDefunct(holder.pid), false);
+      assert.equal(await processIsDefunct(child), true);
+    } finally {
+      holder.stdin.end();
+      await exited;
+    }
+  },
+);

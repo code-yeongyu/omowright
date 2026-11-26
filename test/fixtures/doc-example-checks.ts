@@ -9,7 +9,9 @@ import { analyzeScopes } from "../source-scope.ts";
 // Names an example may use without declaring them, by where the code runs.
 // The language: valid in the example and inside a function handed to the page.
 const LANGUAGE_GLOBALS = new Set([
-  ..."globalThis undefined NaN Infinity Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp".split(" "),
+  ..."globalThis undefined NaN Infinity Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp".split(
+    " ",
+  ),
   ..."Error TypeError RangeError AggregateError Promise Map Set WeakMap WeakSet Reflect Proxy Intl".split(" "),
   ..."parseInt parseFloat isNaN structuredClone encodeURIComponent decodeURIComponent URL URLSearchParams".split(" "),
   ..."TextEncoder TextDecoder AbortController AbortSignal fetch console performance crypto atob btoa".split(" "),
@@ -21,7 +23,9 @@ const HOST_GLOBALS = new Set("Buffer process Bun tool print display env read wri
 const PAGE_GLOBALS = new Set([
   ..."window document location navigator history localStorage sessionStorage innerWidth innerHeight".split(" "),
   ..."scrollX scrollY scrollTo scrollBy getComputedStyle matchMedia MutationObserver IntersectionObserver".split(" "),
-  ..."ResizeObserver requestAnimationFrame HTMLElement Element Node Event CustomEvent KeyboardEvent MouseEvent CSS".split(" "),
+  ..."ResizeObserver requestAnimationFrame HTMLElement Element Node Event CustomEvent KeyboardEvent MouseEvent CSS".split(
+    " ",
+  ),
 ]);
 const PAGE_CALLS = new Set(["evaluate", "evaluateHandle", "waitForFunction", "addInitScript"]);
 
@@ -136,7 +140,8 @@ function givenNames(example: string) {
   parse(example, { ecmaVersion: "latest", sourceType: "module", onComment: comments });
   const names: string[] = [];
   for (const comment of comments) {
-    const list = comment.type === "Line" ? /^\s*given:\s*([\w$]+(?:\s*,\s*[\w$]+)*)/.exec(comment.value)?.[1] : undefined;
+    const list =
+      comment.type === "Line" ? /^\s*given:\s*([\w$]+(?:\s*,\s*[\w$]+)*)/.exec(comment.value)?.[1] : undefined;
     for (const name of list?.split(",") ?? []) names.push(name.trim());
   }
   return names;
