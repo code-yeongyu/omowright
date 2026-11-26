@@ -4,8 +4,10 @@ const REMOVED_ANYWHERE_FROM_LENGTH = 4;
 /**
  * Strips a value being entered (fill/type) out of the error its failure raised, so a secret typed
  * into a form never reaches an agent transcript (#335). The layers below (a CDP transport, the
- * BrowserSkill daemon) may quote the command they refused, raw or JSON-escaped, in the message,
- * the stack, a `data` payload or a cause of any type; each is rewritten in place down the cause chain.
+ * BrowserSkill daemon) may quote the command they refused, raw or JSON-escaped, anywhere in what they
+ * throw: the message, the stack, a cause of any type, an `AggregateError`'s members, or a field of
+ * their own (`data`, `request`). Every own property of every error reachable from the one raised is
+ * rewritten in place, so no list of known error shapes has to keep up with them (#362).
  * A value of four characters or more is removed even where it touches a letter or a digit
  * (`field7<value>`); a shorter one is removed only as a whole token, because taking one or two
  * letters out of every word would leave the message unreadable (fill("a") must keep "locator").
@@ -36,15 +38,33 @@ export function redactValue(error: unknown, value: string): unknown {
     }
   };
 
-  if (!(error instanceof Error)) return scrubPayload(error);
   const seen = new Set<Error>();
-  for (let link: unknown = error; link instanceof Error && !seen.has(link); link = link.cause) {
+  // An Error keeps its identity (callers match on its class) and is rewritten in place; so is each
+  // Error in a list, which is how an AggregateError holds its members.
+  function scrubMember(member: unknown): unknown {
+    if (member instanceof Error) {
+      scrubError(member);
+      return member;
+    }
+    if (Array.isArray(member)) {
+      const items: readonly unknown[] = member;
+      if (items.some((item) => item instanceof Error)) return items.map((item) => scrubMember(item));
+    }
+    return scrubPayload(member);
+  }
+  function scrubError(link: Error) {
+    if (seen.has(link)) return;
     seen.add(link);
     link.message = scrub(link.message);
     if (link.stack !== undefined) link.stack = scrub(link.stack);
-    const data: unknown = Reflect.get(link, "data");
-    if (data !== undefined) Reflect.set(link, "data", scrubPayload(data));
-    if (link.cause !== undefined && !(link.cause instanceof Error)) link.cause = scrubPayload(link.cause);
+    for (const key of Reflect.ownKeys(link)) {
+      if (key === "message" || key === "stack") continue;
+      const descriptor = Reflect.getOwnPropertyDescriptor(link, key);
+      if (descriptor === undefined || !("value" in descriptor)) continue;
+      const value: unknown = scrubMember(descriptor.value);
+      if (!Reflect.set(link, key, value)) Reflect.defineProperty(link, key, { ...descriptor, value });
+    }
   }
-  return error;
+
+  return scrubMember(error);
 }
