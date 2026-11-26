@@ -1,9 +1,12 @@
 /**
  * Scroll-driven collection over a network snoop (see ./network-snoop.ts).
  */
+import { JSON_MIME } from "./network-snoop.ts";
+
 export interface ScrollPage {
   viewportSize(): { width: number; height: number } | null | undefined;
   evaluate<T>(pageFunction: () => T): Promise<T>;
+  evaluate<T, A>(pageFunction: (arg: A) => T | PromiseLike<T>, arg: A): Promise<T>;
   mouse: {
     move(x: number, y: number): Promise<unknown>;
     wheel(deltaX: number, deltaY: number): Promise<unknown>;
@@ -12,9 +15,17 @@ export interface ScrollPage {
 
 export interface JsonSnoop {
   popJson(): Iterable<unknown>;
+  /** Resolves on the next buffered entry the predicate accepts; rejects after timeoutMs. */
+  waitFor(match: (entry: { mimeType: string | null }) => unknown, options: { timeoutMs: number }): Promise<unknown>;
 }
 
 export type ScrollMode = "wheel" | "end";
+
+/** The timer that bounds each round; defaults to the global setTimeout/clearTimeout. */
+export interface ScrollClock {
+  setTimeout(callback: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
 
 export interface CollectWhileScrollingOptions {
   minItems?: number;
@@ -22,6 +33,7 @@ export interface CollectWhileScrollingOptions {
   extract?: (json: unknown) => Iterable<unknown>;
   scroll?: ScrollMode;
   settleMs?: number;
+  clock?: ScrollClock;
 }
 
 export interface CollectWhileScrollingResult {
@@ -65,6 +77,7 @@ export async function* collectWhileScrolling(
     scroll = "wheel",
     settleMs = 800,
   } = options;
+  const clock: ScrollClock = options.clock ?? globalThis;
   if (scroll !== "wheel" && scroll !== "end") throw new TypeError(`Unknown scroll mode: ${String(scroll)}`);
 
   let rounds = 0;
@@ -105,9 +118,45 @@ export async function* collectWhileScrolling(
     }
     lastHeight = height;
 
+    // The round ends on the first of: a JSON response buffered in the snoop, scrollHeight growing past
+    // the height just measured, or the settleMs timer. Both signals are subscribed before the scroll;
+    // a signal that fails or gives up falls back to the timer, which stays the round's only bound.
+    let timer: unknown;
+    const deadline = new Promise<void>((resolve) => {
+      timer = clock.setTimeout(resolve, settleMs);
+    });
+    const response = snoop
+      .waitFor((entry) => JSON_MIME.test(String(entry.mimeType ?? "")), { timeoutMs: settleMs })
+      .catch(() => deadline);
+    const growth = page
+      .evaluate(
+        ({ baseline, cleanupMs }) =>
+          new Promise<boolean>((resolve) => {
+            const element = document.scrollingElement;
+            if (!element) throw new TypeError("Cannot read properties of null (reading 'scrollHeight')");
+            const finish = (grew: boolean) => {
+              observer.disconnect();
+              clearTimeout(cleanup);
+              resolve(grew);
+            };
+            const observer = new ResizeObserver(() => {
+              if (element.scrollHeight > baseline) finish(true);
+            });
+            // Releases the observer once the host timer has ended the round; it never ends a round itself.
+            const cleanup = setTimeout(() => finish(false), cleanupMs);
+            observer.observe(element);
+            if (element.scrollHeight > baseline) finish(true);
+          }),
+        { baseline: height, cleanupMs: settleMs },
+      )
+      .then(
+        (grew) => (grew ? undefined : deadline),
+        () => deadline,
+      );
     await scrollOnce(page, scroll);
     rounds += 1;
-    await new Promise((resolve) => setTimeout(resolve, settleMs));
+    await Promise.race([deadline, response, growth]);
+    clock.clearTimeout(timer);
   }
 
   return { rounds, total, stoppedBecause };

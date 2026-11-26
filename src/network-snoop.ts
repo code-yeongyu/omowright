@@ -50,7 +50,7 @@ interface SnoopWaiter {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const JSON_MIME = /^application\/json\s*(;|$)|\+json\s*(;|$)/i;
+export const JSON_MIME = /^application\/json\s*(;|$)|\+json\s*(;|$)/i;
 
 function matchesText(value: unknown, pattern: unknown) {
   if (pattern === undefined) return true;

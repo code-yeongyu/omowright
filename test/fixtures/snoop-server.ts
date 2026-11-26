@@ -53,14 +53,25 @@ export interface SnoopServer {
   port: number;
   itemsPerPage: number;
   maxPage: number;
+  /** Resolves once the request for `holdPage` has arrived and is being held. */
+  held: Promise<void>;
+  /** Sends the held `holdPage` response. */
+  release(): void;
   close(): Promise<void>;
+}
+
+export interface SnoopServerOptions {
+  /** Hold the /api/items response for this page until release() is called. */
+  holdPage?: number;
 }
 
 function itemsForPage(page: number): { id: number }[] {
   return Array.from({ length: PAGE_SIZE }, (_unused, index) => ({ id: (page - 1) * PAGE_SIZE + index + 1 }));
 }
 
-export async function startSnoopServer(): Promise<SnoopServer> {
+export async function startSnoopServer({ holdPage }: SnoopServerOptions = {}): Promise<SnoopServer> {
+  const hold = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (url.pathname === "/") {
@@ -70,8 +81,16 @@ export async function startSnoopServer(): Promise<SnoopServer> {
     }
     if (url.pathname === "/api/items") {
       const page = Math.min(MAX_PAGE, Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1));
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify(itemsForPage(page)));
+      const send = () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(itemsForPage(page)));
+      };
+      if (page === holdPage) {
+        void release.promise.then(send);
+        hold.resolve();
+        return;
+      }
+      send();
       return;
     }
     if (url.pathname === "/api/click") {
@@ -92,6 +111,8 @@ export async function startSnoopServer(): Promise<SnoopServer> {
     port,
     itemsPerPage: PAGE_SIZE,
     maxPage: MAX_PAGE,
+    held: hold.promise,
+    release: () => release.resolve(),
     async close() {
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
