@@ -3,7 +3,7 @@ import { readProperty } from "../read-property.ts";
 import { findBskBinary } from "./daemon-info.ts";
 import { BskIpcClient } from "./ipc-client.ts";
 import type { BskClient } from "./ipc-client.ts";
-import { isOutdatedExtension, listBrowsers, outdatedExtensionStep } from "./connect.ts";
+import { isTabGroupingExtension, listBrowsers, TAB_GROUPING_EXTENSION_STEP } from "./connect.ts";
 import {
   catalogBrowsers,
   externalExtensionEntry,
@@ -258,7 +258,7 @@ function nextStepFor({
   primary: chosen,
 }: NextStepInput): string | null {
   if (browsersConnected.length > 0)
-    return browsersConnected.every(isOutdatedExtension) ? outdatedExtensionStep(browsersConnected[0]) : null;
+    return browsersConnected.every(isTabGroupingExtension) ? TAB_GROUPING_EXTENSION_STEP : null;
   if (!cli.installed) return "Install the bsk CLI (bskOnboard() runs the official installer).";
   if (!daemon.running) return daemonStep(daemon);
   if (browsers.length === 0 && !chosen) return NO_BROWSER_STEP;
@@ -298,7 +298,7 @@ export async function bskDoctor({
     probeSignals,
     now,
   });
-  const outdatedExtensions = browsersConnected.filter(isOutdatedExtension);
+  const outdatedExtensions = browsersConnected.filter(isTabGroupingExtension);
   const report: BskDoctorReport = {
     cli,
     daemon,
@@ -380,15 +380,14 @@ export async function bskOnboard({
     if (waitForBrowserMs === 0) break;
   }
   daemon = { ...daemon, browsers: browsersConnected };
-  // An installed outdated extension needs the user to update it, not another registration: see bskDoctor.
-  const outdatedExtensions = browsersConnected.filter(isOutdatedExtension);
+  // An installed 0.4.0 extension needs the user to update it, not another registration: see bskDoctor.
+  const outdatedExtensions = browsersConnected.filter(isTabGroupingExtension);
   const ready = browsersConnected.length > outdatedExtensions.length;
-  const updateStep = ready ? null : outdatedExtensionStep(outdatedExtensions[0]);
-  if (updateStep) {
-    humanStep = updateStep;
+  if (!ready && outdatedExtensions.length > 0) {
+    humanStep = TAB_GROUPING_EXTENSION_STEP;
     onHumanStep({
       browser: readProperty(outdatedExtensions[0], "browser_name"),
-      step: updateStep,
+      step: humanStep,
       registered: true,
       needsRestart: false,
     });

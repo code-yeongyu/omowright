@@ -424,57 +424,47 @@ test("connectBrowserSkill sends a browser name as the instance id of the one con
   );
 });
 
-// Extensions before 0.4.0 have no tool.cooperate, which every gated action needs (shared control arrived in 0.4.0).
 // BrowserSkill extension 0.4.0 put every task tab into a native "BrowserSkill" tab group; Chrome saves and syncs those
 // groups, so they stay in the user's own browser after the task ends (upstream removed the feature in 0.4.1).
-for (const { version, why } of [
-  { version: "0.4.0", why: /tab group/i },
-  { version: "0.3.0", why: /tool\.cooperate/ },
-]) {
-  test(`connectBrowserSkill never starts a session on the outdated BrowserSkill extension ${version}`, async () => {
-    const old = { instance_id: "old1", browser_name: "chrome", label: "work", extension_version: version };
-    const current = { instance_id: "new1", browser_name: "edge", extension_version: "0.4.2" };
-    const start = (browsers: object[], browser: string | undefined) => {
-      const client = stubClient({
-        "system.status": { browsers },
-        "session.start": (params: StubParams) => ({
-          session_id: "s",
-          browser_instance_id: params["browser_instance_id"],
-        }),
-      });
-      return { client, started: connectBrowserSkill({ client, browser }) };
-    };
+test("connectBrowserSkill never starts a session on the tab-grouping BrowserSkill extension 0.4.0", async () => {
+  const old = { instance_id: "old1", browser_name: "chrome", label: "work", extension_version: "0.4.0" };
+  const current = { instance_id: "new1", browser_name: "edge", extension_version: "0.4.2" };
+  const start = (browsers: object[], browser: string | undefined) => {
+    const client = stubClient({
+      "system.status": { browsers },
+      "session.start": (params: StubParams) => ({
+        session_id: "s",
+        browser_instance_id: params["browser_instance_id"],
+      }),
+    });
+    return { client, started: connectBrowserSkill({ client, browser }) };
+  };
 
-    for (const browser of [undefined, "old1", "chrome", "work"]) {
-      const { client, started } = start([old], browser);
-      await assert.rejects(started, (err) => {
-        assert.equal(field(err, "code"), "extension_outdated");
-        assert.match(String(field(err, "message")), new RegExp(version.replaceAll(".", "\\.")));
-        assert.match(String(field(err, "message")), why);
-        assert.match(String(field(err, "message")), /Update the BrowserSkill extension to 0\.4\.1 or later/);
-        return true;
-      });
-      assert.equal(
-        client.calls.some((c) => c.method === "session.start"),
-        false,
-        `browser=${browser}`,
-      );
-    }
-
-    const { client, started } = start([old, current], undefined);
-    await started;
+  for (const browser of [undefined, "old1", "chrome", "work"]) {
+    const { client, started } = start([old], browser);
+    await assert.rejects(started, (err) => {
+      assert.equal(field(err, "code"), "extension_outdated");
+      assert.match(String(field(err, "message")), /0\.4\.0/);
+      assert.match(String(field(err, "message")), /tab group/i);
+      return true;
+    });
     assert.equal(
-      client.calls.find((c) => c.method === "session.start")?.params["browser_instance_id"],
-      "new1",
-      "with no browser named, the up-to-date extension is chosen",
+      client.calls.some((c) => c.method === "session.start"),
+      false,
+      `browser=${browser}`,
     );
+  }
 
-    const alone = start([current], "new1");
-    await alone.started;
-    assert.equal(
-      alone.client.calls.some((c) => c.method === "session.start"),
-      true,
-      "a current extension connects",
-    );
-  });
-}
+  const { client, started } = start([old, current], undefined);
+  await started;
+  assert.equal(
+    client.calls.find((c) => c.method === "session.start")?.params["browser_instance_id"],
+    "new1",
+    "with no browser named, the up-to-date extension is chosen",
+  );
+
+  // A 0.3.x extension has no shared control but runs actions without a context (measured on 0.3.2): it connects.
+  const legacy = start([{ instance_id: "old3", browser_name: "chrome", extension_version: "0.3.2" }], "old3");
+  await legacy.started;
+  assert.equal(legacy.client.calls.find((c) => c.method === "session.start")?.params["browser_instance_id"], "old3");
+});
