@@ -115,8 +115,9 @@ test("a cooperate sync's context and dependencies reach every action the extensi
   await session.cooperate("wait", { timeoutMs: 25_000, tabId: 7 });
   assert.deepEqual(lastCall(client).params, { session_id: "abcd", action: "wait", tab_id: 7, timeout_ms: 25_000 });
 
-  const shared = { context: contextIdOf(synced), dependsOn: ["@e2"] };
-  const bound = { context_id: "ctx-1", depends_on: ["@e2"] };
+  const expect = [{ target: "#total", field: "text", equals: "3" }] as const;
+  const shared = { context: contextIdOf(synced), observation: "obs-1", expect, dependsOn: ["@e2"] };
+  const bound = { context_id: "ctx-1", observation_id: "obs-1", expect, depends_on: ["@e2"] };
   const actions: Array<[string, () => unknown]> = [
     ["tool.navigate", () => session.navigate("https://example.com", shared)],
     ["tool.navigate_back", () => session.back(shared)],
@@ -138,6 +139,7 @@ test("a cooperate sync's context and dependencies reach every action the extensi
     ["tool.tab_close", () => session.tabClose(7, shared)],
     ["tool.window_resize", () => session.resize(800, 600, shared)],
     ["tool.emulate", () => session.emulate({ off: true, ...shared })],
+    ["tool.drag", () => session.drag({ selector: "#a" }, { target: { selector: "#b" }, ...shared })],
   ];
   for (const [method, act] of actions) {
     await act();
@@ -146,7 +148,8 @@ test("a cooperate sync's context and dependencies reach every action the extensi
         ? client.calls.findLast((c) => c.method === "tool.screenshot_full_page")
         : lastCall(client);
     assert.equal(lastCall(client).method, method);
-    assert.deepEqual({ context_id: sent?.params["context_id"], depends_on: sent?.params["depends_on"] }, bound, method);
+    const metadata = Object.fromEntries(Object.keys(bound).map((key) => [key, sent?.params[key]]));
+    assert.deepEqual(metadata, bound, method);
   }
 
   // A newer sync supersedes the old context: reusing it is refused, the new one is accepted.
@@ -218,6 +221,26 @@ test("cooperate degrades on an extension without tool.cooperate, and every other
     });
     await assert.rejects(failing.cooperate("sync"), (error) => error instanceof BskRpcError && error.code === code);
   }
+});
+
+// Measured on a connected BrowserSkill 0.5.0 extension: a target-policy sync answers the observation id actions
+// accept at the top level and a different legacy token under observation.observation_id; a strict sync sends only
+// the nested one. Callers read one field either way, and the policy they ask for reaches the wire.
+test("cooperate sends the control policy and exposes the observation id from either place the daemon puts it", async () => {
+  const replies = [
+    { context_id: "ctx-t", control_policy: "target", observation_id: "top", observation: { observation_id: "legacy" } },
+    { context_id: "ctx-s", control_policy: "strict", observation: { observation_id: "nested" } },
+    { context_id: "ctx-n", control_policy: "strict" },
+  ];
+  const client = stubClient({ "tool.cooperate": (_params, count) => replies[count - 1] });
+  const session = new BskSession(client, { sessionId: "abcd" });
+
+  const target = await session.cooperate("sync", { controlPolicy: "target" });
+  assert.deepEqual(lastCall(client).params, { session_id: "abcd", action: "sync", control_policy: "target" });
+  assert.equal(field(target, "observation_id"), "top");
+  assert.equal(field(target, "context_id"), "ctx-t");
+  assert.equal(field(await session.cooperate("sync"), "observation_id"), "nested");
+  assert.equal(field(await session.cooperate("sync"), "observation_id"), undefined);
 });
 
 // The context a sync returned, as the documented loop reads it: absent on an extension without shared control.

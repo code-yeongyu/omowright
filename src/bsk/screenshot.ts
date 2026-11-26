@@ -1,20 +1,18 @@
 import { readProperty } from "../read-property.ts";
-import type { BskToolParams, ScreenshotScope } from "./protocol/params.generated.ts";
+import type { ScreenshotScope } from "./protocol/params.generated.ts";
+import { sharedTab } from "./shared-tab.ts";
+import type { SharedTabOptions, ToolSession as TypedToolSession } from "./shared-tab.ts";
 
-type CaptureMethod = "screenshot" | "screenshot_full_page" | "screenshot_read" | "screenshot_release";
+export type ToolSession = TypedToolSession<
+  "screenshot" | "screenshot_full_page" | "screenshot_read" | "screenshot_release"
+>;
 
-export interface ToolSession {
-  tool<M extends CaptureMethod>(name: M, params: Omit<BskToolParams[M], "session_id">): Promise<unknown>;
-}
-
-export interface ScreenshotOptions {
+export interface ScreenshotOptions extends SharedTabOptions {
   ref?: string;
   tabId?: number;
   fullPage?: boolean;
   scope?: ScreenshotScope;
   timeoutMs?: number;
-  context?: string;
-  dependsOn?: readonly string[];
 }
 
 export interface Screenshot {
@@ -37,7 +35,7 @@ function fromBase64(value: unknown, field: string): Buffer {
 
 export async function captureScreenshot(
   session: ToolSession,
-  { ref, tabId, fullPage = false, scope, timeoutMs, context, dependsOn }: ScreenshotOptions = {},
+  { ref, tabId, fullPage = false, scope, timeoutMs, ...shared }: ScreenshotOptions = {},
 ): Promise<Screenshot> {
   if (!fullPage) {
     const result = await session.tool("screenshot", { ref, tab_id: tabId });
@@ -56,8 +54,7 @@ export async function captureScreenshot(
     scope,
     tab_id: tabId,
     timeout_ms: timeoutMs,
-    context_id: context,
-    depends_on: dependsOn,
+    ...sharedTab(shared),
   });
   const captureId = readProperty(started, "capture_id");
   if (typeof captureId !== "string") throw new TypeError("screenshot_full_page returned no capture_id");

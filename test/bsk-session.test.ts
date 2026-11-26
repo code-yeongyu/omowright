@@ -7,6 +7,7 @@ import { resolveTarget } from "../src/bsk/targets.ts";
 import { lastCall, stubClient } from "./fixtures/bsk-stub-client.ts";
 import type { StubParams } from "./fixtures/bsk-stub-client.ts";
 import { field } from "./fixtures/read-field.ts";
+import type { BskClient } from "../src/index.ts";
 
 test("resolveTarget maps refs, selectors and capture coordinates to daemon fields", () => {
   assert.deepEqual(resolveTarget("@e3"), { ref: "@e3" });
@@ -109,6 +110,32 @@ test("every session method sends the daemon's tool method with session_id inject
     method: "tool.evaluate",
     params: { session_id: "abcd", expression: "1+1", await_promise: false, timeout_ms: 100 },
     options: { idPrefix: "evaluate" },
+  });
+  await session.evaluate("2", { unverified: true });
+  assert.deepEqual(lastCall(client).params, { session_id: "abcd", expression: "2", unverified: true });
+
+  await session.read("h1", { fields: [{ key: "t", read: "text" }], maxNodes: 3 });
+  assert.deepEqual(lastCall(client), {
+    method: "tool.read",
+    params: { session_id: "abcd", selector: "h1", fields: [{ key: "t", read: "text" }], max_nodes: 3 },
+    options: { idPrefix: "read" },
+  });
+  await session.read();
+  assert.deepEqual(lastCall(client).params, { session_id: "abcd" });
+  await session.extract("table", { target: "#prices", maxRows: 5 });
+  assert.deepEqual(lastCall(client).params, { session_id: "abcd", action: "table", selector: "#prices", max_rows: 5 });
+  await session.waitForElement("e4", { state: "visible", timeoutMs: 2000 });
+  assert.deepEqual(lastCall(client), {
+    method: "tool.wait_for_element",
+    params: { session_id: "abcd", ref: "e4", state: "visible", timeout_ms: 2000 },
+    options: { idPrefix: "wait-for-element" },
+  });
+  await session.drag({ ref: "e1" }, { delta: { x: 40, y: 0 }, mode: "press-move-release" });
+  assert.deepEqual(lastCall(client).params, {
+    session_id: "abcd",
+    source: { ref: "e1" },
+    delta: { x: 40, y: 0 },
+    mode: "press-move-release",
   });
 
   await session.tabList({ scope: "user" });
@@ -232,12 +259,21 @@ test("screenshot returns the viewport PNG inline and reassembles full-page captu
   assert.equal(released, "cap-full");
 });
 
+// Public API contract: BskClient is the seam for a caller-supplied transport (a daemon the process cannot reach by
+// socket path), so it is importable from the package entry and connectBrowserSkill drives the daemon through it alone.
 test("connectBrowserSkill starts a session on the daemon and hands back a live BskSession", async () => {
   const client = stubClient({
     "system.status": { browsers: [{ instance_id: "inst-1" }], daemon_version: "0.3.0", protocol_version: "1.3" },
     "session.start": { session_id: "wxyz", browser_instance_id: "inst-1", agent_window_id: 42 },
   });
-  const session = await connectBrowserSkill({ client, name: "smoke", browser: "inst-1", width: 1200, height: 800 });
+  const transport: BskClient = client;
+  const session = await connectBrowserSkill({
+    client: transport,
+    name: "smoke",
+    browser: "inst-1",
+    width: 1200,
+    height: 800,
+  });
   const start = client.calls.find((c) => c.method === "session.start");
   assert.deepEqual(start?.params, {
     task_name: "smoke",
