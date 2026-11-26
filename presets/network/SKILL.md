@@ -59,7 +59,6 @@ const gen = collectWhileScrolling(page, snoop, {
   maxScrolls: 15,
   extract: (json) => json.items ?? [],
   scroll: "wheel", // "end" jumps to the bottom instead
-  settleMs: 800,
 });
 let step;
 while (!(step = await gen.next()).done) items.push(step.value);
@@ -67,7 +66,9 @@ step.value; // { rounds, total, stoppedBecause }
 ```
 
 `for await (const item of gen)` works too when you don't need the return
-value. The loop drains first, then scrolls, and stops on `minItems`,
+value. A round ends as soon as the next response lands or the page grows;
+`settleMs` (default 800) only bounds a round in which neither happens, so leave
+it alone unless the endpoint is slower than that. The loop drains first, then scrolls, and stops on `minItems`,
 `maxScrolls`, or two consecutive rounds where the document height didn't grow
 (`noGrowth`). The default `extract` accepts bodies that are already arrays.
 

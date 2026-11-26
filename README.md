@@ -121,8 +121,7 @@ const run = collectWhileScrolling(page, snoop, {
   maxScrolls: 15, // or after this many scroll rounds
   extract: (json) => json.items, // pull items out of each JSON body
   scroll: "wheel", // "end" jumps to the bottom instead
-  settleMs: 800, // wait for the next page to land
-});
+}); // a round ends when the next response lands; settleMs (default 800) only bounds a silent round
 let step;
 while (!(step = await run.next()).done) items.push(step.value);
 step.value; // { rounds, total, stoppedBecause: "minItems" | "maxScrolls" | "noGrowth" }

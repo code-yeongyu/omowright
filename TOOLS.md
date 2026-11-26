@@ -286,7 +286,8 @@ loop; the module files next to it are implementation detail.
   encodedDataLength, body, base64Encoded, bodySkipped, failed, errorText,
   startedAt, finishedAt`.
 - `collectWhileScrolling(page, snoop, { minItems, maxScrolls=10, extract, scroll:
-  "wheel"|"end", settleMs=800 })`: async generator. Each round scrolls, settles, drains
+  "wheel"|"end", settleMs=800 })`: async generator. Each round scrolls, waits for the next
+  response or page growth (at most `settleMs`), drains
   `snoop.popJson()` through `extract(json) => items[]`, yield each item. Returns
   `{ rounds, total, stoppedBecause: "minItems"|"maxScrolls"|"noGrowth" }`.
 - `createTrace(page, { dir, screenshots=true, network=true, console=true,

@@ -65,8 +65,15 @@ await page.pdf({ path, format?, margin? });
 await page.locator("e1").click();              // ref or CSS
 await page.locator("input[name=q]").fill("text");
 await page.keyboard.press("Enter"); await page.mouse.wheel(0, 400);
+await page.waitForFunction(() => window.ready === true, undefined, { timeout: 10_000 }); // a page state; options are the 3rd argument
+const saved = page.waitForResponse("**/api/cart"); // start the wait, then act, then await it
+await page.locator("e7").click(); await saved;
+await page.waitForURL("**/dashboard"); await page.waitForLoadState("networkidle");
 await page.close();
 ```
+
+Wait with these, never with a fixed delay; the full table is in `SKILL.md` ("Wait for a
+state, never for a clock").
 
 ## Snapshot discipline
 
