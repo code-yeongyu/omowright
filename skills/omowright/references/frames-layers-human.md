@@ -89,23 +89,30 @@ doing: the header becomes the first line of `tree`, and the raw result sits in
 ## Human handoff: login, OTP, CAPTCHA you can't solve
 
 When every rung fails on a login wall, a one-time code, or a challenge the
-captcha preset can't clear, hand the tab to the person and wait for a signal:
+captcha preset can't clear, hand the tab to the person. **DO NOT `await` THE
+HANDOFF IN AN EVAL CELL**: a person takes longer than a cell, and an awaited
+handoff holds the kernel until they finish. Subscribe the harness watcher to a
+flag file first, start the handoff without `await`, and end the cell:
 
 ```js
-const result = await requestHuman(page, {
+const flag = path.join(os.tmpdir(), `omowright-handoff-${Date.now()}.flag`);
+await tool.monitor({ description: "handoff finished", path: flag, event: "create" }); // omo's watcher; subscribe first
+globalThis.omwHandoff = requestHuman(page, {
   prompt: "Sign in with your account, then click Done.",
   until: { url: /\/dashboard/ }, // or { selector: "nav.account" } or async page => boolean
   timeoutMs: 300000,
-});
-// { outcome: "continued" | "timed_out" | "cancelled", elapsedMs, reason: "until" | "done-button" | "timed_out" | "signal" }
-if (result.outcome !== "continued") throw new Error(`handoff ${result.outcome}`);
+}).then(
+  // { outcome: "continued" | "timed_out" | "cancelled", elapsedMs, reason: "until" | "done-button" | "timed_out" | "signal" }
+  (result) => fs.writeFileSync(flag, result.outcome),
+  (error) => fs.writeFileSync(flag, `failed: ${error.message}`),
+);
 ```
 
-**IN AN EVAL CELL, DO NOT `await` THE HANDOFF.** A person takes longer than a
-cell, and an awaited handoff holds the kernel until they finish. Subscribe the
-harness watcher, start `requestHuman(...)` without `await`, write its outcome to
-the watched file in `.then`, and return; the page stays usable from other cells
-meanwhile. Pattern in `eval-kernel.md` (next to this file), "Waits that outlast a cell".
+The event wakes the turn on every outcome. Read the flag: anything but
+`continued` is a handoff that did not happen. The page stays usable from other
+cells meanwhile; more in `eval-kernel.md` (next to this file), "Waits that
+outlast a cell". A plain script with no cell limit may `await requestHuman(...)`
+and read `result.outcome` directly.
 
 The call brings the window to the front, injects a shadow-DOM banner with your
 prompt and a Done button, then polls every `pollMs` for `until` or the button.
