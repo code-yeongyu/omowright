@@ -483,3 +483,26 @@ test("a failed fill() redacts the value from the daemon's error", async () => {
     !`${String(error.stack)}\n${String(Reflect.get(cause, "message"))}\n${String(cause.stack)}`.includes(secret),
   );
 });
+
+// The redaction replaces the value only where it stands as a token, in one pass: a short value
+// leaves the words around it readable, and regex metacharacters in the value match literally.
+test("a failed fill() redacts the value as a token, literally and once", async () => {
+  const refuse = async (value: string, message: string) => {
+    const session = new BskSession(stubClient({ "tool.fill": new BskRpcError("tool_error", message) }), {
+      sessionId: "abcd",
+    });
+    return await session.fill("@e3", value).then(
+      () => assert.fail("fill() resolved through a refusing daemon"),
+      (reason: unknown) => (reason instanceof Error ? reason.message : String(reason)),
+    );
+  };
+
+  assert.equal(
+    await refuse("a", 'locator.fill: timed out after 30000ms waiting for locator("e3") to accept "a"'),
+    'locator.fill: timed out after 30000ms waiting for locator("e3") to accept "<redacted, 1 chars>"',
+  );
+  assert.equal(
+    await refuse("a.b*c(1)", 'refused "a.b*c(1)" next to "aXb*c(1)"'),
+    'refused "<redacted, 8 chars>" next to "aXb*c(1)"',
+  );
+});

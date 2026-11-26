@@ -7,8 +7,13 @@
 export function redactValue(error: unknown, value: string): unknown {
   if (value.length === 0) return error;
   const replacement = `<redacted, ${value.length} chars>`;
-  const escaped = JSON.stringify(value).slice(1, -1);
-  const scrub = (text: string) => text.replaceAll(value, replacement).replaceAll(escaped, replacement);
+  // One pass over the raw and JSON-escaped forms, longest first, so inserted text is never rescanned; the
+  // value matches only as a token, never inside a word (fill("a") must leave "locator" readable).
+  const forms = [...new Set([value, JSON.stringify(value).slice(1, -1)])]
+    .toSorted((left, right) => right.length - left.length)
+    .map((form) => form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])(?:${forms.join("|")})(?![\\p{L}\\p{N}])`, "gu");
+  const scrub = (text: string) => text.replace(pattern, replacement);
   if (typeof error === "string") return scrub(error);
   const seen = new Set<Error>();
   for (let link: unknown = error; link instanceof Error && !seen.has(link); link = link.cause) {
