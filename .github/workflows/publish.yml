@@ -12,6 +12,11 @@ on:
         required: true
         type: boolean
         default: true
+      expected_sha:
+        description: "Full commit SHA the dry run verified. The run fails when the checked-out commit differs; a real publish requires it."
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -90,6 +95,7 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
       DRY_RUN: ${{ inputs.dry_run }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
     steps:
       - uses: actions/checkout@v4
       # `prepack` builds dist/ before npm packs the tarball, and that build is bun.
@@ -109,12 +115,20 @@ jobs:
       - name: Verify version and target
         shell: bash
         run: |
+          if [ -n "$EXPECTED_SHA" ] && [ "$GITHUB_SHA" != "$EXPECTED_SHA" ]; then
+            echo "::error::this run checked out $GITHUB_SHA but expected_sha is $EXPECTED_SHA; dispatch again from the verified commit"
+            exit 1
+          fi
           pkg=$(node -p "require('./package.json').version")
           if [ "$pkg" != "$VERSION" ]; then
             echo "::error::package.json version is $pkg but the input version is $VERSION"
             exit 1
           fi
           if [ "$DRY_RUN" != "true" ]; then
+            if [ -z "$EXPECTED_SHA" ]; then
+              echo "::error::a real publish needs expected_sha: the commit its dry run verified"
+              exit 1
+            fi
             if [ "$GITHUB_REF" != "refs/heads/main" ]; then
               echo "::error::a real publish must run from main, not $GITHUB_REF"
               exit 1

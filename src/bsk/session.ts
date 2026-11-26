@@ -3,6 +3,7 @@ import type { Target } from "./targets.ts";
 import { captureScreenshot } from "./screenshot.ts";
 import type { Screenshot, ScreenshotOptions } from "./screenshot.ts";
 import type { BskClient } from "./ipc-client.ts";
+import { redactValue } from "../redact-value.ts";
 
 const SESSION_STOP_TIMEOUT_MS = 3_600_000;
 
@@ -231,6 +232,8 @@ export class BskSession {
       tab_id: tabId,
       timeout_ms: timeoutMs,
       ...sharedTab(shared),
+    }).catch((error: unknown) => {
+      throw redactValue(error, value);
     });
   }
   press(

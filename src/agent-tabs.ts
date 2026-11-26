@@ -1,4 +1,6 @@
 import { DEFAULT_AGENT_VIEWPORT, repinViewport } from "./viewport.ts";
+import { emulatedDevice } from "./emulate.ts";
+import type { DevicePreset } from "./emulate.ts";
 import type { ViewportSize } from "./viewport.ts";
 import { targetCreationCapability } from "./internal-capability.ts";
 import type { BrowserConnection } from "./connection.ts";
@@ -171,13 +173,18 @@ export class AgentTabManager {
     const version = await this.#connection.cdp.send("Browser.getVersion").catch(() => null);
     return /Headless/i.test(version?.product ?? "");
   }
-  #queueRepin(record: TabRecord, viewport: Readonly<ViewportSize>, reportErrors = false): Promise<ViewportSize> {
+  #queueRepin(
+    record: TabRecord,
+    viewport: Readonly<ViewportSize>,
+    reportErrors = false,
+    device?: DevicePreset,
+  ): Promise<ViewportSize> {
     const size = { ...viewport };
     const operation = record.repinQueue.then(async () => {
       try {
         // A record is repinned only after adopt() attached its page; the JS original threw here otherwise.
         if (record.page === null) throw new TypeError("Cannot read properties of null (reading 'resolveSessionId')");
-        await repinViewport(record.page, size);
+        await repinViewport(record.page, device ?? size, device);
       } catch (error) {
         if (reportErrors) console.warn(`[agent-tabs] viewport repin failed for ${record.targetId}`, error);
         else throw error;
@@ -188,8 +195,14 @@ export class AgentTabManager {
     record.repinQueue = operation.catch(() => {});
     return operation;
   }
+  // Re-pins after a main-frame navigation: an emulated device stays until emulate(page, null) (#338).
   async #repin(record: TabRecord) {
-    await this.#queueRepin(record, record.viewport, true);
+    await this.#queueRepin(
+      record,
+      record.viewport,
+      true,
+      record.page === null ? undefined : emulatedDevice(record.page),
+    );
   }
   async repin(
     tabOrTargetId: string | { targetId: string } | null | undefined,

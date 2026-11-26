@@ -38,6 +38,7 @@ import {
   hasPageBindings,
 } from "./page-setup.ts";
 import { readProperty } from "./read-property.ts";
+import { redactValue } from "./redact-value.ts";
 import type { DialogOpeningParams, DialogPolicy } from "./dialog-policy.ts";
 import type { ConsoleApiCalledEvent } from "./console-events.ts";
 import type { ExceptionThrownEvent } from "./page-events.ts";
@@ -4159,8 +4160,12 @@ function createLocatorClass() {
       await clickElement(this.#e, jn, xn, this.#e.modifierState);
     }
     async fill(xn: string) {
-      let jn = await this.#r();
-      await fillElement(this.#e, jn, xn);
+      try {
+        let jn = await this.#r();
+        await fillElement(this.#e, jn, xn);
+      } catch (jn) {
+        throw redactValue(jn, xn);
+      }
     }
     async selectOption(xn: SelectOptionValue | SelectOptionValue[]) {
       let jn = await this.#r();
@@ -4179,8 +4184,12 @@ function createLocatorClass() {
       await pressElement(this.#e, jn, xn, this.#e.keyboard);
     }
     async pressSequentially(xn: string, jn: { delay?: number } = {}) {
-      let Vn = await this.#r();
-      await pressSequentiallyElement(this.#e, Vn, xn, jn.delay, this.#e.keyboard);
+      try {
+        let Vn = await this.#r();
+        await pressSequentiallyElement(this.#e, Vn, xn, jn.delay, this.#e.keyboard);
+      } catch (Vn) {
+        throw redactValue(Vn, xn);
+      }
     }
     async hover() {
       let xn = await this.#r();
