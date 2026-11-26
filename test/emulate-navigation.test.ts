@@ -1,4 +1,4 @@
-import { after, before, test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,33 +12,27 @@ import { removeTreeSync } from "./fixtures/remove-tree.ts";
 // Public contract (#338): a device set with emulate() stays the page's viewport across same-origin and
 // cross-origin navigation until emulate(page, null). Each read waits for the agent tab's own viewport
 // re-pin after the navigation, the command that used to put the desktop default back.
-// The browser and the fixture server start once for the file and each test opens its own agent tab: launching a
-// browser inside a test that also navigated four times outran the runner's limit on a loaded host (#352).
-type Connection = Awaited<ReturnType<typeof connectPipe>>;
-type Live = {
-  readonly connection: Connection;
-  readonly tabs: ReturnType<typeof createAgentTabs>;
-  readonly first: string;
-  readonly second: string;
-};
-
+// The browser and the fixture server start once, while the module loads, and each test opens its own agent tab.
+// A launch is not the behaviour under test and has no place in a test's time limit: inside a test that also
+// navigated four times it outran the limit on a loaded host, and inside a before() hook it outran the same limit
+// on a Windows runner, because bun gives hooks the test limit and ignores a hook's timeout option (#352).
 const skip = !SHELL && "no chromium binary found";
 const server = createServer((_request, response) => {
   response.setHeader("content-type", "text/html");
   response.end('<!doctype html><meta name="viewport" content="width=device-width"><p>page</p>');
 });
 const repins: Array<() => void> = [];
-let profile: string | undefined;
-let live: Live | undefined;
 
-before(async () => {
-  if (!SHELL) return;
+async function start(browserPath: string) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address !== null && typeof address === "object", "the fixture server has no TCP port");
-  profile = mkdtempSync(path.join(tmpdir(), "omowright-emulate-nav-test-"));
+  const profile = mkdtempSync(path.join(tmpdir(), "omowright-emulate-nav-test-"));
+  // Removed at exit, not in after(): a run whose filter matches no test here never reaches after(), and the
+  // retries a just-closed browser needs on Windows can outlast a hook's limit.
+  process.once("exit", () => removeTreeSync(profile));
   const connection = await connectPipe({
-    browserPath: SHELL,
+    browserPath,
     browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${profile}`],
     storageRoot: profile,
   });
@@ -48,17 +42,18 @@ before(async () => {
     if (method === "Emulation.setDeviceMetricsOverride") repins.shift()?.();
     return result;
   });
-  live = {
+  return {
     connection,
     tabs: createAgentTabs(connection),
     first: `http://127.0.0.1:${address.port}`,
     second: `http://localhost:${address.port}`,
   };
-});
+}
+
+const live = SHELL ? await start(SHELL) : undefined;
 
 after(async () => {
   if (live) await live.connection.close();
-  if (profile !== undefined) removeTreeSync(profile);
   server.close();
 });
 
