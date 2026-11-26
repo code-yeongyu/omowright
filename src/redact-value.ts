@@ -61,8 +61,8 @@ export function redactValue(error: unknown, value: string): unknown {
       if (key === "message" || key === "stack") continue;
       const descriptor = Reflect.getOwnPropertyDescriptor(link, key);
       if (descriptor === undefined || !("value" in descriptor)) continue;
-      const value: unknown = scrubMember(descriptor.value);
-      if (!Reflect.set(link, key, value)) Reflect.defineProperty(link, key, { ...descriptor, value });
+      const scrubbed: unknown = scrubMember(descriptor.value);
+      if (!Reflect.set(link, key, scrubbed)) Reflect.defineProperty(link, key, { ...descriptor, value: scrubbed });
     }
   }
 
