@@ -462,6 +462,11 @@ test("connectBrowserSkill never starts a session on the tab-grouping BrowserSkil
     "new1",
     "with no browser named, the up-to-date extension is chosen",
   );
+
+  // A 0.3.x extension has no shared control but runs actions without a context (measured on 0.3.2): it connects.
+  const legacy = start([{ instance_id: "old3", browser_name: "chrome", extension_version: "0.3.2" }], "old3");
+  await legacy.started;
+  assert.equal(legacy.client.calls.find((c) => c.method === "session.start")?.params["browser_instance_id"], "old3");
 });
 
 // Security contract (#335): the daemon may quote the request it refused; BskSession.fill() never

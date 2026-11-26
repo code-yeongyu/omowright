@@ -192,3 +192,36 @@ test("documented reads need no cooperation context", async () => {
     }
   }
 });
+
+// Measured on a connected BrowserSkill 0.3.2 extension: tool.cooperate answers unknown_method, and gated
+// actions run without a context (a given one is ignored). The documented sync-then-act loop must run unchanged
+// there, so cooperate degrades to "no context, ready" for exactly that answer and sends no context_id.
+test("cooperate degrades on an extension without tool.cooperate, and every other error still rejects", async () => {
+  const notImplemented = new BskRpcError("unknown_method", "tool.cooperate not implemented in extension");
+  const old = stubClient({ "tool.cooperate": notImplemented, "tool.click": {} });
+  const legacy = new BskSession(old, { sessionId: "abcd" });
+  const synced = await legacy.cooperate("sync");
+  assert.equal(field(synced, "supported"), false);
+  assert.equal(Reflect.get(Object(synced), "context_id"), undefined);
+  await legacy.click("@e3", { context: contextOf(synced) });
+  assert.deepEqual(lastCall(old).params, { session_id: "abcd", ref: "@e3" }, "no context_id goes on the wire");
+  assert.equal(field(await legacy.cooperate("wait", { timeoutMs: 1000 }), "ready"), true);
+
+  const current = sharedTabClient({ "tool.click": {} });
+  const session = new BskSession(current, { sessionId: "abcd" });
+  await session.click("@e3", { context: contextOf(await session.cooperate("sync")) });
+  assert.equal(lastCall(current).params["context_id"], "ctx-1", "a current extension's context is still sent");
+
+  for (const code of ["timeout", "no_daemon", "permission_denied"]) {
+    const failing = new BskSession(stubClient({ "tool.cooperate": new BskRpcError(code, "refused") }), {
+      sessionId: "abcd",
+    });
+    await assert.rejects(failing.cooperate("sync"), (error) => error instanceof BskRpcError && error.code === code);
+  }
+});
+
+// The context a sync returned, as the documented loop reads it: absent on an extension without shared control.
+function contextOf(reply: unknown): string | undefined {
+  const contextId: unknown = Reflect.get(Object(reply), "context_id");
+  return typeof contextId === "string" ? contextId : undefined;
+}

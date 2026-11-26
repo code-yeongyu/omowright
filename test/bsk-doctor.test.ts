@@ -419,6 +419,42 @@ test("bskDoctor is not ready while the only connected extension is the tab-group
   }
 });
 
+// A 0.3.x extension runs actions without a cooperate context (measured on 0.3.2), so it is not outdated.
+test("bskDoctor is ready with a BrowserSkill 0.3.x extension, which has no shared control", async () => {
+  const daemon = await startFakeBskDaemon({
+    handlers: {
+      "system.status": () => ({
+        result: {
+          daemon_version: "0.4.0-fake",
+          protocol_version: "1.7",
+          browsers: [
+            { instance_id: "abc", browser_name: "chrome", browser_version: "153", extension_version: "0.3.2" },
+          ],
+          sessions: [],
+        },
+      }),
+    },
+  });
+  const home = macHomeWithChrome();
+  try {
+    const client = new BskIpcClient({ home: daemon.home, autoStart: false });
+    const report = await bskDoctor({
+      platform: "darwin",
+      home,
+      client,
+      ...scoped(home),
+      bskBin: "/fake/bsk",
+      cliVersion: async () => "bsk 0.4.0",
+      waitForBrowserMs: 0,
+    });
+    assert.equal(report.ready, true);
+    assert.deepEqual(report.outdatedExtensions, []);
+  } finally {
+    await daemon.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("bskOnboard is not ready while the only connected extension is the tab-grouping BrowserSkill 0.4.0, and hands the user the update step", async () => {
   const daemon = await startFakeBskDaemon({
     handlers: {
