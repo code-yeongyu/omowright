@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,11 @@ test("committed extension matches its canonical source build", () => {
   // Windows CI keeps the checkout and OS temp directory on different drives.
   // Keep this independent build on the checkout's drive so Bun's source labels
   // are relative to the sandbox, just as they are in the canonical build.
-  const dir = mkdtempSync(path.join(root, ".extension-artifact-"));
+  // It lives under the git-ignored tmp/: a scratch tree in the root itself was listed by the hygiene
+  // scan, which then read files this test had already removed (#359).
+  const scratch = path.join(root, "tmp");
+  mkdirSync(scratch, { recursive: true });
+  const dir = mkdtempSync(path.join(scratch, "extension-artifact-"));
   try {
     cpSync(path.join(root, "bridge"), path.join(dir, "bridge"), { recursive: true });
     cpSync(path.join(root, "package.json"), path.join(dir, "package.json"));
