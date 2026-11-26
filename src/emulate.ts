@@ -61,6 +61,12 @@ const presetsByName: Readonly<Record<string, DevicePreset | undefined>> = DEVICE
 
 // WeakMap to store original UA per page
 const originalUAs = new WeakMap<EmulatePage, string>();
+// The device each page is emulating, until emulate(page, null); an agent tab re-pins it after navigation (#338).
+const emulatedDevices = new WeakMap<object, DevicePreset>();
+
+export function emulatedDevice(page: object): DevicePreset | undefined {
+  return emulatedDevices.get(page);
+}
 
 /**
  * Emulate a device on the given page.
@@ -91,6 +97,7 @@ export async function emulate(page: EmulatePage, presetNameOrObject: string | De
     await page.cdp.send("Emulation.clearDeviceMetricsOverride", {}, sessionId);
     await page.cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false }, sessionId);
 
+    emulatedDevices.delete(page);
     const originalUA = originalUAs.get(page);
     if (originalUA) {
       await page.cdp.send("Emulation.setUserAgentOverride", { userAgent: originalUA }, sessionId);
@@ -116,6 +123,8 @@ export async function emulate(page: EmulatePage, presetNameOrObject: string | De
       },
       sessionId,
     );
+
+    emulatedDevices.set(page, preset);
 
     // Set touch emulation
     await page.cdp.send(
