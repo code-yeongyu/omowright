@@ -185,3 +185,95 @@ test("an accessor, a Map and a Set that carry the value are scrubbed", () => {
   assert.deepEqual([...refused.seen], ["<redacted, 22 chars>", "plain"]);
   assert.ok(refused.bytes instanceof Uint8Array);
 });
+
+// Contract (#369): reading an error's property can have an effect, so each readable property is read once.
+test("an accessor is read once, whether or not what it returns carries the value", () => {
+  let plainReads = 0;
+  let echoReads = 0;
+  const refused = new TypeError(`refused ${SECRET}`);
+  Object.defineProperty(refused, "attempt", { get: () => (plainReads += 1), enumerable: true, configurable: true });
+  Object.defineProperty(refused, "echo", {
+    get: () => {
+      echoReads += 1;
+      return `sent ${SECRET}`;
+    },
+    enumerable: true,
+    configurable: true,
+  });
+
+  redactValue(refused, SECRET);
+
+  assert.deepEqual([plainReads, echoReads], [1, 1]);
+});
+
+// Contract (#369): a copy keeps the shape of what it replaces.
+test("a copied array keeps its length, and a copied Error is a native error of the same class", () => {
+  const sparse: string[] = [SECRET];
+  sparse.length = 4;
+  const refused = Object.assign(new Error("fill failed"), { rows: sparse });
+  const frozen = Object.freeze(new RangeError(`frozen ${SECRET}`));
+
+  redactValue(refused, SECRET);
+  const copy = redactValue(frozen, SECRET);
+
+  assert.notEqual(refused.rows, sparse);
+  assert.equal(refused.rows.length, 4);
+  assert.deepEqual(Object.keys(refused.rows), ["0"]);
+  assert.ok(copy instanceof RangeError);
+  assert.equal(Object.prototype.toString.call(copy), "[object Error]");
+  assert.equal(copy.message, "frozen <redacted, 22 chars>");
+});
+
+// Contract (#369): a string is a string whether or not it is boxed.
+test("a boxed string that carries the value is replaced by a scrubbed string", () => {
+  const refused = Object.assign(new Error("fill failed"), {
+    echo: new String(`sent ${SECRET}`),
+    note: new String("ok"),
+  });
+  const note = refused.note;
+
+  redactValue(refused, SECRET);
+
+  assert.equal(refused.echo, "sent <redacted, 22 chars>");
+  assert.equal(refused.note, note);
+});
+
+// Contract (#369): a copy has the prototype of what it replaces and keeps what could not be read.
+test("a copy keeps a subclass prototype and an accessor that throws", () => {
+  class Headers extends Map<string, string> {}
+  const payload = { value: SECRET };
+  Object.defineProperty(payload, "broken", {
+    get: () => {
+      throw new Error("unreadable");
+    },
+    enumerable: true,
+    configurable: true,
+  });
+  const refused = Object.assign(new Error("fill failed"), { headers: new Headers([["x-echo", SECRET]]), payload });
+
+  redactValue(refused, SECRET);
+
+  assert.ok(refused.headers instanceof Headers);
+  assert.deepEqual([...refused.headers], [["x-echo", "<redacted, 22 chars>"]]);
+  assert.notEqual(refused.payload, payload);
+  assert.equal(refused.payload.value, "<redacted, 22 chars>");
+  assert.throws(() => Reflect.get(refused.payload, "broken"), /unreadable/);
+});
+
+// Security contract (#369): what cannot be read cannot be shown to be clean, so it is not passed on.
+test("an error that cannot be read is withheld", () => {
+  const unreadable = new Proxy(
+    { detail: SECRET },
+    {
+      ownKeys: () => {
+        throw new Error("no keys for you");
+      },
+    },
+  );
+
+  const error = redactValue(new Error(`refused ${SECRET}`, { cause: unreadable }), SECRET);
+
+  assert.ok(error instanceof Error);
+  assert.match(error.message, /could not be read for redaction/);
+  assert.equal(error.cause, undefined);
+});

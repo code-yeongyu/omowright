@@ -101,6 +101,14 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
     "await new Promise((ok) => globalThis.setTimeout(() => ok(), 0b1010));",
     "const poll = setInterval(() => check(), 500);",
     "await scheduler.wait(1000);",
+    'await page["waitForTimeout"](50);',
+    'await Bun["sleep"](50);',
+    'globalThis["setTimeout"](() => step(), 20);',
+    "await page[`waitForTimeout`](50);",
+    "await globalThis.Bun.sleep(50);",
+    "await window.scheduler.wait(1000);",
+    "await new Promise((ok) => setTimeout(() => ok(), 60 * 1000));",
+    "Atomics.wait(view, 0, 0, 500);",
   ];
   const waitsOnAState = [
     "await page.waitForFunction(() => window.ready === true, undefined, { timeout: 5000 });",
@@ -109,6 +117,10 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
     "await requestHuman(page, { prompt, timeoutMs: 300000 });",
     "setTimeout(() => controller.abort(), 0);",
     "setTimeout(next, 0);",
+    "setTimeout(next, -0);",
+    "await Bun.sleep(0);",
+    "Atomics.wait(view, 0, 0);",
+    "await timers.setTimeout(delayMs);",
     "await page.waitForFunction(() => window.ready); // never use sleep(500)",
     'await page.waitForFunction(() => document.body.innerText.includes("setTimeout(done, 1000)"));',
     "const timers = { sleep: 500, setTimeout: 1000 };",
@@ -143,6 +155,20 @@ test("the name check reports what an example uses without accounting for it", ()
     [],
   );
   assert.deepEqual(unaccountedNames(["for (const item of items) console.log(item.id);"]), ["items"]);
+  assert.deepEqual(unaccountedNames(['const label = "// given: missing";\nmissing(label);']), ["missing"]);
+  assert.deepEqual(
+    unaccountedNames(["// given: page\nconsole.log(document.title, await page.evaluate(() => document.title));"]),
+    ["document"],
+  );
+  assert.deepEqual(unaccountedNames(["// given: page\nawait page.waitForFunction(() => process.env.READY);"]), [
+    "process",
+  ]);
+  assert.deepEqual(
+    unaccountedNames([
+      "// given: page\nconst readTitle = () => document.title;\nprint(await page.evaluate(readTitle));",
+    ]),
+    [],
+  );
 });
 
 const docs = await listDocs();

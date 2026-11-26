@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { isPidAlive } from "./instance-lock.ts";
+import { processIsDefunct } from "./process-defunct.ts";
 import { ownProcessStartTime, processStartTime } from "./process-start-time.ts";
 import { readProperty } from "./read-property.ts";
 
@@ -138,14 +139,31 @@ export async function reapOrphanedBrowser(profileDir: string | null | undefined)
   try {
     process.kill(pid, "SIGTERM");
   } catch {}
-  if (!(await processGone(pid, TERM_GRACE_MS))) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {}
+  if (!(await processGone(pid, TERM_GRACE_MS)) && !(await processIsDefunct(pid))) {
+    // The pid may have passed to another process during the grace window: only what is still the recorded
+    // browser is killed. `false` means it is gone or the pid is someone else's now, and the reap is done.
+    const stillTheBrowser = await sameProcessAlive(pid, start);
+    if (stillTheBrowser === true) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
     // SIGKILL lands at once, but the process leaves the table only when its parent collects it. Wait for
-    // that, so the profile is free before the caller launches on it (#361). What is still listed after the
-    // bound is an entry nothing collects (a zombie under an init that does not reap); it holds no files.
-    await processGone(pid, KILL_SETTLE_MS);
+    // that, bounded, so the profile is free before the caller launches on it (#361). What is still listed
+    // after the bound is either an entry nothing collects (a zombie under an init that does not reap), which
+    // holds no files, or a process that is still running. Only the first is passed: for the second the
+    // caller is told and the pidfile stays, so the next launch tries again (#369).
+    const stillRunning =
+      stillTheBrowser !== false &&
+      !(await processGone(pid, KILL_SETTLE_MS)) &&
+      !(await processIsDefunct(pid)) &&
+      isPidAlive(pid);
+    if (stillRunning) {
+      const sent = stillTheBrowser === true ? "SIGTERM and SIGKILL" : "SIGTERM";
+      throw new Error(
+        `omowright: the orphaned browser (pid ${pid}) is still running after ${sent}; its profile ${profileDir} is not reused`,
+      );
+    }
   }
   rmSync(pidFilePath(profileDir), { force: true });
 }
