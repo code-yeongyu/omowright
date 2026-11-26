@@ -25,6 +25,7 @@ rejects every call, so probe before reuse. Two patterns hold up everywhere:
    the setup cell below):
 
 ```js
+// given: shell, profile, omwTools (all three from the setup cell below)
 await tool.monitor({
   description: "omowright browser",
   command: `${shell} --headless --no-first-run --remote-debugging-port=9333 --user-data-dir=${profile} about:blank`,
@@ -119,6 +120,7 @@ transport has no ports to collide on. Every lane connects, acts, and closes
 inside the cell, so the reaping rule never bites.
 
 ```js
+// given: urls
 const results = await parallel(
   [1, 2, 3].map((i) => async () => {
     const prof = fs.mkdtempSync(path.join(os.tmpdir(), `omw-lane${i}-`));

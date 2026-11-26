@@ -12,6 +12,7 @@ One events capability per connection; await `ready` before trusting baseline
 discovery or download configuration:
 
 ```js
+// given: connection (what connectPipe or connect returned)
 import { createEvents, createAgentTabs } from "omowright";
 
 const events = createEvents(connection, {
@@ -28,6 +29,7 @@ Install the listener or `waitForEvent()` before the action that produces the
 event. Waits are bounded; predicates may be async:
 
 ```js
+// given: mainTargetId, mainPage
 const opened = events.waitForEvent("popupOpened", {
   timeout: 30_000,
   predicate: (tab) => tab.openerTargetId === mainTargetId,

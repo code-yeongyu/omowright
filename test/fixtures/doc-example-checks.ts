@@ -114,16 +114,17 @@ function assignedOnGlobalThis(root: AnyNode) {
  * The names the examples of one document use without accounting for them, in document order. An example
  * runs as written in an eval cell, so each name is one of: declared in this example or an earlier one of
  * the document (a declaration, an import, an assignment on `globalThis`), a platform global, or listed in a
- * `// given: a, b` comment, which is how an example names what its reader supplies. A given name holds for
- * the rest of the document, as a declaration does. Examples that do not parse are skipped here.
+ * `// given: a, b` comment, which is how an example names what its reader supplies (only the comma-separated
+ * names count; words after them are a note for the reader). A given name holds for the rest of the document,
+ * as a declaration does. Examples that do not parse are skipped here.
  */
 export function unaccountedNames(examples: readonly string[], platform = PLATFORM_GLOBALS): string[] {
   const known = new Set<string>();
   const missing = new Set<string>();
   for (const example of examples) {
     if (parseFailure(example) !== undefined) continue;
-    for (const given of example.matchAll(/\/\/\s*given:([^\n]*)/g)) {
-      for (const name of (given[1] ?? "").match(/[\w$]+/g) ?? []) known.add(name);
+    for (const given of example.matchAll(/\/\/\s*given:\s*([\w$]+(?:\s*,\s*[\w$]+)*)/g)) {
+      for (const name of (given[1] ?? "").split(",")) known.add(name.trim());
     }
     const analysis = analyzeScopes(example);
     const here = new Set([...analysis.declared, ...assignedOnGlobalThis(analysis.ast)]);

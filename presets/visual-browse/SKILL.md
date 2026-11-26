@@ -36,6 +36,7 @@ disagree, every coordinate is wrong by the same constant offset and retrying
 repeats the miss. Pin both to one box:
 
 ```js
+// given: page
 const { repinViewport, DEFAULT_AGENT_VIEWPORT } = await import("omowright");
 const size = await repinViewport(page, DEFAULT_AGENT_VIEWPORT); // -> { width: 1440, height: 900 }
 ```
@@ -52,14 +53,15 @@ coordinates you computed.
 ```js
 import { createCua } from "omowright";
 
+// given: x, y, text
 const cua = createCua(page);
-await cua.click({ x, y, button?, keypress? });        // keypress: modifiers held during click
-await cua.doubleClick({ x, y, keypress? });
-await cua.drag({ path: [{ x, y }, ...], keys? });     // mousedown at first point, move through path, mouseup
-await cua.move({ x, y, keys? });
-await cua.scroll({ x, y, scrollX, scrollY, keypress? });
+await cua.click({ x, y });                              // options: button, keypress (modifiers held during the click)
+await cua.doubleClick({ x, y });                        // option: keypress
+await cua.drag({ path: [{ x, y }, { x: x + 80, y }] }); // mousedown at the first point, move through the path, mouseup; option: keys
+await cua.move({ x, y });                               // option: keys
+await cua.scroll({ x, y, scrollX: 0, scrollY: 400 });   // option: keypress
 await cua.type({ text });
-await cua.keypress({ keys: ["ControlOrMeta", "a"] }); // ControlOrMeta = Meta on macOS, Control elsewhere
+await cua.keypress({ keys: ["ControlOrMeta", "a"] });   // ControlOrMeta = Meta on macOS, Control elsewhere
 const base64Png = await cua.getVisibleScreenshot();
 ```
 

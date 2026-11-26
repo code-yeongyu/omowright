@@ -12,6 +12,7 @@ host manifest needs an absolute executable path and exactly one
 GO TO STDERR.**
 
 ```js
+// given: extensionId, stdin, stdout, connection, profilePath
 import { createBridgeClient, createChromeApi } from "omowright";
 const bridge = createBridgeClient({ extensionId, stdin, stdout });
 const chrome = createChromeApi(connection, { profilePath, bridge });

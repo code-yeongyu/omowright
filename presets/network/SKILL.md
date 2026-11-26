@@ -20,6 +20,7 @@ arrived as JSON one request earlier. That JSON is complete, typed, and free of
 truncated labels. Snapshot to find and click; snoop to read.
 
 ```js
+// given: page
 const snoop = createNetworkSnoop(page, { match: { url: /\/api\//, mimeType: "json" } }); // strings match as substrings
 await page.goto("https://example.com/search?q=widgets");
 const results = snoop.popJson(); // parsed bodies, buffer drained

@@ -49,6 +49,7 @@ embedder instead of the frame. Take a fresh snapshot and click the ref again;
 the second attempt lands.
 
 ```js
+// given: page
 const snap = await snapshotWithFrames(page, { interactive: true });
 if (snap.missingFrames) console.log("unreachable frames:", snap.missingFrames);
 await page.locator("f1e3").fill("4242 4242 4242 4242");

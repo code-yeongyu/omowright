@@ -414,6 +414,8 @@ readiness is content-probe based).
 A policy is either an object or a function:
 
 ```js
+const { connectPipe } = await import("omowright");
+// given: browserPath, browserArgs, storageRoot
 const browser = await connectPipe({ browserPath, browserArgs, storageRoot, dialogPolicy: { accept: false } }); // confirm() -> false, prompt() -> null
 browser.setDialogPolicy({ accept: true, promptText: "agent@example.com" }); // prompt() -> the text
 browser.setDialogPolicy((dialog) => {
@@ -441,6 +443,7 @@ browser.cdp.dialogPolicy; // read the current policy (client getter)
   `page.waitForEvent('dialog')`) leaves the dialog to the policy:
 
   ```js
+  // given: page
   page.on("dialog", (dialog) => (dialog.type() === "prompt" ? dialog.accept("agent@example.com") : dialog.dismiss()));
   ```
 

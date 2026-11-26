@@ -15,6 +15,7 @@ before measuring coordinates (`Emulation.setDeviceMetricsOverride` and
 `refreshViewportSize`), and measure again after scrolling, resizing, or reflow.
 
 ```js
+// given: page
 import { createCaptcha } from "omowright";
 const captcha = createCaptcha(page);
 ```
