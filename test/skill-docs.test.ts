@@ -74,7 +74,10 @@ function importedNames(block: string) {
   return names;
 }
 
-const FIXED_DELAY = /\b(?:Bun\.sleep|waitForTimeout)\s*\(|\bsetTimeout\s*\(\s*(?:r|res|resolve|done)\s*,/;
+// A wait on a clock in one line of an example: a sleep call, a timer that only settles a promise (callback is a
+// bare name), a timer with a positive literal delay whatever its callback, or the promise form `setTimeout(ms)`.
+const FIXED_DELAY =
+  /\b(?:Bun\.sleep(?:Sync)?|waitForTimeout)\s*\(|(?<![\w.])sleep\s*\(|\bsetTimeout\s*\(\s*[\w$]+\s*,|\bsetTimeout\s*\(.*,\s*[1-9][\d_]*\s*\)|\bsetTimeout\s*\(\s*[1-9]/;
 
 // The guard below is only as good as this matcher: every way an example can wait on a clock is flagged,
 // whatever the timer's callback is called, and a wait on a state is not (#352).
