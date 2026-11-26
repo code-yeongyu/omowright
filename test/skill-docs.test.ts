@@ -53,8 +53,49 @@ function referencedPaths(text: string, docPath: string) {
   return [...out].map((p) => p.replace(/[.,;:)]+$/, ""));
 }
 
+function jsBlocks(text: string) {
+  return [...text.matchAll(/```(?:js|javascript|ts|typescript)\n([\s\S]*?)```/g)].map(captured);
+}
+
+// Names an example takes from the package: `const { a, b: c } = await import("omowright")`
+// and `import { a, b as c } from "omowright"`.
+function importedNames(block: string) {
+  const lists = [
+    ...block.matchAll(/\{([^{}]*)\}\s*=\s*await import\(\s*["']omowright["']\s*\)/g),
+    ...block.matchAll(/import\s*\{([^{}]*)\}\s*from\s*["']omowright["']/g),
+  ];
+  const names: string[] = [];
+  for (const list of lists) {
+    for (const part of captured(list).split(",")) {
+      const name = part.trim().split(/\s*(?::|\bas\b)\s*/)[0];
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
+const FIXED_DELAY = /\b(?:Bun\.sleep|waitForTimeout)\s*\(|\bsetTimeout\s*\(\s*(?:r|res|resolve|done)\s*,/;
+
 const docs = await listDocs();
 assert.ok(docs.length >= 6, `expected skill + presets docs, found ${docs.length}`);
+
+// Package contract: skills/, presets/, README.md and TOOLS.md ship in the npm tarball and agents run their
+// js examples as written, so an example must import names the package exports and must not wait on a clock.
+const exported = new Set(Object.keys(await import("../src/index.ts")));
+for (const doc of [...docs, path.join(repoRoot, "README.md"), path.join(repoRoot, "TOOLS.md")]) {
+  const rel = path.relative(repoRoot, doc);
+  const blocks = jsBlocks(await readFile(doc, "utf8"));
+
+  test(`${rel}: examples import only names the package exports`, () => {
+    const unknown = blocks.flatMap(importedNames).filter((name) => !exported.has(name));
+    assert.deepEqual(unknown, [], `${rel} imports names that omowright does not export`);
+  });
+
+  test(`${rel}: no example waits on a fixed delay`, () => {
+    const delayed = blocks.flatMap((block) => block.split("\n").filter((line) => FIXED_DELAY.test(line)));
+    assert.deepEqual(delayed, [], `${rel} waits on a clock; wait for the state instead`);
+  });
+}
 
 for (const doc of docs) {
   const rel = path.relative(repoRoot, doc);
