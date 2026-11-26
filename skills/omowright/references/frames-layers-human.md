@@ -95,6 +95,10 @@ handoff holds the kernel until they finish. Subscribe the harness watcher to a
 flag file first, start the handoff without `await`, and end the cell:
 
 ```js
+const { requestHuman } = await import("omowright");
+const fs = await import("node:fs");
+const os = await import("node:os");
+const path = await import("node:path");
 const flag = path.join(os.tmpdir(), `omowright-handoff-${Date.now()}.flag`);
 await tool.monitor({ description: "handoff finished", path: flag, event: "create" }); // omo's watcher; subscribe first
 globalThis.omwHandoff = requestHuman(page, {
