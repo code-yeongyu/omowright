@@ -7,6 +7,7 @@ import { pageBundle } from "../injected.ts";
 import { readProperty } from "../read-property.ts";
 import { optionalProperty } from "./reply-fields.ts";
 import type { BskSession } from "./session.ts";
+import type { SharedTabOptions } from "./shared-tab.ts";
 
 const CSS_PATH_FN = String(function cssPath(el: unknown) {
   if (!(el instanceof Element)) return null;
@@ -33,11 +34,9 @@ const CSS_PATH_FN = String(function cssPath(el: unknown) {
 
 export type EvaluateSession = Pick<BskSession, "evaluate">;
 
-export interface BskSnapshotOptions {
+export interface BskSnapshotOptions extends SharedTabOptions {
   tabId?: number;
   timeoutMs?: number;
-  context?: string;
-  dependsOn?: readonly string[];
   [option: string]: unknown;
 }
 
@@ -62,12 +61,14 @@ export function buildSnapshotExpression(options: Record<string, unknown> = {}): 
 
 export async function bskSnapshot(
   session: EvaluateSession,
-  { tabId, timeoutMs, context, dependsOn, ...snapshotOptions }: BskSnapshotOptions = {},
+  { tabId, timeoutMs, context, observation, expect, dependsOn, ...snapshotOptions }: BskSnapshotOptions = {},
 ): Promise<BskSnapshot> {
   const reply = await session.evaluate(buildSnapshotExpression(snapshotOptions), {
     tabId,
     timeoutMs,
     context,
+    observation,
+    expect,
     dependsOn,
     awaitPromise: false,
     returnByValue: true,

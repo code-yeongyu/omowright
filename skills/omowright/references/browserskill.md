@@ -25,18 +25,54 @@ await session.stop(); // ALWAYS: returns borrowed tabs, closes the Agent Window
 
 ### Shared control (BrowserSkill 0.4+)
 
-The person at the keyboard can work in the task tab while the agent does. The
-extension therefore refuses every page action with `permission_denied` /
-`data.reason: "cooperation_sync_required"` unless it carries the
-`context_id` of the latest `session.cooperate("sync")`. A context is good
-for one action: sync, decide from what the sync reported, act with
-`{ context }`, then sync again. Gated: navigation (except the first
-navigation of the untouched blank tab), every input method, `evaluate` (and
-so `bskSnapshot`), `tabClose`, `resize`, `emulate`, `observe` with
-`probeHover`, and `screenshot({ fullPage: true })`. Reads (`observe`,
-`snapshot`, `getHtml`, `screenshot()`, `console`, `network`,
-`waitForNavigation`) need no context. `dependsOn: ["@e2", ...]` narrows the
-check to the observed regions the decision used.
+The person at the keyboard can work in the task tab while the agent does, so
+the extension refuses a page action unless it carries what the latest
+`session.cooperate("sync")` returned. Gated: navigation, every input method,
+`drag`, `evaluate` (and so `bskSnapshot`), `tabClose`, `resize`, `emulate`,
+`observe` with `probeHover`, and `screenshot({ fullPage: true })`. Reads
+(`observe`, `snapshot`, `getHtml`, `read`, `extract`, `screenshot()`,
+`console`, `network`, `waitForNavigation`, `waitForElement`) need no context.
+
+Every gated action takes `{ context, observation, expect, dependsOn }`
+besides its own options; any other key throws. A session runs under one
+control policy, chosen by its first sync and fixed after that:
+
+| Action                                   | `strict` (the default)               | `target` (`cooperate("sync", { controlPolicy: "target" })`) |
+| ---------------------------------------- | ------------------------------------ | ----------------------------------------------------------- |
+| click, hover, fill, ... on a ref/selector | a fresh `context` per action          | `context`; the same one serves the next DOM action          |
+| `evaluate` (and `bskSnapshot`)            | a fresh `context` per action          | `context` plus an unused `observation`, or `expect` facts, or `unverified: true` |
+| `press` with no target, `navigate`        | a fresh `context` per action          | `context` plus an unused `observation`                       |
+| `dependsOn`                               | narrows the check to observed regions | refused; state facts in `expect` instead                     |
+
+The sync result carries `context_id` and, when the daemon sends one,
+`observation_id`; pass them as `{ context, observation }`. An observation is
+good for one action. `expect` is a list of literal facts the extension checks
+right before the input, for example
+`[{ target: "#total", field: "text", equals: "3" }]` (`field` is `text`,
+`value`, `checked`, `attribute` or `exists`); a false fact refuses the action
+with `reason: "precondition_failed"` and nothing is sent to the page.
+
+```js
+const { connectBrowserSkill } = await import("omowright");
+
+const session = await connectBrowserSkill({ name: "check out", focused: false });
+await session.navigate("https://example.com/cart");
+const sync = await session.cooperate("sync", { controlPolicy: "target" });
+const context = sync.context_id;
+await session.click("#apply-coupon", { context });
+await session.click("#checkout", { context, expect: [{ target: "#total", field: "text", equals: "$3.00" }] });
+const next = await session.cooperate("sync");
+await session.press("Enter", { context: next.context_id, observation: next.observation_id });
+const { items } = await session.read("h1"); // no context needed
+await session.stop();
+```
+
+A session's first `navigate` can meet the extension while the new task tab is
+still committing its blank document. That refusal ("The initial task tab
+changed", nothing sent to the page) is handled inside `navigate`: it waits on
+`waitForNavigation` for the tab to settle, checks in `tabList` that the tab is
+still blank, and sends the navigate once more. If the tab never settles or has
+moved on, `navigate` throws the refusal with the tab's state in the message.
 
 On `cooperation_sync_required`, call `session.cooperate("wait", { timeoutMs })`
 (at most 25 s) until it reports `ready`, sync again and replan from the live
@@ -84,8 +120,11 @@ Never a fixed delay.
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Navigate / history | `navigate(url, {waitUntil, timeoutMs})`, `back()`, `forward()`, `reload({hard})`, `waitForNavigation()`                                                                                    |
 | Read the page      | `observe({maxTokens, cursor, probeHover})` (VOM text with `@eN` refs), `snapshot()`, `getHtml({ref, maxBytes})`, `bskSnapshot(session)` (OmOWright tree + css)                             |
+| Read values        | `read(target, {fields, maxNodes})` (text, value, attributes of matching nodes), `extract("table" \| "list" \| "discover", {target, itemSelector, fields})`                                 |
+| Wait               | `waitForElement(target, {state: "visible" \| "hidden" \| "attached" \| "detached", timeoutMs})`, `waitForNavigation()`                                                                      |
 | Act                | `click(target, {button, clickCount, modifiers})`, `hover`, `fill(target, value)`, `press(key, {target, holdMs})`, `select(target, values)`, `focus`, `blur`, `scrollTo`, `wheel({deltaY})` |
-| Script             | `evaluate(expression, {awaitPromise, timeoutMs})` → `{ok, value, error}`; Agent Window tabs only                                                                                           |
+| Drag               | `drag({selector} \| {ref}, {target, delta: {x, y}, mode})`                                                                                                                                 |
+| Script             | `evaluate(expression, {awaitPromise, timeoutMs, unverified})` → `{ok, value, error}`; Agent Window tabs only                                                                                 |
 | Pixels             | `screenshot({ref})` → `{buffer, width, height, captureId}`; `screenshot({fullPage: true})` streams the capture back in chunks                                                              |
 | Tabs               | `tabList({scope: "user"})`, `tabCreate({url})`, `tabSelect(id)`, `tabClose(id)`, `tabBorrow(id)` (the user confirms), `tabReturn(id)`                                                      |
 | Humans             | `requestHelp({prompt, targets, completionCriteria, timeoutMs})` for login, CAPTCHA, OTP, payment — the extension shows an overlay and waits                                                |
@@ -95,7 +134,10 @@ Anything the daemon refuses comes back as a `BskRpcError` with the daemon's
 `code` (`not_found`, `invalid_params`, `permission_denied`, `timeout`,
 `cdp_failed`, `user_aborted`, `no_browser_connected`, ...). Long calls can be
 cancelled: `const h = session.client.callWithHandle(...)`, then
-`session.client.cancel(h.rpcId)`.
+`session.client.cancel(h.rpcId)`. The rest of the daemon's tools (dialogs,
+uploads and downloads, recording, `debug`) are reachable as
+`session.tool("dialog_accept", { dialog_id })` with the daemon's own parameter
+names.
 
 ## bskSnapshot leaves no trace
 
@@ -203,3 +245,10 @@ socket. On another machine, run the library where the daemon is (for example
 through a machine mesh), or pair the extension to a daemon in server mode
 (`bsk daemon start --mode server`, WSS required off loopback). Windows named
 pipes are not discovered automatically; pass `sockPath` explicitly.
+
+When the process cannot reach the daemon by socket path at all, pass your own
+transport as `connectBrowserSkill({ client })`. It is any object with
+`call(method, params, options)` that sends one daemon request (`system.status`,
+`session.start`, `tool.*`, `session.stop`) and resolves with its `result` or
+rejects with a `BskRpcError`. The exported type `BskClient` describes it, and
+the session uses nothing else.

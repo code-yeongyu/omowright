@@ -21,13 +21,10 @@ const UNTYPED = [
   "dialog_handle",
   "dialog_status",
   "download",
-  "drag",
-  "extract",
   // tool_operation_params.json is the params schema operation_await and operation_cancel share, not a method.
   "operation",
   "operation_await",
   "operation_cancel",
-  "read",
   "record_await",
   "record_start",
   "record_stop",
@@ -36,7 +33,6 @@ const UNTYPED = [
   "session_stop",
   "upload",
   "video",
-  "wait_for_element",
   "wait_ms",
 ];
 
@@ -54,10 +50,19 @@ type Options<K extends keyof BskSession, I extends number> = BskSession[K] exten
   ? A[I]
   : never;
 
-const shared = { context: "ctx-1", dependsOn: ["e1"] };
+const shared = {
+  context: "ctx-1",
+  observation: "obs-1",
+  expect: [{ target: "a", field: "text", equals: "x" }],
+  dependsOn: ["e1"],
+} as const;
 const timing = { tabId: 7, timeoutMs: 1000 };
 const CALLS: Record<string, (session: BskSession) => Promise<unknown>> = {
-  cooperate: (s) => s.cooperate("sync", every<Options<"cooperate", 1>>({ tabId: 7, timeoutMs: 10, maxTokens: 10 })),
+  cooperate: (s) =>
+    s.cooperate(
+      "sync",
+      every<Options<"cooperate", 1>>({ tabId: 7, timeoutMs: 10, maxTokens: 10, controlPolicy: "strict" }),
+    ),
   navigate: (s) =>
     s.navigate("https://example.com/", every<Options<"navigate", 1>>({ ...shared, ...timing, waitUntil: "load" })),
   back: (s) => s.back(every<Options<"back", 0>>({ ...shared, ...timing, waitUntil: "load" })),
@@ -103,7 +108,59 @@ const CALLS: Record<string, (session: BskSession) => Promise<unknown>> = {
       every<Options<"wheel", 0>>({ ...shared, ...timing, deltaX: 1, deltaY: 2, target: "e1", modifiers: ["shift"] }),
     ),
   evaluate: (s) =>
-    s.evaluate("1", every<Options<"evaluate", 1>>({ ...shared, ...timing, awaitPromise: true, returnByValue: true })),
+    s.evaluate(
+      "1",
+      every<Options<"evaluate", 1>>({
+        ...shared,
+        ...timing,
+        awaitPromise: true,
+        returnByValue: true,
+        unverified: true,
+      }),
+    ),
+  read: (s) =>
+    s.read(
+      "a",
+      every<Options<"read", 1>>({
+        tabId: 7,
+        timeoutMs: 100,
+        context: "ctx-1",
+        fields: [{ key: "t", read: "text" }],
+        maxNodes: 1,
+        maxBytes: 1024,
+      }),
+    ),
+  extract: (s) =>
+    s.extract(
+      "list",
+      every<Options<"extract", 1>>({
+        ...timing,
+        target: "ul",
+        itemSelector: "li",
+        fields: [{ key: "t", read: "text", selector: "a" }],
+        maxRows: 1,
+        maxColumns: 1,
+        maxBytes: 1024,
+        targetId: "t1",
+      }),
+    ),
+  waitForElement: (s) =>
+    s.waitForElement("a", every<Options<"waitForElement", 1>>({ ...timing, state: "visible", pollMs: 50 })),
+  drag: (s) =>
+    s.drag(
+      { selector: "#a" },
+      every<Options<"drag", 1>>({
+        ...shared,
+        ...timing,
+        target: { selector: "#b" },
+        delta: { x: 1, y: 2 },
+        mode: "press-move-release",
+        button: "left",
+        durationMs: 10,
+        holdMs: 5,
+        modifiers: ["alt"],
+      }),
+    ),
   tabList: (s) => s.tabList(every<Options<"tabList", 0>>({ scope: "agent" })),
   tabCreate: (s) =>
     s.tabCreate(every<Options<"tabCreate", 0>>({ url: "https://example.com/", active: true, index: 0 })),
