@@ -1,96 +1,136 @@
-// Checks that test/skill-docs.test.ts applies to the js examples the package ships. They read an example
-// as text: a snippet may be a fragment that no parser accepts.
+import type { AnyNode } from "acorn";
+import { analyzeScopes } from "../source-scope.ts";
 
-const NUMERIC_LITERAL =
-  /^(?:0[xX][\da-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)$/;
-const SLEEP_CALL = /\b(?:Bun\.sleep(?:Sync)?|waitForTimeout)\s*\(|(?<![\w.])sleep\s*\(/g;
-const TIMER_CALL = /\bsetTimeout\s*\(/g;
-const QUOTES = new Set(['"', "'", "`"]);
+// Checks that test/skill-docs.test.ts applies to the js examples the package ships. Each example is parsed
+// as a module: text inside a comment or a string is never mistaken for code, and a call is read as a call
+// however it is laid out (#352, #362, #366).
 
-function positiveLiteral(text: string) {
-  return NUMERIC_LITERAL.test(text) && Number(text.replaceAll("_", "")) > 0;
+export const PLATFORM_GLOBALS: ReadonlySet<string> = new Set([
+  // the language and the runtimes an example runs on (Node, Bun)
+  ..."globalThis undefined NaN Infinity Object Array String Number Boolean Symbol BigInt Math JSON Date RegExp".split(" "),
+  ..."Error TypeError RangeError AggregateError Promise Map Set WeakMap WeakSet Reflect Proxy Intl".split(" "),
+  ..."parseInt parseFloat isNaN structuredClone encodeURIComponent decodeURIComponent URL URLSearchParams".split(" "),
+  ..."TextEncoder TextDecoder AbortController AbortSignal fetch console performance crypto atob btoa".split(" "),
+  ..."setTimeout clearTimeout setInterval clearInterval queueMicrotask Uint8Array ArrayBuffer Buffer process Bun".split(" "),
+  // the helpers of the eval kernel the skill is written for
+  ..."tool print display env read write parallel log".split(" "),
+  // a page, inside a function handed to evaluate() or waitForFunction()
+  ..."window document location navigator history localStorage sessionStorage innerWidth innerHeight".split(" "),
+  ..."scrollX scrollY scrollTo scrollBy getComputedStyle matchMedia MutationObserver IntersectionObserver".split(" "),
+  ..."ResizeObserver requestAnimationFrame HTMLElement Element Node Event CustomEvent KeyboardEvent MouseEvent CSS".split(" "),
+]);
+
+const SLEEP_FUNCTIONS = new Set(["sleep"]);
+const SLEEP_METHODS = new Set(["waitForTimeout"]);
+const SLEEP_MEMBERS = new Set(["Bun.sleep", "Bun.sleepSync", "scheduler.wait", "Atomics.wait"]);
+const TIMERS = new Set(["setTimeout", "setInterval"]);
+const TIMER_HOLDERS = new Set(["globalThis", "window", "self"]);
+
+function isNode(value: unknown): value is AnyNode {
+  return typeof value === "object" && value !== null && "type" in value && typeof value.type === "string";
 }
 
-function lineAround(source: string, index: number) {
-  const start = source.lastIndexOf("\n", index) + 1;
-  const end = source.indexOf("\n", index);
-  return source.slice(start, end === -1 ? source.length : end).trim();
-}
-
-// The arguments of the call whose "(" is at `open`, split at its own commas: text inside a string, a
-// comment or a nested bracket belongs to the argument it sits in. Undefined when the call never closes.
-function callArguments(source: string, open: number): string[] | undefined {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = open + 1;
-  for (let at = open + 1; at < source.length; at += 1) {
-    const char = source.charAt(at);
-    if (QUOTES.has(char)) {
-      at += 1;
-      while (at < source.length && source.charAt(at) !== char) at += source.charAt(at) === "\\" ? 2 : 1;
-    } else if (source.startsWith("//", at)) {
-      const newline = source.indexOf("\n", at);
-      at = newline === -1 ? source.length : newline;
-    } else if (source.startsWith("/*", at)) {
-      const close = source.indexOf("*/", at + 2);
-      at = close === -1 ? source.length : close + 1;
-    } else if (char === "(" || char === "[" || char === "{") {
-      depth += 1;
-    } else if (char === ")" || char === "]" || char === "}") {
-      if (depth === 0) {
-        parts.push(source.slice(start, at));
-        return parts.map((part) => part.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, "").trim());
-      }
-      depth -= 1;
-    } else if (char === "," && depth === 0) {
-      parts.push(source.slice(start, at));
-      start = at + 1;
-    }
+function everyNode(root: AnyNode, visit: (node: AnyNode) => void) {
+  visit(root);
+  for (const value of Object.values(root)) {
+    for (const item of Array.isArray(value) ? value : [value]) if (isNode(item)) everyNode(item, visit);
   }
-  return undefined;
+}
+
+function numericValue(node: AnyNode | undefined): number | undefined {
+  if (node?.type === "UnaryExpression" && node.operator === "+") return numericValue(node.argument);
+  if (node?.type !== "Literal") return undefined;
+  if (typeof node.value === "number") return node.value;
+  return typeof node.value === "bigint" ? Number(node.value) : undefined;
+}
+
+type Clock = "sleep" | "timer" | undefined;
+
+function clockOf(callee: AnyNode): Clock {
+  if (callee.type === "Identifier") {
+    if (TIMERS.has(callee.name)) return "timer";
+    return SLEEP_FUNCTIONS.has(callee.name) ? "sleep" : undefined;
+  }
+  if (callee.type !== "MemberExpression" || callee.computed || callee.property.type !== "Identifier") return undefined;
+  const method = callee.property.name;
+  if (SLEEP_METHODS.has(method)) return "sleep";
+  if (callee.object.type !== "Identifier") return undefined;
+  if (SLEEP_MEMBERS.has(`${callee.object.name}.${method}`)) return "sleep";
+  return TIMER_HOLDERS.has(callee.object.name) && TIMERS.has(method) ? "timer" : undefined;
+}
+
+// A timer waits on a clock when its delay is a positive number, or when its callback is a bare name (it
+// only settles a promise) and the delay is anything but zero. `setTimeout(ms)` is the promise form.
+function timerWaits(parts: readonly AnyNode[]) {
+  const [first, second] = parts;
+  if (second === undefined) return (numericValue(first) ?? 0) > 0;
+  const delay = numericValue(second);
+  return delay === undefined ? first?.type === "Identifier" : delay > 0;
+}
+
+export function parseFailure(example: string): string | undefined {
+  try {
+    analyzeScopes(example);
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 /**
- * The lines of one example that wait on a clock: a sleep call, a timer that only settles a promise (its
- * callback is a bare name), a timer whose delay is a positive number in any spelling (`1000`, `1_000`,
- * `1e3`, `0x3e8`, `1.5`) whatever follows it, and the promise form `setTimeout(ms)`. A timer call is read
- * whole, across lines; one that never closes is reported too.
+ * The lines of one example that wait on a clock: a call to `sleep`, `Bun.sleep`, `Bun.sleepSync`,
+ * `scheduler.wait`, `Atomics.wait` or any `waitForTimeout`, and a `setTimeout` or `setInterval` (bare or on
+ * `globalThis`, `window`, `self`) that `timerWaits` accepts. A delay kept in a variable and an alias of a
+ * timer are outside this check. An example that does not parse is reported whole.
  */
 export function fixedDelays(example: string): string[] {
+  const failure = parseFailure(example);
+  if (failure !== undefined) return [`unparseable example (${failure})`];
+  const lines = example.split("\n");
   const found: string[] = [];
-  for (const call of example.matchAll(SLEEP_CALL)) found.push(lineAround(example, call.index));
-  for (const call of example.matchAll(TIMER_CALL)) {
-    const parts = callArguments(example, call.index + call[0].length - 1);
-    const [first = "", delay] = parts ?? [];
-    const settlesAPromise = delay !== undefined && /^[\w$]+$/.test(first);
-    const waits = positiveLiteral(delay ?? first);
-    if (parts === undefined || settlesAPromise || waits) found.push(lineAround(example, call.index));
-  }
+  everyNode(analyzeScopes(example).ast, (node) => {
+    if (node.type !== "CallExpression") return;
+    const clock = clockOf(node.callee);
+    if (clock === "sleep" || (clock === "timer" && timerWaits(node.arguments))) {
+      found.push((lines[(node.loc?.start.line ?? 1) - 1] ?? "").trim());
+    }
+  });
   return found;
 }
 
-const NODE_MODULES = ["fs", "os", "path"];
-
-function declares(example: string, name: string) {
-  return new RegExp(
-    `\\b(?:const|let|var)\\s+${name}\\s*=|\\bimport\\s+(?:\\*\\s+as\\s+)?${name}\\s+from\\b|\\{[^{}]*\\b${name}\\b[^{}]*\\}\\s*=`,
-  ).test(example);
+function assignedOnGlobalThis(root: AnyNode) {
+  const names: string[] = [];
+  everyNode(root, (node) => {
+    if (node.type !== "AssignmentExpression" || node.left.type !== "MemberExpression") return;
+    const { object, property, computed } = node.left;
+    if (object.type === "Identifier" && object.name === "globalThis" && !computed && property.type === "Identifier") {
+      names.push(property.name);
+    }
+  });
+  return names;
 }
 
 /**
- * The Node modules (`fs`, `os`, `path`) the examples of one document call without declaring them. An
- * example runs as written in an eval cell, where no Node module is in scope, so a call needs a
- * declaration in its own example or in an earlier one of the same document.
+ * The names the examples of one document use without accounting for them, in document order. An example
+ * runs as written in an eval cell, so each name is one of: declared in this example or an earlier one of
+ * the document (a declaration, an import, an assignment on `globalThis`), a platform global, or listed in a
+ * `// given: a, b` comment, which is how an example names what its reader supplies. A given name holds for
+ * the rest of the document, as a declaration does. Examples that do not parse are skipped here.
  */
-export function undeclaredNodeModules(examples: readonly string[]): string[] {
-  const declared = new Set<string>();
+export function unaccountedNames(examples: readonly string[], platform = PLATFORM_GLOBALS): string[] {
+  const known = new Set<string>();
   const missing = new Set<string>();
   for (const example of examples) {
-    for (const name of NODE_MODULES) {
-      if (declares(example, name)) declared.add(name);
-      if (new RegExp(`(?<![\\w.$])${name}\\s*\\.\\s*\\w+\\s*\\(`).test(example) && !declared.has(name))
-        missing.add(name);
+    if (parseFailure(example) !== undefined) continue;
+    for (const given of example.matchAll(/\/\/\s*given:([^\n]*)/g)) {
+      for (const name of (given[1] ?? "").match(/[\w$]+/g) ?? []) known.add(name);
     }
+    const analysis = analyzeScopes(example);
+    const here = new Set([...analysis.declared, ...assignedOnGlobalThis(analysis.ast)]);
+    for (const { name } of analysis.free) {
+      if (!known.has(name) && !here.has(name) && !platform.has(name)) missing.add(name);
+    }
+    for (const name of here) known.add(name);
   }
   return [...missing];
 }

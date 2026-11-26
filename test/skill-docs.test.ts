@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fixedDelays, undeclaredNodeModules } from "./fixtures/doc-example-checks.ts";
+import { fixedDelays, parseFailure, unaccountedNames } from "./fixtures/doc-example-checks.ts";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -76,8 +76,8 @@ function importedNames(block: string) {
 }
 
 // The guard below is only as good as this matcher: every way an example can wait on a clock is flagged,
-// whatever the timer's callback is called, however its delay is spelled and however many lines the call
-// takes, and a wait on a state is not (#352, #362).
+// whatever the timer's callback is called, however its delay is spelled and however the call is laid out,
+// and a wait on a state is not, even when a comment or a string beside it names a timer (#352, #362, #366).
 test("the fixed-delay matcher flags a wait on a clock and passes a wait on a state", () => {
   const waitsOnAClock = [
     "await Bun.sleep(1000);",
@@ -94,6 +94,13 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
     "await new Promise((done) => setTimeout(() => done(), 0x3e8));",
     "await new Promise((done) => setTimeout(() => done(), 1.5));",
     'await new Promise((done) => setTimeout(() => done("a, b"), /* ms */ 250));',
+    "await new Promise((ok) => setTimeout /* defer */ (() => ok(), 1000));",
+    "await new Promise((ok) => setTimeout?.(() => ok(), 1000));",
+    "await new Promise((ok) => setTimeout(() => ok(), (1000)));",
+    "await new Promise((ok) => setTimeout(() => /[)]/.test(label) && ok(), 1000));",
+    "await new Promise((ok) => globalThis.setTimeout(() => ok(), 0b1010));",
+    "const poll = setInterval(() => check(), 500);",
+    "await scheduler.wait(1000);",
   ];
   const waitsOnAState = [
     "await page.waitForFunction(() => window.ready === true, undefined, { timeout: 5000 });",
@@ -101,6 +108,10 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
     "await snoop.waitFor({ url: /search/ }, { timeoutMs: 10_000 });",
     "await requestHuman(page, { prompt, timeoutMs: 300000 });",
     "setTimeout(() => controller.abort(), 0);",
+    "setTimeout(next, 0);",
+    "await page.waitForFunction(() => window.ready); // never use sleep(500)",
+    'await page.waitForFunction(() => document.body.innerText.includes("setTimeout(done, 1000)"));',
+    "const timers = { sleep: 500, setTimeout: 1000 };",
   ];
 
   assert.deepEqual(
@@ -113,19 +124,25 @@ test("the fixed-delay matcher flags a wait on a clock and passes a wait on a sta
   );
 });
 
-// An example runs as written in an eval cell, where no Node module is in scope (#362).
-test("the module check reports a Node module an example calls without declaring it", () => {
-  const flagLine = "const flag = path.join(os.tmpdir(), `handoff-${Date.now()}.flag`);";
+// An example runs as written in an eval cell: every name it uses is declared in its document's examples, is
+// a platform global, or is listed in a `// given:` line that tells the reader what to supply (#362, #366).
+test("the name check reports what an example uses without accounting for it", () => {
+  const snapshot = "const page = await browser.newTab(url);\nprint(compactSnapshot(await page.snapshot()));";
 
-  assert.deepEqual(undeclaredNodeModules([flagLine, "fs.writeFileSync(flag, 'done');"]), ["os", "path", "fs"]);
+  assert.deepEqual(unaccountedNames([snapshot]), ["browser", "url", "compactSnapshot"]);
+  assert.deepEqual(unaccountedNames(["const text = await fs.promises.readFile(cookieFile, 'utf8');"]), [
+    "fs",
+    "cookieFile",
+  ]);
   assert.deepEqual(
-    undeclaredNodeModules([
-      'const fs = await import("node:fs");\nconst os = await import("node:os");\nimport path from "node:path";',
-      `${flagLine}\nfs.writeFileSync(flag, "done");`,
+    unaccountedNames([
+      'const { connect, compactSnapshot } = await import("omowright");\nglobalThis.browser = await connect();',
+      `// given: url\n${snapshot}`,
+      "await page.evaluate(() => document.title); display(await page.screenshot()); // later example, same names",
     ]),
     [],
   );
-  assert.deepEqual(undeclaredNodeModules(["const where = page.url(); await session.path.join(where);"]), []);
+  assert.deepEqual(unaccountedNames(["for (const item of items) console.log(item.id);"]), ["items"]);
 });
 
 const docs = await listDocs();
@@ -147,8 +164,13 @@ for (const doc of [...docs, path.join(repoRoot, "README.md"), path.join(repoRoot
     assert.deepEqual(blocks.flatMap(fixedDelays), [], `${rel} waits on a clock; wait for the state instead`);
   });
 
-  test(`${rel}: examples declare the Node modules they call`, () => {
-    assert.deepEqual(undeclaredNodeModules(blocks), [], `${rel} calls a Node module no example declares`);
+  test(`${rel}: every example parses and accounts for the names it uses`, () => {
+    assert.deepEqual(
+      blocks.flatMap((block) => parseFailure(block) ?? []),
+      [],
+      `${rel} has an example that is not valid JavaScript`,
+    );
+    assert.deepEqual(unaccountedNames(blocks), [], `${rel} uses names no example declares or lists as given`);
   });
 }
 
