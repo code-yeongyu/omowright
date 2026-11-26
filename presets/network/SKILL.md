@@ -25,7 +25,7 @@ const snoop = createNetworkSnoop(page, { match: { url: /\/api\//, mimeType: "jso
 await page.goto("https://example.com/search?q=widgets");
 const results = snoop.popJson(); // parsed bodies, buffer drained
 console.log(snoop.summary({ max: 20 })); // "GET 200 application/json 8123B https://..."
-snoop.dispose();
+// The next example waits on this snoop. When you are done with the page's traffic: snoop.dispose()
 ```
 
 Create the snoop before the navigation or click that produces the traffic.

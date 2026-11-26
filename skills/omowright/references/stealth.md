@@ -120,7 +120,7 @@ extract them to JSON and inject with the package helper:
 
 ```js
 import fs from "node:fs";
-// given: cookieFile, url
+// given: page, cookieFile, url (page: a tab that is still open; the fallback example above closes its own)
 import { injectCookies } from "omowright";
 const cookies = JSON.parse(await fs.promises.readFile(cookieFile, "utf8"));
 await injectCookies(page, cookies); // sanitize + Network.setCookies
