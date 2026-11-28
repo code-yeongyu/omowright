@@ -99,6 +99,16 @@ Reproduce after `bun install` (any Chromium works for `--browser`, or set
 bun scripts/bench-snapshot-tokens.ts --browser ~/.cache/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-linux64/chrome-headless-shell --browser-arg=--no-sandbox
 ```
 
+## Secret text stays secret
+
+A page can seal any subtree with `data-sensitive` (any value except the exact
+string `"false"`): snapshots, locator reads and BSK output replace it with a
+`[redacted: sensitive]` placeholder that keeps the element's role and ref, while
+everything outside the subtree stays fully visible and clickable. Password input
+values were already redacted; the marker extends that to page text the page
+declares secret (#379). Screenshots still capture rendered pixels — see
+TOOLS.md for the full contract.
+
 ## Scrolling is a first-class problem
 
 Most of the web an agent cares about is behind a scroll: feeds, search results,

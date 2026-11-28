@@ -458,6 +458,9 @@
     if (opts.depth >= MAX_ACCNAME_DEPTH) return "";
     if (opts.visitedElements.has(element)) return "";
     opts.visitedElements.add(element);
+    // #379: names never source from a sealed subtree, so a labelledby target, label content or
+    // a nested child inside data-sensitive contributes nothing instead of the secret.
+    if (isSensitiveElement(element)) return "";
     if (!opts.includeHidden && !opts.inLabelledBy && !opts.inLabel) {
       if (isHiddenForAria(element)) return "";
     }
@@ -606,6 +609,24 @@
   let _visibilityCache = null;
   const OMOWRIGHT_REF_SYMBOL = Symbol("omowright_ref");
   const USER_PASSWORD_REDACTED = "[redacted]";
+  // #379: the page can seal a subtree as secret with data-sensitive (any value except the exact
+  // string "false", which is inert and does not unseal a marked ancestor). The walk crosses
+  // shadow boundaries like the rest of the serializer.
+  const SENSITIVE_REDACTED = "[redacted: sensitive]";
+  function isSensitiveElement(element) {
+    for (let current = element; current;) {
+      const value = current.getAttribute ? current.getAttribute("data-sensitive") : null;
+      if (value !== null && value !== "false") return true;
+      const parent = current.parentElement;
+      if (parent) {
+        current = parent;
+        continue;
+      }
+      const root = typeof current.getRootNode === "function" ? current.getRootNode() : null;
+      current = root && typeof ShadowRoot !== "undefined" && root instanceof ShadowRoot ? root.host : null;
+    }
+    return false;
+  }
   function getRefPrefix(ref) {
     return ref.match(/^(f\d+)?e\d+$/)?.[1] ?? "";
   }
@@ -829,6 +850,20 @@
   function getOrCreateRefId(element, role, name, refPrefix = "") {
     const writeRefMeta = (ref) => {
       const metaRole = getRole(element);
+      // #379: refs are output too; a sealed element's meta never carries its accessible name,
+      // aria-label or placeholder attribute values, only the placeholder and structure.
+      if (isSensitiveElement(element)) {
+        const signature = `${metaRole}::${SENSITIVE_REDACTED}`;
+        const nth = _signatureAssigned.get(signature) ?? 0;
+        _signatureAssigned.set(signature, nth + 1);
+        _refs[ref] = {
+          role: metaRole,
+          name: SENSITIVE_REDACTED,
+          tagName: element.tagName,
+          nthAmongSameSignature: nth,
+        };
+        return;
+      }
       const metaName = getAccessibleName(element).substring(0, 100);
       const signature = `${metaRole}::${metaName}`;
       const nth = _signatureAssigned.get(signature) ?? 0;
@@ -874,6 +909,21 @@
   function toSnapshotNode(element, refPrefix = "") {
     const role = getRole(element);
     const roleLower = role.toLowerCase();
+    // #379: a sealed element becomes one opaque node — role, placeholder name and ref, no state
+    // that carries text and no children — so no name, value, attribute value or descendant
+    // content is emitted. The role and ref stay so an agent can still see the sealed block and
+    // act on it, and elements outside the subtree keep their names and refs.
+    if (isSensitiveElement(element)) {
+      return {
+        role,
+        name: SENSITIVE_REDACTED,
+        hidden: !isVisible(element) || void 0,
+        redacted: true,
+        refId: getOrCreateRefId(element, role, SENSITIVE_REDACTED, refPrefix),
+        element,
+        children: [],
+      };
+    }
     const interactivity = getInteractivitySignals(element);
     const name = normalizeName(getAccessibleName(element));
     const hidden = !isVisible(element);
@@ -1097,7 +1147,8 @@
       const nodeString = snapshotNodeToString(node);
       const textChildren = node.children.filter((child) => typeof child === "string");
       const elementChildren = node.children.filter((child) => typeof child !== "string");
-      const hasSelectOptions = node.element?.tagName.toLowerCase() === "select";
+      // #379: a sealed node emits no option text or values either.
+      const hasSelectOptions = !node.redacted && node.element?.tagName.toLowerCase() === "select";
       if (textChildren.length === 1 && elementChildren.length === 0 && !hasSelectOptions) {
         const text = normalizeWhitespace(textChildren[0] || "");
         if (text) lines.push(`${indent}- ${nodeString}: "${escapeSnapshotText(text)}"`);
@@ -1170,11 +1221,14 @@
         if (!element?.tagName) return;
         if (visited.has(element)) return;
         visited.add(element);
+        const sensitive = isSensitiveElement(element);
         const traversable = shouldTraverse(element, options);
         const includeAsRoot = !options.refId && element === document.body;
         const hidden = !isVisible(element);
         const include =
-          includeAsRoot || (traversable && (shouldIncludeNode(element, options) || (options.showHidden && hidden)));
+          sensitive ||
+          includeAsRoot ||
+          (traversable && (shouldIncludeNode(element, options) || (options.showHidden && hidden)));
         if (!traversable && !includeAsRoot) return;
         let currentNode = null;
         let targetNode = parentNode;
@@ -1189,6 +1243,10 @@
           const hoistedName = normalizeName(getAccessibleName(element));
           if (hoistedName && targetNode.role !== "fragment") targetNode.children.push(hoistedName);
         }
+        // #379: a sealed element is a leaf — no text, ::before/::after, owned or child content
+        // can reach the tree from below it. (Its forced include means the hoist above is
+        // unreachable for it; the early return is what seals the subtree.)
+        if (sensitive) return;
         if (currentDepth < maxDepth) {
           const beforeText = getCSSContent(element, "::before");
           if (beforeText) targetNode.children.push(beforeText);
