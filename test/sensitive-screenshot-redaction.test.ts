@@ -330,8 +330,11 @@ async function setTallPage(page: PipePage) {
   });
 }
 
-// unchanged; a capture that cannot even check the page fails fast with the capture timeout's
-// own wording instead of hanging past the caller's budget. (2) regression — the review's five
+// The tests after the first three extend the same contract (#383 review): a marked replaced
+// element or shadow host blanks what it paints, a page.video recording streams blanked frames,
+// overlapping captures share one page-level hold, and a capture that cannot even blank the page
+// fails within the caller's timeout with the capture timeout's own wording instead of hanging
+// past the caller's budget. (2) regression — the review's five
 // findings: replaced elements carrying the marker (img, canvas, video, iframe paint above the
 // black background), a marked shadow host (a light-DOM stylesheet and the shadow copy's own
 // selectors never reach the host from inside), screencast frames during a page.video recording,
@@ -444,6 +447,23 @@ function findFfmpeg() {
 }
 
 const FFMPEG = findFfmpeg();
+// A recorded frame went through JPEG and VP8, which turn pure black into near-black; the
+// unblanked frame reads rgb(250, 0, 2), far outside this bound.
+const CODEC_BLANK_TOLERANCE = 16;
+
+function assertRegionNearBlank(image: DecodedPng, rect: Rect, what: string) {
+  const region = deviceRegion(image, rect, 1, INSET_DEVICE_PX);
+  assertRegionInside(image, region, what);
+  for (let y = region.y; y < region.y + region.height; y += 1) {
+    for (let x = region.x; x < region.x + region.width; x += 1) {
+      const actual = pixel(image, x, y);
+      if (actual.some((channel) => channel > CODEC_BLANK_TOLERANCE)) {
+        assert.fail(`${what} is not blank: rgb(${actual.join(", ")}) at (${x}, ${y})`);
+      }
+    }
+  }
+}
+
 const skipVideo = !SHELL
   ? "no chromium binary found"
   : !FFMPEG && "no ffmpeg on PATH with the libvpx encoder and null muxer";
@@ -528,7 +548,7 @@ test("a marked shadow host blanks its shadow content (security contract #380)", 
 
 test(
   "video recording frames blank a marked page mid-recording (security contract #380)",
-  { skip: skipVideo, timeout: 60_000 },
+  { skip: skipVideo },
   async () => {
     assert.ok(SHELL, "no chromium binary found");
     assert.ok(FFMPEG, "no ffmpeg on PATH with the libvpx encoder and null muxer");
@@ -552,8 +572,9 @@ test(
         await page.evaluate(() => {
           document.body.style.background = "#ffffff";
         });
-        // The repaint's screencast frame must land before stopScreencast cancels it.
-        await Promise.race([firstFrame.promise, new Promise((resolve) => setTimeout(resolve, 3000))]);
+        // A screencast frame must land before stopScreencast cancels the stream; the test's own
+        // limit bounds the wait.
+        await firstFrame.promise;
         await video.stop({ path: "marked/finished.webm" });
         assert.ok(frames >= 1, "no screencast frame arrived during the recording");
         const clip = await video.path();
@@ -565,7 +586,7 @@ test(
           `the recorded frame is ${image.width}x${image.height}, not the viewport ${viewport.width}x${viewport.height}`,
         );
         const secret = await rectOf(page, `document.getElementById("secret")`);
-        assertRegionBlank(image, secret, 1, "the marked block in a mid-recording screencast frame");
+        assertRegionNearBlank(image, secret, "the marked block in a mid-recording screencast frame");
       } finally {
         unsubscribe();
       }
