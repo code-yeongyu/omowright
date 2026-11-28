@@ -405,6 +405,15 @@ findable and clickable. Accessible names never source from a sealed subtree: an
 input values were already redacted; the marker extends that to page text the
 page itself declares secret.
 
+A sealed `<iframe>` (or one inside a sealed element) seals the document it hosts
+and every frame below it: snapshots show only the iframe's placeholder line, refs
+into those frames resolve as stale, and `frameLocator(...)` reads return the
+placeholder. Text, label and role-name matchers (`getByText`, `getByLabel`,
+`getByRole({ name })`, `:has-text`) read a sealed subtree as the placeholder, so a
+match count cannot confirm a guessed secret. Attribute matchers (`getByTestId`,
+`getByTitle`, `getByPlaceholder`, `getByAltText`) still match a sealed element, so
+a sealed block can be located by its test id.
+
 Screenshots, `readText` OCR and anything pixel-based still capture what the page
 renders: avoid them (or mask via the page's own CSS) while a marked secret is
 visible. `page.evaluate` with your own JS reads the DOM directly and is likewise

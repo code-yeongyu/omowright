@@ -1,11 +1,15 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { globSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { buildSnapshotExpression, compactSnapshot, connectPipe } from "../src/index.ts";
+import { buildSnapshotExpression, compactSnapshot, describeLayers } from "../src/index.ts";
 import { readProperty } from "../src/read-property.ts";
-import { removeTreeSync } from "./fixtures/remove-tree.ts";
+import {
+  PLACEHOLDER,
+  type PipePage,
+  assertNoWords,
+  openSensitiveTab as openTab,
+  releaseSensitiveBrowser,
+  skipWithoutShell as skip,
+} from "./fixtures/sensitive-browser.ts";
 
 // Test authoring gate: (1) contract — security (#379): an element the page marks data-sensitive
 // (any value except the exact string "false") is a secret, and omowright never emits its text or
@@ -17,44 +21,20 @@ import { removeTreeSync } from "./fixtures/remove-tree.ts";
 // (#335/#341) are redacted, but nothing covers page-MARKED text. (4) boundary — a real
 // Chromium via connectPipe: page.snapshot(), page.locator() reads and the real BSK snapshot
 // expression, no mocks. The secret words are synthetic NATO filler standing in for a 24-word
-// recovery phrase.
+// recovery phrase. The text, label and role matchers (#382) are outputs too: a match count would
+// confirm a guessed secret, so they read a sealed subtree as the placeholder.
 
 const SECRET = "alpha bravo charlie";
 const INPUT_SECRET = "kilo lima mike";
 const MUTATED_SECRET = "foxtrot golf";
-const PLACEHOLDER = "[redacted: sensitive]";
-const SECRET_WORDS = [...SECRET.split(" "), ...INPUT_SECRET.split(" "), ...MUTATED_SECRET.split(" ")];
+const OPTION_SECRET = "november oscar";
+const LAYER_SECRET = "papa quebec";
+const SECRET_WORDS = [SECRET, INPUT_SECRET, MUTATED_SECRET, OPTION_SECRET, LAYER_SECRET].flatMap((s) => s.split(" "));
 
 function assertNoSecret(what: string, value: unknown) {
-  const text = typeof value === "string" ? value : (JSON.stringify(value) ?? "");
-  for (const word of SECRET_WORDS) {
-    assert.ok(!text.includes(word), `${what} leaked "${word}": ${text}`);
-  }
+  assertNoWords(what, value, SECRET_WORDS);
 }
 
-function findHeadlessShell() {
-  const home = process.env["HOME"] ?? "";
-  const candidates = [
-    ...globSync(
-      path.join(
-        home,
-        "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
-      ),
-    ),
-    ...globSync(
-      path.join(
-        home,
-        ".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell",
-      ),
-    ),
-  ];
-  return candidates.toSorted().at(-1);
-}
-
-const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
-
-type PipeBrowser = Awaited<ReturnType<typeof connectPipe>>;
-type PipePage = Awaited<ReturnType<PipeBrowser["newTab"]>>;
 type SnapshotResult = Awaited<ReturnType<PipePage["snapshot"]>>;
 type TreeRead = Extract<SnapshotResult, { tree: string }>;
 
@@ -91,6 +71,7 @@ async function setSecretPage(page: PipePage) {
       '<span data-sensitive id="secret-name">alpha bravo charlie</span>' +
       '<button type="button" id="reveal" aria-labelledby="secret-name">Reveal</button>' +
       '<div data-sensitive="false"><p>public notes stay visible</p></div>' +
+      '<select data-sensitive id="pin"><option>november oscar</option></select>' +
       "</main>";
   });
 }
@@ -98,49 +79,8 @@ async function setSecretPage(page: PipePage) {
 // One browser serves the whole file. The first test that runs starts it — the lighter BSK read
 // below runs first, so the cold chrome-headless-shell start, which alone takes the whole default
 // per-test limit on windows-latest, lands on the lightest body and carries that one explicit
-// timeout, and the locator-read contract runs against the already-warm browser — and after()
-// releases everything. Not in a before() hook: bun gives hooks the test limit and ignores a hook's
-// timeout option (killed at 5003 ms on bun 1.4.5 in both argument orders), and that hook timed out
-// on a Windows runner. Not while the module loads either: a run whose filter selects no test here
-// would launch a browser and leave its profile behind. Release runs newest first, the browser
-// before its user-data dir, collecting failures instead of stranding the rest.
-const skip = !SHELL && "no chromium binary found";
-type Release = () => unknown;
-const releases: Release[] = [];
-let shared: Promise<PipeBrowser> | undefined;
-
-async function start(): Promise<PipeBrowser> {
-  assert.ok(SHELL, "no chromium binary found");
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-sensitive-"));
-  releases.push(() => removeTreeSync(ud));
-  const browser = await connectPipe({
-    browserPath: SHELL,
-    browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-    storageRoot: ud,
-  });
-  releases.push(() => browser.close());
-  return browser;
-}
-
-after(async () => {
-  await shared?.catch(() => undefined);
-  const failures: unknown[] = [];
-  for (const step of releases.toReversed()) {
-    try {
-      await step();
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length > 0)
-    throw new AggregateError(failures, "the sensitive-redaction fixture did not release cleanly");
-});
-
-async function openTab(): Promise<PipePage> {
-  shared ??= start();
-  const browser = await shared;
-  return await browser.newTab("about:blank");
-}
+// timeout, and the locator-read contract runs against the already-warm browser.
+after(releaseSensitiveBrowser);
 
 // This test runs first, so it pays the cold chrome-headless-shell start, measured at ~5 s on
 // windows-latest: run 46127683648 took 4920 ms and run 46130078845 reached its first CDP command
@@ -258,6 +198,26 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
       texts.includes("public notes stay visible") && texts.includes(PLACEHOLDER),
       `allTextContents lost unmarked text or placeholder: ${JSON.stringify(texts)}`,
     );
+
+    // Matchers (#382): a guessed sealed string matches nothing, by text, label or role name,
+    // while unmarked text still matches.
+    assert.equal(await page.getByText("bravo").count(), 0, "getByText confirmed a sealed string");
+    assert.equal(await page.getByText("oscar").count(), 0, "getByText confirmed a sealed option");
+    assert.equal(await page.getByLabel("bravo").count(), 0, "getByLabel confirmed a sealed label");
+    assert.equal(await page.getByRole("button", { name: "bravo" }).count(), 0, "role name confirmed a secret");
+    assert.equal(await page.getByText("Copy phrase").count(), 1, "unmarked text stopped matching");
+
+    // Layers (#382): a sealed overlay is named by the placeholder, with no selector hint.
+    await page.evaluate(() => {
+      const overlay = document.createElement("div");
+      overlay.setAttribute("data-sensitive", "");
+      overlay.style.cssText = "position:fixed;inset:0;background:#fff";
+      overlay.textContent = "papa quebec";
+      document.body.append(overlay);
+    });
+    const layers = await describeLayers(page);
+    assertNoSecret("layers", layers);
+    assert.equal(layers.blocking?.name, PLACEHOLDER, `sealed overlay layer: ${JSON.stringify(layers.blocking)}`);
   } finally {
     await page.close();
   }

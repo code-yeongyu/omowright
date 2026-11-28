@@ -21,6 +21,7 @@ export function createTextMatching(
   isHidden: (element: Element) => boolean = () => false,
   getRole: (element: Element) => string = () => "",
   includeHidden = false,
+  sealedDocument = false,
 ) {
   // Predicates live inside the factory so the serialized source stays self-contained.
   const isElement = (node: Node): node is Element => node.nodeType === 1;
@@ -57,6 +58,24 @@ export function createTextMatching(
       ? text === normalize(matcher.exact)
       : text.toLowerCase().includes(normalize(matcher.contains).toLowerCase());
   };
+  // #379: data-sensitive (any value except "false") seals a subtree. Text, label and role-name
+  // matching read a sealed subtree as the placeholder, so a matcher cannot confirm a guessed secret.
+  // sealedDocument: the whole document is hosted by a sealed frame owner.
+  const SENSITIVE = "[redacted: sensitive]";
+  const marked = (node: Node) => {
+    if (!isElement(node)) return false;
+    const value = node.getAttribute("data-sensitive");
+    return value !== null && value !== "false";
+  };
+  const sealed = (node: Node) => {
+    if (sealedDocument) return true;
+    for (let current: Node | null = node; current;) {
+      if (marked(current)) return true;
+      const root: Node | null = current.parentNode;
+      current = root && root.nodeType === 11 && "host" in root && root.host instanceof Node ? root.host : root;
+    }
+    return false;
+  };
   const skipped = (node: Node) =>
     ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.nodeName) || !!node.ownerDocument?.head?.contains(node);
   const textCache = new Map<Node, string>();
@@ -64,7 +83,8 @@ export function createTextMatching(
     const cached = textCache.get(node);
     if (cached !== undefined) return cached;
     let value = "";
-    if (!skipped(node)) {
+    if (marked(node)) value = SENSITIVE;
+    else if (!skipped(node)) {
       if (isInput(node) && ["submit", "button", "reset"].includes(node.type)) value = node.value;
       else {
         for (const child of node.childNodes) {
@@ -77,7 +97,8 @@ export function createTextMatching(
     textCache.set(node, value);
     return value;
   };
-  const matchesText = (node: MatchNode, matcher: TextMatcher) => !skipped(node) && matches(text(node), matcher);
+  const sealedText = (node: MatchNode) => (sealed(node) ? SENSITIVE : text(node));
+  const matchesText = (node: MatchNode, matcher: TextMatcher) => !skipped(node) && matches(sealedText(node), matcher);
   const labelledBy = (node: Element) => {
     const refs =
       node.ariaLabelledByElements ??
@@ -91,10 +112,10 @@ export function createTextMatching(
   };
   const labels = (node: MatchElement) => {
     const refs = labelledBy(node);
-    if (refs) return refs.map(text);
+    if (refs) return refs.map(sealedText);
     const ariaLabel = node.getAttribute("aria-label");
-    if (ariaLabel?.trim()) return [ariaLabel];
-    return Array.from(node.labels ?? [], text);
+    if (ariaLabel?.trim()) return [sealed(node) ? SENSITIVE : ariaLabel];
+    return Array.from(node.labels ?? [], sealedText);
   };
   const contentRoles = new Set([
     "button",
@@ -143,7 +164,7 @@ export function createTextMatching(
       descendant = false,
       inLabelledBy = false,
     ): string => {
-      if (visited.has(element) || skipped(element)) return "";
+      if (visited.has(element) || skipped(element) || sealed(element)) return "";
       if (!includeHidden && !hiddenReference && isHidden(element)) return "";
       visited.add(element);
       const refs = labelledBy(element);
@@ -189,7 +210,8 @@ export function createTextMatching(
       }
       return element.getAttribute("title") || "";
     };
-    return prohibitedRoles.has(getRole(node)) ? "" : normalize(alternative(node));
+    if (prohibitedRoles.has(getRole(node))) return "";
+    return sealed(node) ? SENSITIVE : normalize(alternative(node));
   };
   return { normalize, matches, skipped, text, matchesText, labels, accessibleName };
 }

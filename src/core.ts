@@ -21,6 +21,12 @@ import { pageBundle } from "./injected.ts";
 import { queryOpenShadowAll } from "./open-shadow-query.ts";
 import { isElementHiddenForAria } from "./aria-hidden.ts";
 import { createTextMatching } from "./text-matching.ts";
+import {
+  SENSITIVE_PLACEHOLDER,
+  collectSealedFrames,
+  isInSealedFrame,
+  sensitiveElementGuard,
+} from "./sensitive-guard.ts";
 import { snapshotResult, validateSnapshotOptions } from "./snapshot-diff.ts";
 import { subscribeConsoleEvents } from "./console-events.ts";
 import { assertPageEvent, RUNTIME_PAGE_EVENTS, subscribePageErrors } from "./page-events.ts";
@@ -2616,6 +2622,7 @@ export interface RoleQuery {
   level?: number;
   pressed?: boolean;
   selected?: boolean;
+  sealedDocument?: boolean;
 }
 export type LocatorWaitState = "attached" | "detached" | "visible" | "hidden";
 export interface LocatorScreenshotOptions {
@@ -3595,40 +3602,12 @@ async function isCheckedElement(xn: OmOPage, jn: ElementTarget) {
     }`,
   );
 }
-// #379: an element the page seals with data-sensitive (any value except the exact string
-// "false", which is inert and does not unseal a marked ancestor) makes every read omowright
-// formats from it return the placeholder instead of its text, value or attribute values —
-// including a read of an ancestor, which substitutes the placeholder for the sealed subtree.
-// The walk crosses shadow boundaries. innerText on a subtree containing sealed elements
-// falls back to the walker's text form, so its whitespace can differ from layout innerText.
-const SENSITIVE_PLACEHOLDER = `[redacted: sensitive]`;
-const sensitiveElementGuard = `const __omowSensitive = (element) => {
-  for (let current = element; current; ) {
-    const value = current.getAttribute ? current.getAttribute('data-sensitive') : null;
-    if (value !== null && value !== 'false') return true;
-    const parent = current.parentElement;
-    if (parent) { current = parent; continue; }
-    const root = typeof current.getRootNode === 'function' ? current.getRootNode() : null;
-    current = root && typeof ShadowRoot !== 'undefined' && root instanceof ShadowRoot ? root.host : null;
-  }
-  return false;
-};
-const __omowSensitiveTextOf = (root) => {
-  const parts = [];
-  const visit = (node) => {
-    if (node.nodeType === 3) parts.push(node.nodeValue || '');
-    else if (node.nodeType === 1) {
-      if (__omowSensitive(node)) { parts.push(${JSON.stringify(SENSITIVE_PLACEHOLDER)}); return; }
-      for (const child of node.childNodes) visit(child);
-    }
-  };
-  visit(root);
-  return parts.join('');
-};
-const __omowHasSensitive = (root) =>
-  __omowSensitive(root) ||
-  Array.from(root.querySelectorAll('[data-sensitive]')).some((el) => el.getAttribute('data-sensitive') !== 'false');`;
+// #379: reads of an element inside a frame hosted by a sealed owner return the placeholder.
+async function inSealedFrame(xn: OmOPage, jn: ElementTarget) {
+  return await isInSealedFrame(xn.cdp, xn.frameManager, jn.frameId);
+}
 async function inputValueElement(xn: OmOPage, jn: ElementTarget) {
+  if (await inSealedFrame(xn, jn)) return SENSITIVE_PLACEHOLDER;
   return await evaluateOnElement<string>(
     xn,
     jn,
@@ -3640,6 +3619,7 @@ async function inputValueElement(xn: OmOPage, jn: ElementTarget) {
   );
 }
 async function innerHTMLElement(xn: OmOPage, jn: ElementTarget) {
+  if (await inSealedFrame(xn, jn)) return SENSITIVE_PLACEHOLDER;
   return await evaluateOnElement<string>(
     xn,
     jn,
@@ -3663,6 +3643,7 @@ async function innerHTMLElement(xn: OmOPage, jn: ElementTarget) {
   );
 }
 async function innerTextElement(xn: OmOPage, jn: ElementTarget) {
+  if (await inSealedFrame(xn, jn)) return SENSITIVE_PLACEHOLDER;
   return await evaluateOnElement<string>(
     xn,
     jn,
@@ -3674,6 +3655,7 @@ async function innerTextElement(xn: OmOPage, jn: ElementTarget) {
   );
 }
 async function textContentElement(xn: OmOPage, jn: ElementTarget) {
+  if (await inSealedFrame(xn, jn)) return SENSITIVE_PLACEHOLDER;
   return await evaluateOnElement<string | null>(
     xn,
     jn,
@@ -3685,6 +3667,7 @@ async function textContentElement(xn: OmOPage, jn: ElementTarget) {
   );
 }
 async function getAttributeElement(xn: OmOPage, jn: ElementTarget, Vn: string) {
+  if (await inSealedFrame(xn, jn)) return SENSITIVE_PLACEHOLDER;
   return await evaluateOnElement<string | null>(
     xn,
     jn,
@@ -4443,7 +4426,10 @@ function createLocatorClass() {
         for (let { frameId: xn } of qn) {
           let jn = this.#e.frameManager.getFrame(xn);
           jn?.isolatedContextId &&
-            (Jn += await this.#m(await this.#e.resolveSessionId(jn.sessionId), jn.isolatedContextId, Vn));
+            (Jn += await this.#m(await this.#e.resolveSessionId(jn.sessionId), jn.isolatedContextId, {
+              ...Vn,
+              sealedDocument: await this.#sealed(xn),
+            }));
         }
         return xn ? +(Jn > 0 && (jn === `last` || jn < Jn)) : Jn;
       }
@@ -4453,7 +4439,7 @@ function createLocatorClass() {
       return await this.#e.evaluateInFrame<number>(
         Vn,
         `function(query) {
-        const textMatching = (${createTextMatching.toString()})();
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -4598,7 +4584,7 @@ function createLocatorClass() {
         const index = query.nth === 'last' ? nodes.length - 1 : query.nth;
         return query.hasNth ? (nodes[index] ? 1 : 0) : nodes.length;
       }`,
-        { selector: jn.selector, nth: jn.nth, hasNth: xn },
+        { selector: jn.selector, nth: jn.nth, hasNth: xn, sealedDocument: await this.#sealed(Vn) },
       );
     }
     async getAttribute(xn: string) {
@@ -4914,12 +4900,12 @@ function createLocatorClass() {
         if (countOnly) return 0;
         throw Error(`Selector "${xn}" not found`);
       }
-      let Jn = { ...this.#f(xn), scoped: scope !== void 0, countOnly },
+      let Jn = { ...this.#f(xn), scoped: scope !== void 0, countOnly, sealedDocument: await this.#sealed(jn) },
         { result: Yn } = await this.#e.cdp.send(
           `Runtime.callFunctionOn`,
           {
             functionDeclaration: `function(query, ...scopeRoots) {
-        const textMatching = (${createTextMatching.toString()})();
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -5088,7 +5074,10 @@ function createLocatorClass() {
         for (let { frameId: xn } of Vn) {
           let jn = this.#e.frameManager.getFrame(xn);
           jn?.isolatedContextId &&
-            (Yn += await this.#m(await this.#e.resolveSessionId(jn.sessionId), jn.isolatedContextId, Jn));
+            (Yn += await this.#m(await this.#e.resolveSessionId(jn.sessionId), jn.isolatedContextId, {
+              ...Jn,
+              sealedDocument: await this.#sealed(xn),
+            }));
         }
         --Yn;
       } else Yn = qn;
@@ -5097,7 +5086,8 @@ function createLocatorClass() {
         let Vn = this.#e.frameManager.getFrame(xn);
         if (!Vn?.isolatedContextId) continue;
         let qn = await this.#e.resolveSessionId(Vn.sessionId),
-          Zn = await this.#m(qn, Vn.isolatedContextId, Jn);
+          sealedDocument = await this.#sealed(xn),
+          Zn = await this.#m(qn, Vn.isolatedContextId, { ...Jn, sealedDocument });
         if (Zn <= 0) continue;
         if (Yn >= Zn) {
           Yn -= Zn;
@@ -5136,7 +5126,7 @@ function createLocatorClass() {
               const isElementHiddenForAria = (${isElementHiddenForAria.toString()});
               const ariaHiddenCache = new Map();
               const isHidden = (node) => isElementHiddenForAria(node, ariaHiddenCache);
-          const textMatching = (${createTextMatching.toString()})(isHidden, getRole, query.includeHidden === true);
+          const textMatching = (${createTextMatching.toString()})(isHidden, getRole, query.includeHidden === true, query.sealedDocument === true);
           const getAccessibleName = textMatching.accessibleName;
 
               const getAriaBoolean = (value) => {
@@ -5238,7 +5228,7 @@ function createLocatorClass() {
 
               return matches[query.nth] ?? null;
             }`,
-            arguments: [{ value: { ...jn, nth: Yn } }],
+            arguments: [{ value: { ...jn, nth: Yn, sealedDocument } }],
             executionContextId: Vn.isolatedContextId,
             returnByValue: !1,
             awaitPromise: !1,
@@ -5258,6 +5248,11 @@ function createLocatorClass() {
     }
     async #u() {
       return this.#n ? await this.#n.resolveFrameId() : this.#e.frameManager.mainFrameId;
+    }
+    // #379: text, label and role-name matching inside a frame hosted by a sealed owner reads the
+    // whole document as sealed, so a matcher there cannot confirm a guessed secret either.
+    async #sealed(frameId: string | null) {
+      return await isInSealedFrame(this.#e.cdp, this.#e.frameManager, frameId ?? undefined);
     }
     async #d(): Promise<FrameWalkEntry[]> {
       if (this.#n) {
@@ -5344,7 +5339,7 @@ function createLocatorClass() {
           const isElementHiddenForAria = (${isElementHiddenForAria.toString()});
           const ariaHiddenCache = new Map();
           const isHidden = (node) => isElementHiddenForAria(node, ariaHiddenCache);
-          const textMatching = (${createTextMatching.toString()})(isHidden, getRole, query.includeHidden === true);
+          const textMatching = (${createTextMatching.toString()})(isHidden, getRole, query.includeHidden === true, query.sealedDocument === true);
           const getAccessibleName = textMatching.accessibleName;
 
           const getAriaBoolean = (value) => {
@@ -5792,18 +5787,22 @@ async function takeSnapshot(xn: CoreCdpTransport, jn: PageFrameManager, Vn: Snap
     Yn = new Map<string, string>(),
     Zn = new Map<string, string>(),
     Qn = 1;
+  // #379: a frame hosted by a sealed owner, and every frame below it, is sealed content: it keeps
+  // its prefix number (so the fN sequence matches frames-snapshot.ts) but is never snapshotted,
+  // inlined or appended, and its refs resolve as stale.
+  let sealed = await collectSealedFrames(xn, jn, Jn);
   for (let xn of Jn) {
     let jn = xn.frameId === qn ? `` : `f${Qn++}`;
-    (Yn.set(xn.frameId, jn), Zn.set(jn, xn.frameId));
+    (Yn.set(xn.frameId, jn), sealed.has(xn.frameId) || Zn.set(jn, xn.frameId));
   }
   jn.setSnapshotFramePrefixMap(Zn);
   let ei = (() => {
     if (!Vn.ref) return qn;
     let xn = getRefPrefix(Vn.ref);
-    return Jn.find(({ frameId: jn }) => (Yn.get(jn) ?? ``) === xn)?.frameId ?? null;
+    return Jn.find(({ frameId: jn }) => !sealed.has(jn) && (Yn.get(jn) ?? ``) === xn)?.frameId ?? null;
   })();
   if (!ei) throw Error(`Ref "${Vn.ref}" points to a frame that is no longer available. Take a new snapshot.`);
-  let ti = jn.collectDescendantFrames(ei),
+  let ti = jn.collectDescendantFrames(ei).filter(({ frameId: xn }) => !sealed.has(xn)),
     ni = new Map<string, FrameSnapshot>(),
     ri: unknown;
   await Promise.all(
