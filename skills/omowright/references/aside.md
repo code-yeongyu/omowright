@@ -35,6 +35,12 @@ inside `run()`. There is no raw CDP (`page.context()` is undefined), so the
 omowright Page API, `compactSnapshot` and CUA do not apply; when the task needs
 them, use the next engine.
 
+For a long human step, wait in the calling program **between** REPL calls.
+Keep the session open, let the person finish, then take a fresh snapshot on
+that session before acting. Do not hold a single `run()` open while waiting
+for the person. `callTimeoutMs` controls how long omowright waits for a reply;
+increasing it does not extend an evaluation limit imposed by the Aside CLI.
+
 ## Setup and failures
 
 `asideDoctor()` reads the Aside app (macOS), the CLI and its sign-in without
@@ -46,5 +52,8 @@ approve the code in Aside). Relay that step; do not try another engine on the
 user's behalf without saying why.
 
 `repl_error` is the page code's own exception and the session stays usable.
-`repl_timeout` closes the session: connect again. `repl_start_timeout` and
+`repl_timeout` closes the session. A new connection is a new REPL: do not
+assume its `page` or globals survived. If the interrupted call took an action,
+inspect the browser state before deciding whether to repeat it; a missing reply
+does not establish that the action failed. `repl_start_timeout` and
 `repl_unsupported_cli` name the CLI version; relay them with `aside --update`.
