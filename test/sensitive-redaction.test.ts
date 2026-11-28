@@ -564,9 +564,20 @@ test(
         `(() => { ${sensitiveElementGuard}; return __omowRedactedClone(document.body, { indices: [], total: -1, all: false }).innerHTML; })()`,
       );
       assertNoWords("clone with a stale owner count", stale, SOURCE_WORDS);
-      for (const selector of ['iframe[src*="rho"]', 'object[data*="tau"]', 'iframe[srcdoc*="chi"]']) {
+      // A locator step hidden in a CSS comment is plain CSS to waitForSelector and scoped snapshots,
+      // which run the selector raw, so they refuse it like any source comparison (#395 review). The
+      // locator engine splits it into steps, and "/*" is not a valid selector there, whatever the guess.
+      const smuggled = '/*>>text:a*/iframe[srcdoc*="chi"]';
+      await assert.rejects(page.locator(smuggled).count(), "locator answered a smuggled comparison");
+      await assert.rejects(page.snapshot({ selector: smuggled }), /data-sensitive/, "snapshot smuggled");
+      const smuggledWait = page.waitForSelector(smuggled, { timeout: 200, state: "attached" });
+      await assert.rejects(smuggledWait, /data-sensitive/, "waitForSelector smuggled");
+      const sourceSelectors = ['iframe[src*="rho"]', 'object[data*="tau"]', 'iframe[srcdoc*="chi"]'];
+      for (const selector of sourceSelectors) {
         await assert.rejects(page.locator(selector).count(), /data-sensitive/, `CSS ${selector} answered`);
         await assert.rejects(page.snapshot({ selector }), /data-sensitive/, `snapshot({ selector: ${selector} })`);
+        const wait = page.waitForSelector(selector, { timeout: 200, state: "attached" });
+        await assert.rejects(wait, /data-sensitive/, `waitForSelector(${selector})`);
       }
       // An owner that never loads a frame cannot be checked, so a source that carries markup is
       // withheld: an <object> of a type the browser cannot render (it gets no frame), and a frame

@@ -38,6 +38,7 @@ import {
   isWithheldOwner,
   withheldFrameOwners,
   withheldMarkupUrl,
+  cssNeedsOwnerCheck,
   selectorNeedsOwnerCheck,
 } from "./sealed-frame-owners.ts";
 import { snapshotResult, validateSnapshotOptions } from "./snapshot-diff.ts";
@@ -5887,7 +5888,7 @@ async function takeSnapshot(xn: CoreCdpTransport, jn: PageFrameManager, Vn: Snap
           refPrefix: Yn.get(qn) ?? ``,
         };
         let selectorSealedFrames =
-          ai.selector && selectorNeedsOwnerCheck(ai.selector) ? await holdsWithheldOwner(xn, jn, qn) : !1;
+          ai.selector && cssNeedsOwnerCheck(ai.selector) ? await holdsWithheldOwner(xn, jn, qn) : !1;
         try {
           let { result: Vn } = await xn.send(
               `Runtime.callFunctionOn`,
@@ -7220,7 +7221,7 @@ function createOmOPageClass() {
           selectorGuardExpression(
             xn,
             testIdAttributeName,
-            selectorNeedsOwnerCheck(xn) &&
+            cssNeedsOwnerCheck(xn) &&
               (await holdsWithheldOwner(this.cdp, this.frameManager, this.frameManager.mainFrameId)),
           ),
         );
