@@ -511,43 +511,58 @@ test("a marked cross-origin iframe blanks its content (security contract #380)",
 
 // #385 seals the frame a sealed owner hosts (<iframe>, <frame>, <object>, <embed>; marked, or
 // inside a marked element) and every frame below it; each of those shapes must stay blank in
-// pixels too, here with cross-origin content the parent's stylesheet cannot enter.
+// pixels too, here with cross-origin content the parent's stylesheet cannot enter. The parent is
+// an http page because chrome-headless-shell paints nothing for a cross-origin <object>/<embed>
+// under about:blank, and every region must first show its content under an inert attribute, so
+// a shape that never painted cannot pass as blank.
+async function listen(body: string): Promise<{ url: string; close: () => Promise<unknown> }> {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object", "the server has no port");
+  return {
+    url: `http://127.0.0.1:${address.port}/`,
+    close: async () => await new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+const SEALED_FRAME_CONTENT_BACKGROUND: readonly number[] = [255, 0, 0];
+
 test(
   "every frame the text outputs seal (#385) stays blank in screenshots (security contract #380)",
   { skip },
   async () => {
-    const server = createServer((_request, response) => {
-      response.writeHead(200, { "content-type": "text/html" });
-      response.end(
-        '<body style="margin:0"><div style="width:300px;height:120px;background:#ff0000;color:#0000ff;font:48px bold sans-serif">hotel india</div></body>',
-      );
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const parent = await listen('<body style="margin:0"></body>');
+    const content = await listen(
+      '<body style="margin:0"><div style="width:300px;height:120px;background:#ff0000;color:#0000ff;font:48px bold sans-serif">hotel india</div></body>',
+    );
     const page = await openTab();
     try {
-      const address = server.address();
-      assert.ok(address && typeof address === "object", "the frame server has no port");
-      const url = `http://127.0.0.1:${address.port}/`;
+      await page.goto(parent.url);
+      const url = content.url;
       const box = "width:300px;height:120px;display:block;border:0";
+      // data-mark stands where data-sensitive goes; it is switched over after the first capture.
       const owners: ReadonlyArray<readonly [string, string]> = [
         [
           "in-wrapper",
-          `<div data-sensitive id="in-wrapper" style="width:300px;height:120px"><iframe src="${url}" style="${box}"></iframe></div>`,
+          `<div data-mark id="in-wrapper" style="width:300px;height:120px"><iframe src="${url}" style="${box}"></iframe></div>`,
         ],
         [
           "nested",
-          `<iframe data-sensitive id="nested" style="${box}" srcdoc="<body style='margin:0'><iframe src='${url}' style='${box}'></iframe></body>"></iframe>`,
+          `<iframe data-mark id="nested" style="${box}" srcdoc="<body style='margin:0'><iframe src='${url}' style='${box}'></iframe></body>"></iframe>`,
         ],
-        ["object", `<object data-sensitive id="object" type="text/html" data="${url}" style="${box}"></object>`],
-        ["embed", `<embed data-sensitive id="embed" type="text/html" src="${url}" style="${box}">`],
+        ["object", `<object data-mark id="object" type="text/html" data="${url}" style="${box}"></object>`],
+        ["embed", `<embed data-mark id="embed" type="text/html" src="${url}" style="${box}">`],
         [
           "frameset",
-          `<iframe id="frameset" style="${box}" srcdoc="<frameset rows='*'><frame data-sensitive src='${url}'></frameset>"></iframe>`,
+          `<iframe id="frameset" style="${box}" srcdoc="<frameset rows='*'><frame data-mark src='${url}'></frameset>"></iframe>`,
         ],
       ];
       await page.evaluate(
         `new Promise((resolve) => {
-        document.body.style.margin = "0";
         document.body.innerHTML = ${JSON.stringify(owners.map(([, html]) => html).join(""))};
         const loading = ${JSON.stringify(owners.map(([id]) => id))}.map((id) => {
           const owner = document.getElementById(id);
@@ -558,14 +573,28 @@ test(
       })`,
       );
       const dpr = await dprOf(page);
-      const image = decodePng(await page.screenshot());
-      for (const [id] of owners) {
-        const rect = await rectOf(page, `document.getElementById("${id}")`);
-        assertRegionBlank(image, rect, dpr, `the sealed frame shape "${id}"`);
-      }
+      const rects = new Map<string, Rect>();
+      for (const [id] of owners) rects.set(id, await rectOf(page, `document.getElementById("${id}")`));
+
+      const shown = decodePng(await page.screenshot());
+      for (const [id, rect] of rects)
+        assertRegionUnchanged(shown, rect, dpr, SEALED_FRAME_CONTENT_BACKGROUND, `the unsealed frame shape "${id}"`);
+
+      await page.evaluate(`(() => {
+        const marks = [...document.querySelectorAll("[data-mark]"),
+          ...document.getElementById("frameset").contentDocument.querySelectorAll("[data-mark]")];
+        for (const element of marks) {
+          element.removeAttribute("data-mark");
+          element.setAttribute("data-sensitive", "");
+        }
+        return marks.length;
+      })()`);
+      const sealed = decodePng(await page.screenshot());
+      for (const [id, rect] of rects) assertRegionBlank(sealed, rect, dpr, `the sealed frame shape "${id}"`);
     } finally {
       await page.close();
-      await new Promise((resolve) => server.close(resolve));
+      await content.close();
+      await parent.close();
     }
   },
 );
