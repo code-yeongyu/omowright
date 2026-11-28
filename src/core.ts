@@ -3595,11 +3595,46 @@ async function isCheckedElement(xn: OmOPage, jn: ElementTarget) {
     }`,
   );
 }
+// #379: an element the page seals with data-sensitive (any value except the exact string
+// "false", which is inert and does not unseal a marked ancestor) makes every read omowright
+// formats from it return the placeholder instead of its text, value or attribute values —
+// including a read of an ancestor, which substitutes the placeholder for the sealed subtree.
+// The walk crosses shadow boundaries. innerText on a subtree containing sealed elements
+// falls back to the walker's text form, so its whitespace can differ from layout innerText.
+const SENSITIVE_PLACEHOLDER = `[redacted: sensitive]`;
+const sensitiveElementGuard = `const __omowSensitive = (element) => {
+  for (let current = element; current; ) {
+    const value = current.getAttribute ? current.getAttribute('data-sensitive') : null;
+    if (value !== null && value !== 'false') return true;
+    const parent = current.parentElement;
+    if (parent) { current = parent; continue; }
+    const root = typeof current.getRootNode === 'function' ? current.getRootNode() : null;
+    current = root && typeof ShadowRoot !== 'undefined' && root instanceof ShadowRoot ? root.host : null;
+  }
+  return false;
+};
+const __omowSensitiveTextOf = (root) => {
+  const parts = [];
+  const visit = (node) => {
+    if (node.nodeType === 3) parts.push(node.nodeValue || '');
+    else if (node.nodeType === 1) {
+      if (__omowSensitive(node)) { parts.push(${JSON.stringify(SENSITIVE_PLACEHOLDER)}); return; }
+      for (const child of node.childNodes) visit(child);
+    }
+  };
+  visit(root);
+  return parts.join('');
+};
+const __omowHasSensitive = (root) =>
+  __omowSensitive(root) ||
+  Array.from(root.querySelectorAll('[data-sensitive]')).some((el) => el.getAttribute('data-sensitive') !== 'false');`;
 async function inputValueElement(xn: OmOPage, jn: ElementTarget) {
   return await evaluateOnElement<string>(
     xn,
     jn,
     `function() {
+      ${sensitiveElementGuard}
+      if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
       return this.value || '';
     }`,
   );
@@ -3609,6 +3644,20 @@ async function innerHTMLElement(xn: OmOPage, jn: ElementTarget) {
     xn,
     jn,
     `function() {
+      ${sensitiveElementGuard}
+      if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
+      if (__omowHasSensitive(this)) {
+        const clone = this.cloneNode(true);
+        const strip = (node) => {
+          for (const child of Array.from(node.childNodes)) {
+            if (child.nodeType !== 1) continue;
+            if (__omowSensitive(child)) node.replaceChild(document.createTextNode(${JSON.stringify(SENSITIVE_PLACEHOLDER)}), child);
+            else strip(child);
+          }
+        };
+        strip(clone);
+        return clone.innerHTML;
+      }
       return this.innerHTML;
     }`,
   );
@@ -3618,10 +3667,9 @@ async function innerTextElement(xn: OmOPage, jn: ElementTarget) {
     xn,
     jn,
     `function() {
-      if (typeof this.innerText === 'string') {
-        return this.innerText;
-      }
-      return this.textContent || '';
+      ${sensitiveElementGuard}
+      if (typeof this.innerText === 'string' && !__omowHasSensitive(this)) return this.innerText;
+      return __omowSensitiveTextOf(this);
     }`,
   );
 }
@@ -3630,6 +3678,8 @@ async function textContentElement(xn: OmOPage, jn: ElementTarget) {
     xn,
     jn,
     `function() {
+      ${sensitiveElementGuard}
+      if (__omowHasSensitive(this)) return __omowSensitiveTextOf(this);
       return this.textContent ?? null;
     }`,
   );
@@ -3639,6 +3689,8 @@ async function getAttributeElement(xn: OmOPage, jn: ElementTarget, Vn: string) {
     xn,
     jn,
     `function(_, attributeName) {
+      ${sensitiveElementGuard}
+      if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
       return this.getAttribute(attributeName);
     }`,
     Vn,

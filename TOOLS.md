@@ -392,6 +392,24 @@ loop; the module files next to it are implementation detail.
   raw JSON Lines IPC client (`call`, `callWithHandle`, `cancel`) for daemon
   methods the session does not wrap.
 
+## Secret text (data-sensitive)
+
+Mark an element `data-sensitive` (any value except the exact string `"false"` —
+`"false"` is inert and does not unseal a marked ancestor). Every omowright output —
+snapshot trees, refs maps, diff/find/scoped reads, locator `textContent`/
+`innerText`/`inputValue`/`getAttribute`/`innerHTML`, BSK snapshots (tree, refs,
+css paths) and layer headers — replaces that subtree with a `[redacted: sensitive]`
+placeholder that keeps the element's role and ref, so buttons outside it stay
+findable and clickable. Accessible names never source from a sealed subtree: an
+`aria-labelledby` target or `<label>` inside it contributes nothing. Password
+input values were already redacted; the marker extends that to page text the
+page itself declares secret.
+
+Screenshots, `readText` OCR and anything pixel-based still capture what the page
+renders: avoid them (or mask via the page's own CSS) while a marked secret is
+visible. `page.evaluate` with your own JS reads the DOM directly and is likewise
+not redacted.
+
 ## Rules
 
 - Ref ids are virtual: pass them straight to `page.locator('e1')`, never into

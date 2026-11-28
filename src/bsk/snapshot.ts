@@ -15,6 +15,10 @@ const CSS_PATH_FN = String(function cssPath(el: unknown) {
   const parts: string[] = [];
   let node: Element | null = el;
   while (node && node.nodeType === 1 && node !== document.documentElement) {
+    // #379: a data-sensitive element (any value except "false") seals its subtree, so no path
+    // carrying its ids or classes is emitted; the daemon cannot be pointed at a secret.
+    const marker = node.getAttribute("data-sensitive");
+    if (marker !== null && marker !== "false") return null;
     let part = node.localName;
     if (node.id && /^[A-Za-z_][\w-]*$/.test(node.id) && document.querySelectorAll("#" + node.id).length === 1) {
       parts.unshift("#" + node.id);

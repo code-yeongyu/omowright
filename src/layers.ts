@@ -52,6 +52,37 @@ export async function describeLayers(page: LayersPage, { grid = 5 }: { grid?: nu
       return root instanceof ShadowRoot ? root.host : null;
     }
 
+    // #379: a data-sensitive element (any value except "false") seals its subtree; layer names
+    // and selector hints never carry its text or attribute values.
+    const SENSITIVE = "[redacted: sensitive]";
+
+    function isSensitive(el: Element) {
+      for (let node: Element | null = el; node; node = parentOf(node)) {
+        const marker = node.getAttribute("data-sensitive");
+        if (marker !== null && marker !== "false") return true;
+      }
+      return false;
+    }
+
+    function sealedSubtreeText(el: Element) {
+      const parts: string[] = [];
+      const visit = (node: Node) => {
+        if (node.nodeType === 3) {
+          parts.push(node.nodeValue ?? "");
+          return;
+        }
+        if (!(node instanceof Element)) return;
+        const marker = node.getAttribute("data-sensitive");
+        if (marker !== null && marker !== "false") {
+          parts.push(SENSITIVE);
+          return;
+        }
+        for (const child of node.childNodes) visit(child);
+      };
+      visit(el);
+      return parts.join("");
+    }
+
     function promote(el: Element) {
       const minArea = 0.5 * width * height;
       let node: Element | null = el;
@@ -71,7 +102,11 @@ export async function describeLayers(page: LayersPage, { grid = 5 }: { grid?: nu
       if (!ids) return "";
       return ids
         .split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent?.trim() ?? "")
+        .map((id) => {
+          const target = document.getElementById(id);
+          if (!target || isSensitive(target)) return "";
+          return target.textContent?.trim() ?? "";
+        })
         .filter(Boolean)
         .join(" ");
     }
@@ -81,12 +116,15 @@ export async function describeLayers(page: LayersPage, { grid = 5 }: { grid?: nu
       if (ariaLabel) return ariaLabel;
       const labelled = labelledByText(el);
       if (labelled) return labelled;
-      const heading = el.querySelector("h1,h2,h3,h4,h5,h6")?.textContent?.trim();
-      if (heading) return heading;
-      return ((el instanceof HTMLElement ? el.innerText : undefined) || el.textContent || "")
-        .trim()
-        .replace(/\s+/g, " ")
-        .slice(0, 80);
+      const heading = el.querySelector("h1,h2,h3,h4,h5,h6");
+      if (heading && !isSensitive(heading)) {
+        const text = heading.textContent?.trim();
+        if (text) return text;
+      }
+      const raw = el.querySelector("[data-sensitive]:not([data-sensitive='false'])")
+        ? sealedSubtreeText(el)
+        : (el instanceof HTMLElement ? el.innerText : undefined) || el.textContent || "";
+      return raw.trim().replace(/\s+/g, " ").slice(0, 80);
     }
 
     function selectorHint(el: Element) {
@@ -96,6 +134,17 @@ export async function describeLayers(page: LayersPage, { grid = 5 }: { grid?: nu
     }
 
     function describe(el: Element, coverage: number): LayerInfo {
+      if (isSensitive(el)) {
+        return {
+          tagName: el.tagName,
+          role: el.getAttribute("role") || "",
+          name: SENSITIVE,
+          coverage,
+          position: getComputedStyle(el).position,
+          selectorHint: SENSITIVE,
+          ariaModal: el.getAttribute("aria-modal") === "true",
+        };
+      }
       return {
         tagName: el.tagName,
         role: el.getAttribute("role") || "",

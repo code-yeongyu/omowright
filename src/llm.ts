@@ -95,7 +95,7 @@ export const toolSchemas = [
   {
     name: "page.snapshot",
     description:
-      "PRIMARY page read. Snapshot once, act on refs, re-read with {diff:true} (fallback: full:true, reason) or {find} to search. Options: diff, find, context, maxDepth, maxChars, interactive, showHidden, selector, ref.",
+      "PRIMARY page read. Snapshot once, act on refs, re-read with {diff:true} or {find} to search. data-sensitive text is redacted. Options: diff, find, context, maxDepth, maxChars, interactive, showHidden, selector, ref.",
     parameters: { type: "object", properties: { options: { type: "object" } } },
   },
   {
