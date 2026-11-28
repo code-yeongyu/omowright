@@ -77,16 +77,13 @@ test(
       }
       assertSealed("diff", compactSnapshot(await page.snapshot({ diff: true })));
 
-      for (let index = 1; index <= 4; index++) {
-        const ref = `f${index}e1`;
-        const scoped = await page.snapshot({ ref }).catch((error: unknown) => String(error));
-        assertSealed(`snapshot({ ref: ${ref} })`, scoped);
-        const text = await page
-          .locator(ref)
-          .textContent()
-          .catch((error: unknown) => String(error));
-        assertSealed(`locator(${ref}).textContent()`, text);
+      // Frame prefixes follow attach order: f1 #sealed, f2 #wrapped, f3 #open, f4 #inner. A guessed
+      // ref into a sealed frame is refused; the unmarked frame's ref still resolves.
+      for (const ref of ["f1e1", "f2e1", "f4e1"]) {
+        await assert.rejects(page.snapshot({ ref }), `snapshot({ ref: ${ref} }) read a sealed frame`);
+        await assert.rejects(page.locator(ref).textContent(), `locator(${ref}) read a sealed frame`);
       }
+      assert.equal(await page.locator("f3e1").textContent(), "Open action");
 
       const sealed = page.frameLocator("#sealed");
       const inner = sealed.frameLocator("#inner");
