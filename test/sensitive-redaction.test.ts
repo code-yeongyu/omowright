@@ -269,12 +269,12 @@ async function setFramedPage(page: PipePage) {
     };
     const sealed = frame(
       "sealed",
-      '<p>alpha bravo charlie</p><button>zulu outer</button><iframe id="inner" srcdoc="<p>delta echo</p><button>yankee inner</button>"></iframe>',
+      '<p>alpha bravo charlie</p><button title="zulu tip">zulu outer</button><iframe id="inner" srcdoc="<p>delta echo</p><button title=\'yankee tip\'>yankee inner</button>"></iframe>',
     );
     sealed.setAttribute("data-sensitive", "");
     const wrapper = document.createElement("div");
     wrapper.setAttribute("data-sensitive", "");
-    const wrapped = frame("wrapped", "<p>hotel india</p>");
+    const wrapped = frame("wrapped", '<p>hotel india</p><img alt="india tip" title="india tip" />');
     wrapper.append(wrapped);
     const open = frame("open", "<p>public frame text</p><button>Open action</button>");
     const loaded = [sealed, wrapped, open].map(
@@ -330,6 +330,8 @@ test(
         assert.equal(await frame.getByText("o").count(), 0, `${what} getByText matched sealed text`);
         assert.equal(await frame.locator("p").filter({ hasText: "o" }).count(), 0, `${what} filter matched`);
         await assert.rejects(frame.locator('button[type^="s"]').count(), /data-sensitive/, `${what} CSS compare`);
+        assert.equal(await frame.getByTitle(/zulu|yankee|india/).count(), 0, `${what} getByTitle confirmed a secret`);
+        assert.equal(await frame.getByAltText("india").count(), 0, `${what} getByAltText confirmed a secret`);
         const roleGuess = frame.getByRole("button", { name: /zulu|yankee/ });
         assert.equal(await roleGuess.count(), 0, `${what} role name matched`);
       }
