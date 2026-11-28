@@ -542,7 +542,8 @@
     if (tag === "select") {
       const sel = element;
       const selected = sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
-      if (selected) return selected.textContent?.trim() || "";
+      // #379: a sealed selected option contributes nothing to the select's name.
+      if (selected) return isSensitiveElement(selected) ? "" : selected.textContent?.trim() || "";
     }
     if (NAME_FROM_CONTENT_ROLES.has(role) || opts.inLabelledBy || opts.inLabel) {
       const parts = [];
@@ -627,6 +628,28 @@
     }
     return false;
   }
+  // A sealed descendant (not the element itself) means its text must come from sealedTextOf.
+  function containsSensitive(root) {
+    return Array.from(root.querySelectorAll("[data-sensitive]")).some(
+      (element) => element.getAttribute("data-sensitive") !== "false",
+    );
+  }
+  // The element's text with each sealed subtree as the placeholder.
+  function sealedTextOf(root) {
+    const parts = [];
+    const visit = (node) => {
+      if (node.nodeType === 3) parts.push(node.nodeValue || "");
+      else if (node.nodeType === 1) {
+        if (isSensitiveElement(node)) {
+          parts.push(SENSITIVE_REDACTED);
+          return;
+        }
+        for (const child of node.childNodes) visit(child);
+      }
+    };
+    visit(root);
+    return parts.join("");
+  }
   function getRefPrefix(ref) {
     return ref.match(/^(f\d+)?e\d+$/)?.[1] ?? "";
   }
@@ -661,7 +684,8 @@
     return getAriaBoolean(element.getAttribute("aria-selected")) === true;
   }
   function getTextboxValue(element) {
-    if (isContentEditableElement(element)) return element.innerText ?? element.textContent ?? "";
+    if (isContentEditableElement(element))
+      return containsSensitive(element) ? sealedTextOf(element) : (element.innerText ?? element.textContent ?? "");
     if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) return null;
     if (element instanceof HTMLInputElement && ["checkbox", "radio", "file"].includes(element.type)) return null;
     if (element instanceof HTMLInputElement && element.type === "password")
@@ -1161,6 +1185,11 @@
         const selectEl = node.element;
         for (const option of Array.from(selectEl.options)) {
           let optionLine = `${childIndent}- option`;
+          // #379: a sealed option inside an unmarked select shows only the placeholder, no value.
+          if (isSensitiveElement(option)) {
+            lines.push(`${optionLine} "${SENSITIVE_REDACTED}"${option.selected ? " (selected)" : ""}`);
+            continue;
+          }
           const optionText = option.textContent?.trim() || "";
           if (optionText) {
             const truncated = optionText.replace(/\s+/g, " ").substring(0, 100);

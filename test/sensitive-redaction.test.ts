@@ -30,9 +30,18 @@ const MUTATED_SECRET = "foxtrot golf";
 const OPTION_SECRET = "november oscar";
 const LAYER_SECRET = "papa quebec";
 const ATTRIBUTE_SECRET = "sierra tango";
-const SECRET_WORDS = [SECRET, INPUT_SECRET, MUTATED_SECRET, OPTION_SECRET, LAYER_SECRET, ATTRIBUTE_SECRET].flatMap(
-  (s) => s.split(" "),
-);
+// Sealed parts inside unmarked elements: a selected option, a contenteditable child, template
+// content and an unmarked iframe's srcdoc, plus the two layer-name sources (#389 audit, #390).
+const NESTED_SECRET = "juliet romeo nectar ochre papaya quince uniform victor whiskey xray";
+const SECRET_WORDS = [
+  SECRET,
+  INPUT_SECRET,
+  MUTATED_SECRET,
+  OPTION_SECRET,
+  LAYER_SECRET,
+  ATTRIBUTE_SECRET,
+  NESTED_SECRET,
+].flatMap((s) => s.split(" "));
 
 function assertNoSecret(what: string, value: unknown) {
   assertNoWords(what, value, SECRET_WORDS);
@@ -77,6 +86,10 @@ async function setSecretPage(page: PipePage) {
       '<select data-sensitive id="pin"><option>november oscar</option></select>' +
       '<div data-sensitive><input id="hint" data-testid="hint-box" title="sierra tango" placeholder="sierra tango" />' +
       '<img alt="sierra tango" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" /></div>' +
+      '<select id="pick"><option data-sensitive selected>juliet romeo</option><option>Public choice</option></select>' +
+      '<div id="notes" contenteditable="true" role="textbox" aria-label="Notes">Note: <span data-sensitive>nectar ochre</span></div>' +
+      '<template id="tpl"><p data-sensitive>papaya</p></template>' +
+      '<iframe id="doc" srcdoc="<p data-sensitive>quince</p>"></iframe>' +
       "</main>";
   });
 }
@@ -195,6 +208,29 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
 
     // page.content() is the document's HTML: the sealed subtrees, their text and attribute values
     // are replaced like innerHTML, and unmarked content stays.
+    assert.deepEqual(
+      await page.locator("#pick").selectOption({ index: 0 }),
+      [PLACEHOLDER],
+      "selectOption returned a sealed value",
+    );
+    assert.deepEqual(
+      await page.locator("#pin").selectOption({ index: 0 }),
+      [PLACEHOLDER],
+      "sealed select returned its value",
+    );
+    // A value or label guess would confirm a sealed option through what gets selected, so on a
+    // select that is or holds sealed content only { index } is accepted (#392 review).
+    for (const [what, request] of [
+      ["string", "juliet romeo"],
+      ["value", { value: "juliet romeo" }],
+      ["label", { label: "Public choice" }],
+    ] as const) {
+      await assert.rejects(page.locator("#pick").selectOption(request), /data-sensitive/, `selectOption by ${what}`);
+      await assert.rejects(page.locator("#pin").selectOption(request), /data-sensitive/, `sealed select by ${what}`);
+    }
+    assert.equal(await page.locator("#pick").inputValue(), PLACEHOLDER, "inputValue read a sealed selected option");
+    // An unmarked iframe's srcdoc that carries the marker reads as the placeholder (#392 review).
+    assert.equal(await page.locator("#doc").getAttribute("srcdoc"), PLACEHOLDER, "getAttribute('srcdoc') leaked");
     const content = await page.content();
     assertNoSecret("page.content()", content);
     assert.ok(content.includes(PLACEHOLDER) && content.includes("Copy phrase"), `page.content():\n${content}`);
@@ -231,6 +267,12 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
       'input[data-sensitive][value^="k"]',
       'main:has(input[value^="k"])',
       '[title*="z"]',
+      // A raw role attribute is not in the redacted snapshot either (#390).
+      '[role*="t"]',
+      // Valid for querySelectorAll but rejected as a style rule (a trailing comment swallows the
+      // rule body), so the guard judges the raw text: it holds a "[" or ":" (#391).
+      'input[value^="k"] /*',
+      "#seed:placeholder-shown /*",
       'input[value/**/^="k"]',
       'input[\\76 alue^="k"]',
       'input[*|value^="k"]',
@@ -247,10 +289,10 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
       await assert.rejects(page.waitForSelector(selector, { timeout: 200 }), /data-sensitive/, `wait ${selector}`);
       await assert.rejects(page.snapshot({ selector }), /data-sensitive/, `snapshot({ selector: ${selector} })`);
     }
-    // A role selector stays usable for scoped snapshots: a sealed element's role is already output.
-    const byRole = await page.snapshot({ selector: '[role="main"]' });
-    assertTreeRead(byRole);
-    assertNoSecret("role-scoped tree", byRole.tree);
+    // An element-scoped snapshot still runs; role selectors are refused on sealed pages (#390).
+    const byId = await page.snapshot({ selector: "main" });
+    assertTreeRead(byId);
+    assertNoSecret("element-scoped tree", byId.tree);
     assert.equal(await page.locator("#seed[data-sensitive]").count(), 1, "presence selector refused");
     assert.equal(await page.locator("main > button:first-of-type:enabled").count(), 1, "structural selector refused");
     assert.equal(await page.locator('[data-testid="hint-box"]').count(), 1, "test id comparison refused");
@@ -270,6 +312,39 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
     const layers = await describeLayers(page);
     assertNoSecret("layers", layers);
     assert.equal(layers.blocking?.name, PLACEHOLDER, `sealed overlay layer: ${JSON.stringify(layers.blocking)}`);
+
+    // Layer names of an unmarked overlay read its heading and aria-labelledby target with the
+    // sealed parts as the placeholder (#389 audit).
+    for (const markup of [
+      "<h2>Recovery <span data-sensitive>uniform victor</span></h2>",
+      '<p id="dialog-label">Seed <span data-sensitive>whiskey xray</span></p>',
+    ]) {
+      await page.evaluate((html) => {
+        document.querySelectorAll("[data-overlay]").forEach((node) => node.remove());
+        const overlay = document.createElement("div");
+        overlay.setAttribute("data-overlay", "");
+        overlay.setAttribute("role", "dialog");
+        if (html.includes("dialog-label")) overlay.setAttribute("aria-labelledby", "dialog-label");
+        overlay.style.cssText = "position:fixed;inset:0;background:#fff";
+        overlay.innerHTML = html;
+        document.body.append(overlay);
+      }, markup);
+      const named = await describeLayers(page);
+      assertNoSecret("layer name", named);
+      assert.ok(named.blocking?.name.includes(PLACEHOLDER), `overlay name: ${JSON.stringify(named.blocking)}`);
+    }
+
+    // A page whose only sealed markup sits in a srcdoc still counts as holding sealed content, and
+    // a sealed <title> reads as the placeholder (#392 review).
+    await page.evaluate(() => {
+      document.head.innerHTML = "";
+      document.body.innerHTML = '<iframe id="only" srcdoc="<p data-sensitive>quince</p>"></iframe>';
+    });
+    await assert.rejects(page.locator('iframe[srcdoc*="quince"]').count(), /data-sensitive/, "srcdoc CSS compare");
+    await page.evaluate(() => {
+      document.head.innerHTML = "<title data-sensitive>ochre</title>";
+    });
+    assert.equal(await page.title(), PLACEHOLDER, "page.title() read a sealed title");
   } finally {
     await page.close();
   }
@@ -303,7 +378,10 @@ async function setFramedPage(page: PipePage) {
     sealed.setAttribute("data-sensitive", "");
     const wrapper = document.createElement("div");
     wrapper.setAttribute("data-sensitive", "");
-    const wrapped = frame("wrapped", '<p>hotel india</p><img alt="india tip" title="india tip" />');
+    const wrapped = frame(
+      "wrapped",
+      '<p>hotel india</p><img alt="india tip" title="india tip" /><select><option>hotel pick</option></select>',
+    );
     wrapper.append(wrapped);
     const open = frame("open", "<p>public frame text</p><button>Open action</button>");
     const loaded = [sealed, wrapped, open].map(
@@ -371,6 +449,13 @@ test("a data-sensitive frame owner seals frame-scoped reads (security contract #
       assert.equal(await frame.locator("body").innerHTML(), PLACEHOLDER, `${what} innerHTML`);
       assertSealed(`${what} allTextContents`, await frame.locator("p").allTextContents());
     }
+    const wrappedSelect = page.frameLocator("#wrapped").locator("select");
+    assert.deepEqual(await wrappedSelect.selectOption({ index: 0 }), [PLACEHOLDER], "sealed-frame selectOption");
+    await assert.rejects(
+      wrappedSelect.selectOption("hotel pick"),
+      /data-sensitive/,
+      "sealed-frame selectOption by value",
+    );
     const sealedButton = page.frameLocator("#sealed").locator("button");
     assert.equal(await sealedButton.getAttribute("type"), PLACEHOLDER, "sealed getAttribute");
     assert.equal(await page.frameLocator("#open").locator("p").textContent(), "public frame text");
