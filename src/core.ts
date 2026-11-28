@@ -39,6 +39,7 @@ import {
 } from "./page-setup.ts";
 import { readProperty } from "./read-property.ts";
 import { redactValue } from "./redact-value.ts";
+import { withSensitiveBlanking } from "./sensitive-blank.ts";
 import type { DialogOpeningParams, DialogPolicy } from "./dialog-policy.ts";
 import type { ConsoleApiCalledEvent } from "./console-events.ts";
 import type { ExceptionThrownEvent } from "./page-events.ts";
@@ -7366,11 +7367,16 @@ function createOmOPageClass() {
       return await this.evaluate<number>(`window.devicePixelRatio`).catch(() => 1);
     }
     async #b(xn: object, jn: number | undefined, Vn: string) {
-      try {
-        return await this._sendToTarget(`Page.captureScreenshot`, xn, { timeoutMs: jn });
-      } catch (xn) {
-        throw rewriteCaptureScreenshotError(xn, jn, Vn);
-      }
+      return await withSensitiveBlanking(
+        (expression) => this.evaluate(expression),
+        async () => {
+          try {
+            return await this._sendToTarget(`Page.captureScreenshot`, xn, { timeoutMs: jn });
+          } catch (xn) {
+            throw rewriteCaptureScreenshotError(xn, jn, Vn);
+          }
+        },
+      );
     }
     async snapshot(xn: SnapshotOptions = {}) {
       return await takeSnapshot(this.cdp, this.frameManager, xn);

@@ -23,7 +23,6 @@ import { removeTreeSync } from "./fixtures/remove-tree.ts";
 // synthetic NATO filler standing in for a 24-word recovery phrase.
 
 const BLANK: readonly number[] = [0, 0, 0];
-const SECRET_BACKGROUND: readonly number[] = [255, 0, 0];
 const PUBLIC_BACKGROUND: readonly number[] = [0, 0, 255];
 const INERT_BACKGROUND: readonly number[] = [0, 128, 0];
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -88,9 +87,9 @@ function decodePng(png: Buffer): DecodedPng {
     const row = decoded.subarray(y * stride, (y + 1) * stride);
     for (let x = 0; x < stride; x += 1) {
       const rawByte = line[x] ?? 0;
-      const left = x >= channels ? row[x - channels] ?? 0 : 0;
+      const left = x >= channels ? (row[x - channels] ?? 0) : 0;
       const up = previous[x] ?? 0;
-      const upLeft = x >= channels ? previous[x - channels] ?? 0 : 0;
+      const upLeft = x >= channels ? (previous[x - channels] ?? 0) : 0;
       let value: number;
       switch (filter) {
         case 0:
@@ -167,7 +166,13 @@ function assertRegionBlank(image: DecodedPng, rect: Rect, dpr: number, what: str
 
 // Unchanged means the block still shows its background with its text on top, which any
 // over-blanking (a selector too broad, a style that never came off) would destroy.
-function assertRegionUnchanged(image: DecodedPng, rect: Rect, dpr: number, background: readonly number[], what: string) {
+function assertRegionUnchanged(
+  image: DecodedPng,
+  rect: Rect,
+  dpr: number,
+  background: readonly number[],
+  what: string,
+) {
   const region = deviceRegion(image, rect, dpr, INSET_DEVICE_PX);
   assertRegionInside(image, region, what);
   const total = region.width * region.height;
@@ -255,12 +260,15 @@ async function openTab(): Promise<PipePage> {
 }
 
 async function rectOf(page: PipePage, expression: string): Promise<Rect> {
-  const rect = await page.evaluate(`${expression}.getBoundingClientRect().toJSON()`);
-  assert.ok(typeof rect === "object" && rect !== null, `${expression} returned no rect`);
-  const { x, y, width, height } = rect as Record<string, unknown>;
-  for (const value of [x, y, width, height])
-    assert.ok(typeof value === "number" && Number.isFinite(value), `${expression} rect field is not a number`);
-  return { x: x as number, y: y as number, width: width as number, height: height as number };
+  const serialized = await page.evaluate(
+    `(() => { const r = ${expression}.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(String).join(","); })()`,
+  );
+  assert.ok(typeof serialized === "string", `${expression} returned no rect`);
+  const fields = serialized.split(",").map(Number);
+  assert.equal(fields.length, 4, `${expression} rect fields: ${serialized}`);
+  for (const value of fields)
+    assert.ok(Number.isFinite(value), `${expression} rect field is not a number: ${serialized}`);
+  return { x: fields[0] ?? 0, y: fields[1] ?? 0, width: fields[2] ?? 0, height: fields[3] ?? 0 };
 }
 
 async function dprOf(page: PipePage): Promise<number> {
@@ -281,7 +289,8 @@ async function assertPageRestored(page: PipePage, before: string) {
     "the blanking style stayed in the document",
   );
   assert.equal(
-    await page.evaluate(`document.querySelector("#shadow-host")?.shadowRoot?.querySelector("#${BLANK_STYLE_ID}")`),
+    (await page.evaluate(`document.querySelector("#shadow-host")?.shadowRoot?.querySelector("#${BLANK_STYLE_ID}")`)) ??
+      null,
     null,
     "the blanking style stayed in the shadow root",
   );
@@ -330,7 +339,7 @@ test(
       const secret = await rectOf(page, `document.getElementById("secret")`);
       const publicBlock = await rectOf(page, `document.getElementById("public")`);
       const inert = await rectOf(page, `document.getElementById("inert")`);
-      const shadow = await rectOf(page, `document.getElementById("shadow-host")`);
+      const shadow = await rectOf(page, `document.getElementById("shadow-host").shadowRoot.querySelector("div")`);
       const before = await domSnapshot(page);
 
       const image = decodePng(await page.screenshot());
@@ -346,27 +355,37 @@ test(
   },
 );
 
-test("locator screenshots return only the blanked box for a marked element (security contract #380)", { skip }, async () => {
-  const page = await openTab();
-  try {
-    await setBlocks(page);
-    const dpr = await dprOf(page);
-    const secret = await rectOf(page, `document.getElementById("secret")`);
-    const publicBlock = await rectOf(page, `document.getElementById("public")`);
-    const before = await domSnapshot(page);
+test(
+  "locator screenshots return only the blanked box for a marked element (security contract #380)",
+  { skip },
+  async () => {
+    const page = await openTab();
+    try {
+      await setBlocks(page);
+      const dpr = await dprOf(page);
+      const secret = await rectOf(page, `document.getElementById("secret")`);
+      const publicBlock = await rectOf(page, `document.getElementById("public")`);
+      const before = await domSnapshot(page);
 
-    // locator.screenshot defaults to webp with a surrounding margin; png + margin 0 makes
-    // the returned image exactly the element's box, so every pixel must be blank.
-    const secretImage = decodePng(await page.locator("#secret").screenshot({ type: "png", margin: 0 }));
-    assertRegionBlank(secretImage, { ...secret, x: 0, y: 0 }, dpr, "the element capture of the marked block");
+      // locator.screenshot defaults to webp with a surrounding margin; png + margin 0 makes
+      // the returned image exactly the element's box, so every pixel must be blank.
+      const secretImage = decodePng(await page.locator("#secret").screenshot({ type: "png", margin: 0 }));
+      assertRegionBlank(secretImage, { ...secret, x: 0, y: 0 }, dpr, "the element capture of the marked block");
 
-    const publicImage = decodePng(await page.locator("#public").screenshot({ type: "png", margin: 0 }));
-    assertRegionUnchanged(publicImage, { ...publicBlock, x: 0, y: 0 }, dpr, PUBLIC_BACKGROUND, "the element capture of the unmarked block");
-    await assertPageRestored(page, before);
-  } finally {
-    await page.close();
-  }
-});
+      const publicImage = decodePng(await page.locator("#public").screenshot({ type: "png", margin: 0 }));
+      assertRegionUnchanged(
+        publicImage,
+        { ...publicBlock, x: 0, y: 0 },
+        dpr,
+        PUBLIC_BACKGROUND,
+        "the element capture of the unmarked block",
+      );
+      await assertPageRestored(page, before);
+    } finally {
+      await page.close();
+    }
+  },
+);
 
 test("full-page screenshots blank below-the-fold marked content (security contract #380)", { skip }, async () => {
   const page = await openTab();

@@ -405,10 +405,26 @@ findable and clickable. Accessible names never source from a sealed subtree: an
 input values were already redacted; the marker extends that to page text the
 page itself declares secret.
 
-Screenshots, `readText` OCR and anything pixel-based still capture what the page
-renders: avoid them (or mask via the page's own CSS) while a marked secret is
-visible. `page.evaluate` with your own JS reads the DOM directly and is likewise
-not redacted.
+Screenshots blank the pixels too. Every capture omowright controls — viewport, clipped,
+element and full-page `page.screenshot`, locator screenshots and the captcha `readText`
+helper — flows through one choke point that first injects a temporary style rendering
+each marked element as an opaque black block of its own box (its text, input values,
+children, images and pseudo-element content invisible), captures, then removes the style,
+so the page is exactly restored even when the capture fails. The style is injected into
+the document, every open shadow root and every same-origin iframe document, because a
+light-DOM stylesheet reaches none of those; a page without a marked element is not
+touched. Two limits remain: cross-origin frame content is unreachable from the parent
+page, and a page can outrank the blanking with its own `!important` inline styles on a
+marked element — the marker is the page's own declaration, so a page fighting it is out
+of contract. `page.pdf()` renders without blanking, and `page.evaluate` with your own JS
+reads the DOM directly and is likewise not redacted.
+
+The BSK daemon path (`session.screenshot()`) is the one capture omowright does not
+control: the daemon's `screenshot` tool is a cooperation-exempt read, while `evaluate` —
+the only way to inject the blanking style into the remote page — is a gated action that
+needs the single-use context of the latest `cooperate` sync, which a screenshot cannot
+obtain without invalidating the caller's own context. Avoid BSK screenshots while a
+marked secret is visible, or mask it via the page's own CSS.
 
 ## Rules
 

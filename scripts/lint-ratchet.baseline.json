@@ -86,6 +86,9 @@
   "test/sensitive-redaction.test.ts": {
     "omowright-testing/no-flake-masking": 1
   },
+  "test/sensitive-screenshot-redaction.test.ts": {
+    "omowright-testing/no-flake-masking": 1
+  },
   "test/snapshot-live-feedback.test.ts": {
     "omowright-testing/no-flake-masking": 1
   },
