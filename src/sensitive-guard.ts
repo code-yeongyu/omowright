@@ -11,7 +11,7 @@
 // parent document, using only CDP methods the scoped page path already allows.
 
 import type { CdpSend } from "./cdp-protocol.ts";
-import { createTextMatching } from "./text-matching.ts";
+import { createSelectorGuard } from "./selector-guard.ts";
 
 export const SENSITIVE_PLACEHOLDER = `[redacted: sensitive]`;
 
@@ -42,7 +42,19 @@ const __omowSensitiveTextOf = (root) => {
 };
 const __omowHasSensitive = (root) =>
   __omowSensitive(root) ||
-  Array.from(root.querySelectorAll('[data-sensitive]')).some((el) => el.getAttribute('data-sensitive') !== 'false');`;
+  Array.from(root.querySelectorAll('[data-sensitive]')).some((el) => el.getAttribute('data-sensitive') !== 'false');
+const __omowRedactedClone = (root) => {
+  const clone = root.cloneNode(true);
+  const strip = (node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType !== 1) continue;
+      if (__omowSensitive(child)) node.replaceChild(document.createTextNode(${JSON.stringify(SENSITIVE_PLACEHOLDER)}), child);
+      else strip(child);
+    }
+  };
+  strip(clone);
+  return clone;
+};`;
 
 // index < 0 returns how many sealed frame owners the document holds; index >= 0 returns that
 // owner element. Open shadow roots are searched too.
@@ -62,7 +74,7 @@ const SEALED_OWNER_FN = `function(index) {
 // A page expression that throws when `selector` could confirm a sealed attribute value (see
 // assertSelectorAllowed), for selector waits that run outside the locator query.
 export function selectorGuardExpression(selector: string, testIdAttribute = "data-testid") {
-  return `(${createTextMatching.toString()})(undefined, undefined, false, false, ${JSON.stringify(testIdAttribute)}).assertSelectorAllowed(${JSON.stringify(selector)}, document)`;
+  return `(${createSelectorGuard.toString()})(false, ${JSON.stringify(testIdAttribute)}).assertSelectorAllowed(${JSON.stringify(selector)}, document)`;
 }
 
 interface SealableFrame {

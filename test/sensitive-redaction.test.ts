@@ -193,6 +193,12 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
     );
     assert.ok(mainText?.includes(PLACEHOLDER), `ancestor read has no placeholder:\n${mainText}`);
 
+    // page.content() is the document's HTML: the sealed subtrees, their text and attribute values
+    // are replaced like innerHTML, and unmarked content stays.
+    const content = await page.content();
+    assertNoSecret("page.content()", content);
+    assert.ok(content.includes(PLACEHOLDER) && content.includes("Copy phrase"), `page.content():\n${content}`);
+
     const mainHtml = await page.locator("main").innerHTML();
     assertNoSecret("main innerHTML", mainHtml);
     assert.ok(mainHtml.includes(PLACEHOLDER), `ancestor innerHTML has no placeholder:\n${mainHtml}`);
@@ -229,12 +235,24 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
       'input[\\76 alue^="k"]',
       'input[*|value^="k"]',
       'input[value/*]*/^="k"]',
+      // Pseudo-classes that read a sealed element's language, emptiness or form state (#387).
+      "#seed:placeholder-shown",
+      "main :lang(en)",
+      "input:invalid",
+      "main span:empty",
+      "input:\\70 laceholder-shown",
     ];
     for (const selector of comparing) {
       await assert.rejects(page.locator(selector).count(), /data-sensitive/, `CSS ${selector} answered`);
       await assert.rejects(page.waitForSelector(selector, { timeout: 200 }), /data-sensitive/, `wait ${selector}`);
+      await assert.rejects(page.snapshot({ selector }), /data-sensitive/, `snapshot({ selector: ${selector} })`);
     }
+    // A role selector stays usable for scoped snapshots: a sealed element's role is already output.
+    const byRole = await page.snapshot({ selector: '[role="main"]' });
+    assertTreeRead(byRole);
+    assertNoSecret("role-scoped tree", byRole.tree);
     assert.equal(await page.locator("#seed[data-sensitive]").count(), 1, "presence selector refused");
+    assert.equal(await page.locator("main > button:first-of-type:enabled").count(), 1, "structural selector refused");
     assert.equal(await page.locator('[data-testid="hint-box"]').count(), 1, "test id comparison refused");
     assert.equal(await page.getByText("oscar").count(), 0, "getByText confirmed a sealed option");
     assert.equal(await page.getByLabel("bravo").count(), 0, "getByLabel confirmed a sealed label");
@@ -298,14 +316,32 @@ async function setFramedPage(page: PipePage) {
   });
 }
 
-test(
-  "a data-sensitive frame owner seals its whole frame chain in every read (security contract #379)",
-  { skip },
-  async () => {
-    const page = await openTab();
-    try {
-      await setFramedPage(page);
+// Each frame contract runs on its own freshly framed tab: three short tests instead of one long one,
+// so none of them sits near the per-test limit on a loaded runner (#387).
+async function withFramedPage(body: (page: PipePage) => Promise<void>) {
+  const page = await openTab();
+  try {
+    await setFramedPage(page);
+    await body(page);
+  } finally {
+    await page.close();
+  }
+}
 
+function sealedFrames(page: PipePage) {
+  const sealed = page.frameLocator("#sealed");
+  return [
+    ["sealed", sealed],
+    ["inner", sealed.frameLocator("#inner")],
+    ["wrapped", page.frameLocator("#wrapped")],
+  ] as const;
+}
+
+test(
+  "a data-sensitive frame owner seals its frame chain in snapshots and refs (security contract #379)",
+  { skip },
+  () =>
+    withFramedPage(async (page) => {
       for (const options of [{}, { interactive: true }, { selector: "main" }]) {
         const read = await page.snapshot(options);
         assert.ok("tree" in read && read.refs, `expected a tree with refs, got ${JSON.stringify(read)}`);
@@ -324,36 +360,38 @@ test(
         await assert.rejects(page.locator(ref).textContent(), `locator(${ref}) read a sealed frame`);
       }
       assert.equal(await page.locator("f3e1").textContent(), "Open action");
+    }),
+);
 
-      const sealed = page.frameLocator("#sealed");
-      const inner = sealed.frameLocator("#inner");
-      const wrapped = page.frameLocator("#wrapped");
-      for (const [what, frame] of [
-        ["sealed", sealed],
-        ["inner", inner],
-        ["wrapped", wrapped],
-      ] as const) {
-        assert.equal(await frame.locator("p").textContent(), PLACEHOLDER, `${what} textContent`);
-        assert.equal(await frame.locator("p").innerText(), PLACEHOLDER, `${what} innerText`);
-        assert.equal(await frame.locator("body").innerHTML(), PLACEHOLDER, `${what} innerHTML`);
-        assertSealed(`${what} allTextContents`, await frame.locator("p").allTextContents());
-        // Guesses the placeholder cannot match: "o" is in every sealed frame's text, not in it.
-        assert.equal(await frame.getByText("o").count(), 0, `${what} getByText matched sealed text`);
-        assert.equal(await frame.locator("p").filter({ hasText: "o" }).count(), 0, `${what} filter matched`);
-        await assert.rejects(frame.locator('button[type^="s"]').count(), /data-sensitive/, `${what} CSS compare`);
-        assert.equal(await frame.getByTitle(/zulu|yankee|india/).count(), 0, `${what} getByTitle confirmed a secret`);
-        assert.equal(await frame.getByAltText("india").count(), 0, `${what} getByAltText confirmed a secret`);
-        const roleGuess = frame.getByRole("button", { name: /zulu|yankee/ });
-        assert.equal(await roleGuess.count(), 0, `${what} role name matched`);
-      }
-      assert.equal(await sealed.locator("button").getAttribute("type"), PLACEHOLDER, "sealed getAttribute");
-
-      const open = page.frameLocator("#open");
-      assert.equal(await open.locator("p").textContent(), "public frame text");
-      assert.equal(await open.getByText("public frame").count(), 1);
-      assert.equal(await open.getByRole("button", { name: "Open action" }).count(), 1);
-    } finally {
-      await page.close();
+test("a data-sensitive frame owner seals frame-scoped reads (security contract #379)", { skip }, () =>
+  withFramedPage(async (page) => {
+    for (const [what, frame] of sealedFrames(page)) {
+      assert.equal(await frame.locator("p").textContent(), PLACEHOLDER, `${what} textContent`);
+      assert.equal(await frame.locator("p").innerText(), PLACEHOLDER, `${what} innerText`);
+      assert.equal(await frame.locator("body").innerHTML(), PLACEHOLDER, `${what} innerHTML`);
+      assertSealed(`${what} allTextContents`, await frame.locator("p").allTextContents());
     }
-  },
+    const sealedButton = page.frameLocator("#sealed").locator("button");
+    assert.equal(await sealedButton.getAttribute("type"), PLACEHOLDER, "sealed getAttribute");
+    assert.equal(await page.frameLocator("#open").locator("p").textContent(), "public frame text");
+  }),
+);
+
+test("a data-sensitive frame owner seals frame-scoped matchers and CSS (security contract #379)", { skip }, () =>
+  withFramedPage(async (page) => {
+    for (const [what, frame] of sealedFrames(page)) {
+      // Guesses the placeholder cannot match: "o" is in every sealed frame's text, not in it.
+      assert.equal(await frame.getByText("o").count(), 0, `${what} getByText matched sealed text`);
+      assert.equal(await frame.locator("p").filter({ hasText: "o" }).count(), 0, `${what} filter matched`);
+      await assert.rejects(frame.locator('button[type^="s"]').count(), /data-sensitive/, `${what} CSS compare`);
+      await assert.rejects(frame.locator("p:lang(en)").count(), /data-sensitive/, `${what} CSS :lang`);
+      assert.equal(await frame.getByTitle(/zulu|yankee|india/).count(), 0, `${what} getByTitle confirmed a secret`);
+      assert.equal(await frame.getByAltText("india").count(), 0, `${what} getByAltText confirmed a secret`);
+      const roleGuess = frame.getByRole("button", { name: /zulu|yankee/ });
+      assert.equal(await roleGuess.count(), 0, `${what} role name matched`);
+    }
+    const open = page.frameLocator("#open");
+    assert.equal(await open.getByText("public frame").count(), 1);
+    assert.equal(await open.getByRole("button", { name: "Open action" }).count(), 1);
+  }),
 );

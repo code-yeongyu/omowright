@@ -21,6 +21,7 @@ import { pageBundle } from "./injected.ts";
 import { queryOpenShadowAll } from "./open-shadow-query.ts";
 import { isElementHiddenForAria } from "./aria-hidden.ts";
 import { createTextMatching } from "./text-matching.ts";
+import { createSelectorGuard } from "./selector-guard.ts";
 import {
   SENSITIVE_PLACEHOLDER,
   collectSealedFrames,
@@ -3623,19 +3624,7 @@ async function innerHTMLElement(xn: OmOPage, jn: ElementTarget) {
     `function() {
       ${sensitiveElementGuard}
       if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
-      if (__omowHasSensitive(this)) {
-        const clone = this.cloneNode(true);
-        const strip = (node) => {
-          for (const child of Array.from(node.childNodes)) {
-            if (child.nodeType !== 1) continue;
-            if (__omowSensitive(child)) node.replaceChild(document.createTextNode(${JSON.stringify(SENSITIVE_PLACEHOLDER)}), child);
-            else strip(child);
-          }
-        };
-        strip(clone);
-        return clone.innerHTML;
-      }
-      return this.innerHTML;
+      return __omowHasSensitive(this) ? __omowRedactedClone(this).innerHTML : this.innerHTML;
     }`,
   );
 }
@@ -4437,6 +4426,7 @@ function createLocatorClass() {
         Vn,
         `function(query) {
         const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
+        const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -4559,7 +4549,7 @@ function createLocatorClass() {
                 ? textMatches(root, step.matcher)
                 : step.kind === 'label'
                   ? labelMatches(root, step.matcher)
-                  : (textMatching.assertSelectorAllowed(step.selector, document), queryOpenShadowAll(root, step.selector));
+                  : (selectorGuard.assertSelectorAllowed(step.selector, document), queryOpenShadowAll(root, step.selector));
               if (step.hasText) {
                 matches = matches.filter((node) => matchesText(node, step.hasText));
               }
@@ -4905,6 +4895,7 @@ function createLocatorClass() {
           {
             functionDeclaration: `function(query, ...scopeRoots) {
         const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
+        const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -5028,7 +5019,7 @@ function createLocatorClass() {
                 ? textMatches(root, step.matcher)
                 : step.kind === 'label'
                   ? labelMatches(root, step.matcher)
-                  : (textMatching.assertSelectorAllowed(step.selector, document), queryOpenShadowAll(root, step.selector));
+                  : (selectorGuard.assertSelectorAllowed(step.selector, document), queryOpenShadowAll(root, step.selector));
               if (step.hasText) {
                 matches = matches.filter((node) => matchesText(node, step.hasText));
               }
@@ -5830,7 +5821,10 @@ async function takeSnapshot(xn: CoreCdpTransport, jn: PageFrameManager, Vn: Snap
           let { result: Vn } = await xn.send(
               `Runtime.callFunctionOn`,
               {
+                // #379: a scoped read runs the caller's selector, so it passes the same attribute
+                // comparison check as locators, in the frame it is queried in.
                 functionDeclaration: `function(opts) {
+              ${ai.selector ? `try { ${selectorGuardExpression(ai.selector, testIdAttributeName)}; } catch (error) { return { error: String((error && error.message) || error) }; }` : ``}
               return globalThis.__omowright.takeSnapshot(opts);
             }`,
                 arguments: [{ value: ai }],
@@ -7310,8 +7304,13 @@ function createOmOPageClass() {
     async title() {
       return await this.evaluate<string>(`document.title`).catch(() => ``);
     }
+    // #379: the document's HTML with every sealed subtree replaced by the placeholder, like innerHTML.
     async content() {
-      return await this.evaluate<string>(`document.documentElement.outerHTML`);
+      return await this.evaluate<string>(`(() => {
+        ${sensitiveElementGuard}
+        const root = document.documentElement;
+        return __omowHasSensitive(root) ? __omowRedactedClone(root).outerHTML : root.outerHTML;
+      })()`);
     }
     async screenshot(xn: ScreenshotOptions = {}) {
       let jn = normalizeScreenshotTimeout(xn.timeout),
