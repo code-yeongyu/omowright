@@ -1,10 +1,12 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { globSync, mkdtempSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, globSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
 import { connectPipe } from "../src/index.ts";
+import { sensitiveBlankInjectExpression, sensitiveBlankRemoveExpression } from "../src/sensitive-blank.ts";
 import { removeTreeSync } from "./fixtures/remove-tree.ts";
 
 // Test authoring gate: (1) contract — security (#380): the pixels of an element the page seals
@@ -328,6 +330,14 @@ async function setTallPage(page: PipePage) {
   });
 }
 
+// unchanged; a capture that cannot even check the page fails fast with the capture timeout's
+// own wording instead of hanging past the caller's budget. (2) regression — the review's five
+// findings: replaced elements carrying the marker (img, canvas, video, iframe paint above the
+// black background), a marked shadow host (a light-DOM stylesheet and the shadow copy's own
+// selectors never reach the host from inside), screencast frames during a page.video recording,
+// per-root reference counts that remove early when roots change between overlapping captures,
+// and unbounded blanking evaluates that outlive the screenshot timeout.
+
 test(
   "viewport screenshots blank data-sensitive pixels and restore the page exactly (security contract #380)",
   { skip, timeout: 30_000 },
@@ -411,3 +421,223 @@ test("full-page screenshots blank below-the-fold marked content (security contra
     await page.close();
   }
 });
+
+// ffmpeg resolution for the video-recording test, the same capability check the page-video tests
+// in integration.test.ts use: the encoder needs libvpx and the null muxer.
+function findFfmpeg() {
+  const binary = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const candidates = (process.env["PATH"] ?? "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((dir) => path.join(dir, binary));
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    const { status, stdout } = spawnSync(candidate, ["-hide_banner", "-encoders"], {
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (status !== 0 || !/^\s*V\S*\s+libvpx\s/m.test(stdout)) continue;
+    const muxers = spawnSync(candidate, ["-hide_banner", "-muxers"], { encoding: "utf8", timeout: 5000 });
+    if (muxers.status === 0 && /^\s*E\s+null\s/m.test(muxers.stdout)) return candidate;
+  }
+  return null;
+}
+
+const FFMPEG = findFfmpeg();
+const skipVideo = !SHELL
+  ? "no chromium binary found"
+  : !FFMPEG && "no ffmpeg on PATH with the libvpx encoder and null muxer";
+
+// A replaced element carrying the marker paints its own content above the black background and
+// has no element children for the visibility rule to hide (H1).
+async function setReplacedElementsPage(page: PipePage) {
+  await page.evaluate(() => {
+    document.body.style.margin = "0";
+    const red =
+      "data:image/svg+xml;charset=utf-8," +
+      encodeURIComponent(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='120'><rect width='300' height='120' fill='#ff0000'/></svg>",
+      );
+    document.body.innerHTML =
+      `<img data-sensitive id="marked-img" src="${red}" style="width:300px;height:120px;display:block">` +
+      `<canvas data-sensitive id="marked-canvas" width="300" height="120" style="width:300px;height:120px;display:block"></canvas>` +
+      `<video data-sensitive id="marked-video" poster="${red}" style="width:300px;height:120px;display:block"></video>` +
+      `<iframe data-sensitive id="marked-frame" style="width:300px;height:120px;display:block;border:0"></iframe>`;
+    const canvas = document.getElementById("marked-canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) throw new Error("canvas missing");
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("canvas 2d context unavailable");
+    context.fillStyle = "#00ff00";
+    context.fillRect(0, 0, 300, 120);
+    context.fillStyle = "#ff0000";
+    context.font = "48px bold sans-serif";
+    context.fillText("alpha bravo", 10, 80);
+    const frame = document.getElementById("marked-frame");
+    if (!(frame instanceof HTMLIFrameElement)) throw new Error("iframe missing");
+    frame.srcdoc =
+      '<div style="width:300px;height:120px;background:#ff0000;color:#0000ff;font:48px bold sans-serif">hotel india</div>';
+  });
+  await page.evaluate(
+    `new Promise((resolve) => {
+      const frame = document.getElementById("marked-frame");
+      if (!frame || (frame.contentDocument && frame.contentDocument.readyState === "complete")) { resolve(1); return; }
+      frame.addEventListener("load", () => resolve(1), { once: true });
+    })`,
+  );
+}
+
+test(
+  "marked replaced elements blank: img, canvas, video poster, iframe (security contract #380)",
+  { skip },
+  async () => {
+    const page = await openTab();
+    try {
+      await setReplacedElementsPage(page);
+      const dpr = await dprOf(page);
+      const image = decodePng(await page.screenshot());
+      for (const id of ["marked-img", "marked-canvas", "marked-video", "marked-frame"]) {
+        const rect = await rectOf(page, `document.getElementById("${id}")`);
+        assertRegionBlank(image, rect, dpr, `the marked element #${id}`);
+      }
+    } finally {
+      await page.close();
+    }
+  },
+);
+
+test("a marked shadow host blanks its shadow content (security contract #380)", { skip }, async () => {
+  const page = await openTab();
+  try {
+    await page.evaluate(() => {
+      document.body.style.margin = "0";
+      document.body.innerHTML = '<div id="host" data-sensitive></div>';
+      const host = document.getElementById("host");
+      if (!host) throw new Error("host missing");
+      const shadow = host.attachShadow({ mode: "open" });
+      shadow.innerHTML =
+        '<div style="width:300px;height:120px;background:#ff00ff;color:#000000;font:48px bold sans-serif">hotel india</div>';
+    });
+    const dpr = await dprOf(page);
+    const host = await rectOf(page, `document.getElementById("host")`);
+    const image = decodePng(await page.screenshot());
+    assertRegionBlank(image, host, dpr, "the shadow content of the marked host");
+  } finally {
+    await page.close();
+  }
+});
+
+test(
+  "video recording frames blank a marked page mid-recording (security contract #380)",
+  { skip: skipVideo, timeout: 60_000 },
+  async () => {
+    assert.ok(SHELL, "no chromium binary found");
+    assert.ok(FFMPEG, "no ffmpeg on PATH with the libvpx encoder and null muxer");
+    const page = await openTab();
+    const originalPath = process.env["PATH"];
+    try {
+      process.env["PATH"] = `${path.dirname(FFMPEG)}${path.delimiter}${originalPath ?? ""}`;
+      await setBlocks(page);
+      const sessionId = await page.resolveSessionId();
+      let frames = 0;
+      const firstFrame = Promise.withResolvers<void>();
+      const unsubscribe = page.cdp.on("Page.screencastFrame", (_frame, meta) => {
+        if (meta.sessionId !== sessionId) return;
+        frames += 1;
+        firstFrame.resolve();
+      });
+      try {
+        const viewport = await page.refreshViewportSize();
+        const video = page.video();
+        await video.start({ path: "marked/raw.webm", size: { width: viewport.width, height: viewport.height } });
+        await page.evaluate(() => {
+          document.body.style.background = "#ffffff";
+        });
+        // The repaint's screencast frame must land before stopScreencast cancels it.
+        await Promise.race([firstFrame.promise, new Promise((resolve) => setTimeout(resolve, 3000))]);
+        await video.stop({ path: "marked/finished.webm" });
+        assert.ok(frames >= 1, "no screencast frame arrived during the recording");
+        const clip = await video.path();
+        const frame0 = path.join(path.dirname(clip), "frame0.png");
+        execFileSync(FFMPEG, ["-y", "-v", "error", "-i", clip, "-vframes", "1", frame0], { stdio: "pipe" });
+        const image = decodePng(readFileSync(frame0));
+        assert.ok(
+          image.width === viewport.width && image.height === viewport.height,
+          `the recorded frame is ${image.width}x${image.height}, not the viewport ${viewport.width}x${viewport.height}`,
+        );
+        const secret = await rectOf(page, `document.getElementById("secret")`);
+        assertRegionBlank(image, secret, 1, "the marked block in a mid-recording screencast frame");
+      } finally {
+        unsubscribe();
+      }
+    } finally {
+      if (originalPath === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = originalPath;
+      await page.close();
+    }
+  },
+);
+
+test(
+  "overlapping blank acquisitions with a root added between never remove early or leave a style (security contract #380)",
+  { skip },
+  async () => {
+    const page = await openTab();
+    try {
+      await setBlocks(page);
+      const inject = sensitiveBlankInjectExpression();
+      const remove = sensitiveBlankRemoveExpression();
+      assert.equal(await page.evaluate(inject), true);
+      assert.equal(await page.evaluate(inject), true);
+      await page.evaluate(() => {
+        const host = document.createElement("div");
+        host.id = "late-host";
+        document.body.append(host);
+        const shadow = host.attachShadow({ mode: "open" });
+        shadow.innerHTML = '<div data-sensitive style="width:50px;height:50px;background:#ff0000">late</div>';
+      });
+      assert.equal(await page.evaluate(inject), true);
+      assert.equal(await page.evaluate(remove), 0, "a release while other captures hold the blank removed styles");
+      assert.equal(
+        await page.evaluate(
+          `document.querySelector("#late-host")?.shadowRoot?.querySelector("#${BLANK_STYLE_ID}") !== null`,
+        ),
+        true,
+        "the late shadow root lost its blanking while a capture still held it",
+      );
+      assert.equal(await page.evaluate(remove), 0);
+      const removed = await page.evaluate(remove);
+      assert.ok(typeof removed === "number" && removed >= 1, "the final release did not remove the injected styles");
+      assert.equal(await page.evaluate(`document.querySelector("#${BLANK_STYLE_ID}")`), null);
+      assert.equal(
+        await page.evaluate(`document.querySelector("#shadow-host")?.shadowRoot?.querySelector("#${BLANK_STYLE_ID}")`),
+        null,
+      );
+      assert.equal(
+        await page.evaluate(`document.querySelector("#late-host")?.shadowRoot?.querySelector("#${BLANK_STYLE_ID}")`),
+        null,
+      );
+    } finally {
+      await page.close();
+    }
+  },
+);
+
+test(
+  "a hung page fails the blanking within the screenshot timeout, reported like a capture timeout (security contract #380)",
+  { skip },
+  async () => {
+    const page = await openTab();
+    try {
+      await setBlocks(page);
+      await page.evaluate("setTimeout(() => { const until = Date.now() + 9000; while (Date.now() < until); }, 0)");
+      const started = Date.now();
+      await assert.rejects(
+        page.screenshot({ timeout: 400 }),
+        /page\.screenshot: browser CDP command timed out while capturing sensitive blanking/,
+      );
+      assert.ok(Date.now() - started < 4000, "the blanking hang did not fail within its timeout");
+    } finally {
+      await page.close();
+    }
+  },
+);
