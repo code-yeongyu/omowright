@@ -96,13 +96,14 @@ async function setSecretPage(page: PipePage) {
 }
 
 // One browser serves the whole file. The first test that runs starts it — the lighter BSK read
-// below runs first, so the cold chrome-headless-shell start, which alone can take most of a slow
-// runner's per-test limit, lands on the lightest body, and the locator-read contract runs against
-// the already-warm browser — and after() releases everything. Not in a before() hook: bun gives
-// hooks the test limit and ignores a hook's timeout option, and that hook timed out on a Windows
-// runner. Not while the module loads either: a run whose filter selects no test here would launch a
-// browser and leave its profile behind. Release runs newest first, the browser before its
-// user-data dir, collecting failures instead of stranding the rest.
+// below runs first, so the cold chrome-headless-shell start, which alone takes the whole default
+// per-test limit on windows-latest, lands on the lightest body and carries that one explicit
+// timeout, and the locator-read contract runs against the already-warm browser — and after()
+// releases everything. Not in a before() hook: bun gives hooks the test limit and ignores a hook's
+// timeout option (killed at 5003 ms on bun 1.4.5 in both argument orders), and that hook timed out
+// on a Windows runner. Not while the module loads either: a run whose filter selects no test here
+// would launch a browser and leave its profile behind. Release runs newest first, the browser
+// before its user-data dir, collecting failures instead of stranding the rest.
 const skip = !SHELL && "no chromium binary found";
 type Release = () => unknown;
 const releases: Release[] = [];
@@ -141,9 +142,14 @@ async function openTab(): Promise<PipePage> {
   return await browser.newTab("about:blank");
 }
 
+// This test runs first, so it pays the cold chrome-headless-shell start, measured at ~5 s on
+// windows-latest: run 46127683648 took 4920 ms and run 46130078845 reached its first CDP command
+// only at elapsedSinceLaunchMs=4975, past the default 5 s per-test limit. The launch is the one
+// boundary here with an explicit timeout, the same allowance async-dispose.test.ts grants its
+// launchers; the contract read below keeps the default limit against the warm browser.
 test(
   "bsk snapshot redacts data-sensitive text and emits no css path for marked refs (security contract #379)",
-  { skip },
+  { skip, timeout: 30_000 },
   async () => {
     const page = await openTab();
     try {
