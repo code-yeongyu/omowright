@@ -334,6 +334,14 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
       assert.ok(named.blocking?.name.includes(PLACEHOLDER), `overlay name: ${JSON.stringify(named.blocking)}`);
     }
 
+    // Template content alone is sealed markup in serialized HTML (#394).
+    await page.evaluate(() => {
+      document.body.innerHTML = "<template><p data-sensitive>quartz</p></template><p>after</p>";
+    });
+    const templateOnly = await page.content();
+    assertNoWords("template-only page.content()", templateOnly, ["quartz"]);
+    assert.ok(templateOnly.includes("after"), `template-only page.content():\n${templateOnly}`);
+
     // A page whose only sealed markup sits in a srcdoc still counts as holding sealed content, and
     // a sealed <title> reads as the placeholder (#392 review).
     await page.evaluate(() => {
@@ -479,4 +487,84 @@ test("a data-sensitive frame owner seals frame-scoped matchers and CSS (security
     assert.equal(await open.getByText("public frame").count(), 1);
     assert.equal(await open.getByRole("button", { name: "Open action" }).count(), 1);
   }),
+);
+
+// Frame sources (#392 audit): a frame's markup can come from its owner's attribute (srcdoc, or a
+// data: URL in <iframe src> or <object data>). An owner whose loaded document, or a frame below
+// it, holds sealed markup has src, srcdoc and data withheld from page.content(), innerHTML and
+// getAttribute, and its page counts as holding sealed content for the selector guard. The
+// decision comes from the loaded frame tree, not the attribute text: the nested srcdoc below
+// carries its marker entity-encoded, so the outer attribute never spells it.
+const SOURCE_WORDS = ["rho", "sigma", "tau", "phi", "chi", "psi"];
+
+async function setFrameSourcePage(page: PipePage) {
+  await page.evaluate(async () => {
+    const owners = [
+      Object.assign(document.createElement("iframe"), {
+        id: "data-frame",
+        src: "data:text/html,<p data-sensitive>rho sigma</p>",
+      }),
+      Object.assign(document.createElement("object"), {
+        id: "data-object",
+        type: "text/html",
+        data: "data:text/html,<p data-sensitive>tau phi</p>",
+      }),
+      Object.assign(document.createElement("iframe"), {
+        id: "nested",
+        srcdoc: '<iframe srcdoc="<p data&#45;sensitive>chi psi</p>"></iframe>',
+      }),
+      Object.assign(document.createElement("iframe"), { id: "plain", src: "data:text/html,<p>public data frame</p>" }),
+    ];
+    const loaded = owners.map(
+      (owner) => new Promise((resolve) => owner.addEventListener("load", resolve, { once: true })),
+    );
+    const main = document.createElement("main");
+    main.append(...owners);
+    document.body.replaceChildren(main);
+    await Promise.all(loaded);
+  });
+}
+
+test(
+  "a frame owner whose loaded document holds sealed markup withholds its source (security contract #379)",
+  { skip },
+  async () => {
+    const page = await openTab();
+    try {
+      await setFrameSourcePage(page);
+      const content = await page.content();
+      assertNoWords("page.content()", content, SOURCE_WORDS);
+      assert.ok(content.includes("public data frame"), `unmarked frame source withheld:\n${content}`);
+      assertNoWords("main innerHTML", await page.locator("main").innerHTML(), SOURCE_WORDS);
+      assert.equal(await page.locator("#data-frame").getAttribute("src"), PLACEHOLDER, "data: src");
+      assert.equal(await page.locator("#data-object").getAttribute("data"), PLACEHOLDER, "object data");
+      assert.equal(await page.locator("#nested").getAttribute("srcdoc"), PLACEHOLDER, "nested srcdoc");
+      assert.equal(await page.locator("#plain").getAttribute("src"), "data:text/html,<p>public data frame</p>");
+      for (const selector of ['iframe[src*="rho"]', 'object[data*="tau"]', 'iframe[srcdoc*="chi"]']) {
+        await assert.rejects(page.locator(selector).count(), /data-sensitive/, `CSS ${selector} answered`);
+        await assert.rejects(page.snapshot({ selector }), /data-sensitive/, `snapshot({ selector: ${selector} })`);
+      }
+      // An owner that never loads a frame cannot be checked, so a source that carries markup is
+      // withheld: an <object> of a type the browser cannot render (it gets no frame), and a frame
+      // owner inside <template> content.
+      await page.evaluate(() => {
+        const holder = document.createElement("div");
+        holder.innerHTML =
+          '<object id="bare" type="application/x-omowright-none" data="data:text/html,<p data-sensitive>upsilon</p>"></object>' +
+          '<template><iframe srcdoc="<p data-sensitive>upsilon</p>"></iframe></template>';
+        document.querySelector("main")?.append(holder);
+      });
+      assertNoWords("unloaded owners in page.content()", await page.content(), ["upsilon"]);
+      assert.equal(await page.locator("#bare").getAttribute("data"), PLACEHOLDER, "frameless object data");
+      await page.evaluate(() => document.getElementById("bare")?.parentElement?.remove());
+
+      // With only the unmarked frame left, a source comparison still runs.
+      await page.evaluate(() => {
+        for (const id of ["data-frame", "data-object", "nested"]) document.getElementById(id)?.remove();
+      });
+      assert.equal(await page.locator('iframe[src*="public"]').count(), 1, "unmarked frame source refused");
+    } finally {
+      await page.close();
+    }
+  },
 );

@@ -398,14 +398,22 @@ Mark an element `data-sensitive` (any value except the exact string `"false"` �
 `"false"` is inert and does not unseal a marked ancestor). Every omowright output —
 snapshot trees, refs maps, diff/find/scoped reads, locator `textContent`/
 `innerText`/`inputValue`/`getAttribute`/`innerHTML`, `page.content()` (including
-`<template>` content and an iframe `srcdoc` that carries the marker, which
-`getAttribute('srcdoc')` withholds too), `page.title()`, the values `selectOption`
-returns, BSK snapshots (tree, refs, css paths) and layer headers — replaces that subtree with a `[redacted: sensitive]`
+`<template>` content), `page.title()`, the values `selectOption` returns, BSK
+snapshots (tree, refs, css paths) and layer headers — replaces that subtree with a `[redacted: sensitive]`
 placeholder that keeps the element's role and ref, so buttons outside it stay
 findable and clickable. Accessible names never source from a sealed subtree: an
 `aria-labelledby` target or `<label>` inside it contributes nothing. Password
 input values were already redacted; the marker extends that to page text the
 page itself declares secret.
+
+A frame's markup can come from its owner's attribute (`srcdoc`, or a `data:` URL in
+`<iframe src>` or `<object data>`). When an owner's loaded frame, or a frame below
+it, holds sealed markup, its `src`, `srcdoc` and `data` read as the placeholder in
+`page.content()`, `innerHTML` and `getAttribute`, and its page counts as holding
+sealed content for the selector rules below. That is decided from the loaded frame
+tree, not the attribute text. An owner that never loads a frame (one inside
+`<template>` content, or an `<object>` the browser cannot render) has a `srcdoc`, or
+a `data:` or `javascript:` source, withheld, since it cannot be checked.
 
 A sealed `<iframe>` (or one inside a sealed element) seals the document it hosts
 and every frame below it: snapshots show only the iframe's placeholder line, refs
