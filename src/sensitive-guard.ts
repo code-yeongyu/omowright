@@ -11,6 +11,7 @@
 // parent document, using only CDP methods the scoped page path already allows.
 
 import type { CdpSend } from "./cdp-protocol.ts";
+import { createTextMatching } from "./text-matching.ts";
 
 export const SENSITIVE_PLACEHOLDER = `[redacted: sensitive]`;
 
@@ -57,6 +58,12 @@ const SEALED_OWNER_FN = `function(index) {
   visit(document);
   return index < 0 ? owners.length : (owners[index] ?? null);
 }`;
+
+// A page expression that throws when `selector` could confirm a sealed attribute value (see
+// assertSelectorAllowed), for selector waits that run outside the locator query.
+export function selectorGuardExpression(selector: string, testIdAttribute = "data-testid") {
+  return `(${createTextMatching.toString()})(undefined, undefined, false, false, ${JSON.stringify(testIdAttribute)}).assertSelectorAllowed(${JSON.stringify(selector)}, document)`;
+}
 
 interface SealableFrame {
   readonly parentFrameId: string | null;

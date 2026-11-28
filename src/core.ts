@@ -25,6 +25,7 @@ import {
   SENSITIVE_PLACEHOLDER,
   collectSealedFrames,
   isInSealedFrame,
+  selectorGuardExpression,
   sensitiveElementGuard,
 } from "./sensitive-guard.ts";
 import { snapshotResult, validateSnapshotOptions } from "./snapshot-diff.ts";
@@ -4435,7 +4436,7 @@ function createLocatorClass() {
       return await this.#e.evaluateInFrame<number>(
         Vn,
         `function(query) {
-        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true);
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -4465,7 +4466,7 @@ function createLocatorClass() {
           return { value: JSON.parse(raw.slice(0, -1)), exact: raw.endsWith('s') };
         };
         const matchesAttribute = (node, attribute) => {
-          const value = node.getAttribute(attribute.name);
+          const value = textMatching.attributeValue(node, attribute.name);
           if (value === null) return false;
           const matcher = attribute.matcher;
           if (matcher instanceof RegExp) {
@@ -4558,7 +4559,7 @@ function createLocatorClass() {
                 ? textMatches(root, step.matcher)
                 : step.kind === 'label'
                   ? labelMatches(root, step.matcher)
-                  : queryOpenShadowAll(root, step.selector);
+                  : (textMatching.assertSelectorAllowed(step.selector, document), queryOpenShadowAll(root, step.selector));
               if (step.hasText) {
                 matches = matches.filter((node) => matchesText(node, step.hasText));
               }
@@ -4580,7 +4581,13 @@ function createLocatorClass() {
         const index = query.nth === 'last' ? nodes.length - 1 : query.nth;
         return query.hasNth ? (nodes[index] ? 1 : 0) : nodes.length;
       }`,
-        { selector: jn.selector, nth: jn.nth, hasNth: xn, sealedDocument: await this.#sealed(Vn) },
+        {
+          selector: jn.selector,
+          nth: jn.nth,
+          hasNth: xn,
+          sealedDocument: await this.#sealed(Vn),
+          testIdAttribute: testIdAttributeName,
+        },
       );
     }
     async getAttribute(xn: string) {
@@ -4886,12 +4893,18 @@ function createLocatorClass() {
         if (countOnly) return 0;
         throw Error(`Selector "${xn}" not found`);
       }
-      let Jn = { ...this.#f(xn), scoped: scope !== void 0, countOnly, sealedDocument: await this.#sealed(jn) },
+      let Jn = {
+          ...this.#f(xn),
+          scoped: scope !== void 0,
+          countOnly,
+          sealedDocument: await this.#sealed(jn),
+          testIdAttribute: testIdAttributeName,
+        },
         { result: Yn } = await this.#e.cdp.send(
           `Runtime.callFunctionOn`,
           {
             functionDeclaration: `function(query, ...scopeRoots) {
-        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true);
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -4921,7 +4934,7 @@ function createLocatorClass() {
           return { value: JSON.parse(raw.slice(0, -1)), exact: raw.endsWith('s') };
         };
         const matchesAttribute = (node, attribute) => {
-          const value = node.getAttribute(attribute.name);
+          const value = textMatching.attributeValue(node, attribute.name);
           if (value === null) return false;
           const matcher = attribute.matcher;
           if (matcher instanceof RegExp) {
@@ -5015,7 +5028,7 @@ function createLocatorClass() {
                 ? textMatches(root, step.matcher)
                 : step.kind === 'label'
                   ? labelMatches(root, step.matcher)
-                  : queryOpenShadowAll(root, step.selector);
+                  : (textMatching.assertSelectorAllowed(step.selector, document), queryOpenShadowAll(root, step.selector));
               if (step.hasText) {
                 matches = matches.filter((node) => matchesText(node, step.hasText));
               }
@@ -7114,6 +7127,7 @@ function createOmOPageClass() {
       for (;;) {
         if (Date.now() - Yn >= qn)
           throw Error(`waitForSelector: timed out after ${qn}ms waiting for "${xn}" to be ${Vn}`);
+        await this.evaluate(selectorGuardExpression(xn, testIdAttributeName));
         let jn = await this.evaluate((xn: string) => {
           let jn = document.querySelector(xn);
           if (!jn) return { attached: !1, visible: !1 };

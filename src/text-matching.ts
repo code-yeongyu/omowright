@@ -22,6 +22,7 @@ export function createTextMatching(
   getRole: (element: Element) => string = () => "",
   includeHidden = false,
   sealedDocument = false,
+  testIdAttribute = "data-testid",
 ) {
   // Predicates live inside the factory so the serialized source stays self-contained.
   const isElement = (node: Node): node is Element => node.nodeType === 1;
@@ -98,6 +99,30 @@ export function createTextMatching(
     return value;
   };
   const sealedText = (node: MatchNode) => (sealed(node) ? SENSITIVE : text(node));
+  // Attribute matchers read a sealed element's attribute values as the placeholder, except the
+  // test id, which stays matchable so a sealed block can still be located.
+  const attributeValue = (node: Element, name: string) => {
+    const value = node.getAttribute(name);
+    return value !== null && name !== testIdAttribute && sealed(node) ? SENSITIVE : value;
+  };
+  // A CSS selector that compares an attribute value (`[value^="k"]`, also inside :has/:not or
+  // across combinators) could confirm a sealed value through its match count, so it is refused in
+  // a document holding sealed content. Presence-only selectors, ids and classes still run. The
+  // refusal depends only on whether sealed content exists, which the snapshot already shows.
+  const comparedAttributes = (selector: string) =>
+    Array.from(selector.matchAll(/\[\s*(?:[\w*-]*\|)?([^\s~|^$*=\]]+)\s*[~|^$*]?=/g), (match) =>
+      String(match[1]).toLowerCase(),
+    ).filter((name) => name !== "data-sensitive" && name !== testIdAttribute.toLowerCase());
+  const holdsSealed = (root: Document | ShadowRoot): boolean =>
+    Array.from(root.querySelectorAll("*")).some(
+      (element) => sealedDocument || marked(element) || (!!element.shadowRoot && holdsSealed(element.shadowRoot)),
+    );
+  const assertSelectorAllowed = (selector: string, document: Document) => {
+    if (comparedAttributes(selector).length > 0 && holdsSealed(document))
+      throw new Error(
+        `Selector "${selector}" compares attribute values in a document with data-sensitive content; use a ref, role, test id, id or class instead`,
+      );
+  };
   const matchesText = (node: MatchNode, matcher: TextMatcher) => !skipped(node) && matches(sealedText(node), matcher);
   const labelledBy = (node: Element) => {
     const refs =
@@ -213,5 +238,15 @@ export function createTextMatching(
     if (prohibitedRoles.has(getRole(node))) return "";
     return sealed(node) ? SENSITIVE : normalize(alternative(node));
   };
-  return { normalize, matches, skipped, text, matchesText, labels, accessibleName };
+  return {
+    normalize,
+    matches,
+    skipped,
+    text,
+    matchesText,
+    labels,
+    accessibleName,
+    attributeValue,
+    assertSelectorAllowed,
+  };
 }

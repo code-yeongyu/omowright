@@ -29,7 +29,10 @@ const INPUT_SECRET = "kilo lima mike";
 const MUTATED_SECRET = "foxtrot golf";
 const OPTION_SECRET = "november oscar";
 const LAYER_SECRET = "papa quebec";
-const SECRET_WORDS = [SECRET, INPUT_SECRET, MUTATED_SECRET, OPTION_SECRET, LAYER_SECRET].flatMap((s) => s.split(" "));
+const ATTRIBUTE_SECRET = "sierra tango";
+const SECRET_WORDS = [SECRET, INPUT_SECRET, MUTATED_SECRET, OPTION_SECRET, LAYER_SECRET, ATTRIBUTE_SECRET].flatMap(
+  (s) => s.split(" "),
+);
 
 function assertNoSecret(what: string, value: unknown) {
   assertNoWords(what, value, SECRET_WORDS);
@@ -72,6 +75,8 @@ async function setSecretPage(page: PipePage) {
       '<button type="button" id="reveal" aria-labelledby="secret-name">Reveal</button>' +
       '<div data-sensitive="false"><p>public notes stay visible</p></div>' +
       '<select data-sensitive id="pin"><option>november oscar</option></select>' +
+      '<div data-sensitive><input id="hint" data-testid="hint-box" title="sierra tango" placeholder="sierra tango" />' +
+      '<img alt="sierra tango" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" /></div>' +
       "</main>";
   });
 }
@@ -206,6 +211,20 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
     assert.equal(await sealedSpans.filter({ hasText: "bravo" }).count(), 0, "filter hasText confirmed a secret");
     assert.equal(await sealedSpans.filter({ hasText: /^alpha/ }).count(), 0, "filter hasText RegExp confirmed");
     assert.equal(await sealedSpans.filter({ hasNotText: "bravo" }).count(), 1, "filter hasNotText confirmed");
+
+    // Attribute matchers (#386) read sealed attribute values as the placeholder; the test id stays
+    // matchable so a sealed block can be located.
+    assert.equal(await page.getByPlaceholder("sierra").count(), 0, "getByPlaceholder confirmed a secret");
+    assert.equal(await page.getByTitle("sierra").count(), 0, "getByTitle confirmed a secret");
+    assert.equal(await page.getByAltText("sierra").count(), 0, "getByAltText confirmed a secret");
+    assert.equal(await page.getByTestId("hint-box").count(), 1, "a sealed block lost its test id");
+    // A CSS selector comparing attribute values is refused in a document with sealed content,
+    // whatever its match would be; presence, id and class selectors still run.
+    for (const selector of ['input[data-sensitive][value^="k"]', 'main:has(input[value^="k"])', '[title*="z"]']) {
+      await assert.rejects(page.locator(selector).count(), /data-sensitive/, `CSS ${selector} answered`);
+      await assert.rejects(page.waitForSelector(selector, { timeout: 200 }), /data-sensitive/, `wait ${selector}`);
+    }
+    assert.equal(await page.locator("#seed[data-sensitive]").count(), 1, "presence selector refused");
     assert.equal(await page.getByText("oscar").count(), 0, "getByText confirmed a sealed option");
     assert.equal(await page.getByLabel("bravo").count(), 0, "getByLabel confirmed a sealed label");
     assert.equal(await page.getByRole("button", { name: "bravo" }).count(), 0, "role name confirmed a secret");
@@ -310,6 +329,7 @@ test(
         // Guesses the placeholder cannot match: "o" is in every sealed frame's text, not in it.
         assert.equal(await frame.getByText("o").count(), 0, `${what} getByText matched sealed text`);
         assert.equal(await frame.locator("p").filter({ hasText: "o" }).count(), 0, `${what} filter matched`);
+        await assert.rejects(frame.locator('button[type^="s"]').count(), /data-sensitive/, `${what} CSS compare`);
         const roleGuess = frame.getByRole("button", { name: /zulu|yankee/ });
         assert.equal(await roleGuess.count(), 0, `${what} role name matched`);
       }

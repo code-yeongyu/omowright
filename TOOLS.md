@@ -409,10 +409,15 @@ A sealed `<iframe>` (or one inside a sealed element) seals the document it hosts
 and every frame below it: snapshots show only the iframe's placeholder line, refs
 into those frames resolve as stale, and `frameLocator(...)` reads return the
 placeholder. Text, label and role-name matchers (`getByText`, `getByLabel`,
-`getByRole({ name })`, `:has-text`) read a sealed subtree as the placeholder, so a
-match count cannot confirm a guessed secret. Attribute matchers (`getByTestId`,
-`getByTitle`, `getByPlaceholder`, `getByAltText`) still match a sealed element, so
-a sealed block can be located by its test id.
+`getByRole({ name })`, `:has-text`, `filter({ hasText, hasNotText })`) and the
+attribute matchers `getByTitle`, `getByPlaceholder` and `getByAltText` read a sealed
+subtree as the placeholder, so a match count cannot confirm a guessed secret.
+`getByTestId` still matches a sealed element, so a sealed block can be located by
+its test id. In a document with sealed content, a CSS selector that compares an
+attribute value (`[value^="k"]`, also inside `:has()`/`:not()`) is refused by
+locators and `waitForSelector`; presence selectors (`[data-sensitive]`), ids and
+classes still run. `requestHuman`'s `until.selector`, like its predicate, runs page
+JS directly and is not covered.
 
 Screenshots, `readText` OCR and anything pixel-based still capture what the page
 renders: avoid them (or mask via the page's own CSS) while a marked secret is
