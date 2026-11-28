@@ -143,6 +143,27 @@ export async function withheldFrameOwners(
   }
 }
 
+// Whether a locator selector has a step whose answer can depend on a frame owner's source, so the
+// owner probe must run: an attribute-engine step on src/srcdoc/data, or a CSS step with an attribute
+// selector or pseudo-class (the selector guard inspects those). Text, label and role steps never
+// read those attributes, and skipping the probe for them keeps query-heavy pages fast. This reads
+// the caller's selector, never page content.
+export function selectorNeedsOwnerCheck(selector: string) {
+  return selector.split(/\s*>>\s*/).some((step) => {
+    const base = step
+      .trim()
+      .replace(/:nth\((?:\d+|last)\)$/, "")
+      .replace(/:has-text\(.*\)$/s, "")
+      .trim();
+    if (/^(text:|internal:label:|role:)/.test(base)) return false;
+    const attribute = /^internal:attr=\[([^=\]]+)=/.exec(base)?.[1];
+    if (attribute !== undefined) return WITHHELD_OWNER_ATTRIBUTES.includes(attribute.toLowerCase());
+    return /[[:]/.test(base);
+  });
+}
+
+export const NO_WITHHELD_OWNERS = null;
+
 export function holdsWithheld(owners: WithheldOwners) {
   return owners.all || owners.indices.length > 0;
 }

@@ -38,6 +38,7 @@ import {
   isWithheldOwner,
   withheldFrameOwners,
   withheldMarkupUrl,
+  selectorNeedsOwnerCheck,
 } from "./sealed-frame-owners.ts";
 import { snapshotResult, validateSnapshotOptions } from "./snapshot-diff.ts";
 import { subscribeConsoleEvents } from "./console-events.ts";
@@ -4471,6 +4472,7 @@ function createLocatorClass() {
         const withheldOwners = (() => {
           const owners = (${FRAME_OWNERS_SOURCE})();
           const withheld = query.withheldOwners;
+          if (withheld === null) return new Set();
           if (!withheld || withheld.all || owners.length !== withheld.total) return new Set(owners.filter(${CARRIES_MARKUP_SOURCE}));
           return new Set(withheld.indices.map((index) => owners[index]).filter(Boolean));
         })();
@@ -4625,7 +4627,7 @@ function createLocatorClass() {
           nth: jn.nth,
           hasNth: xn,
           sealedDocument: await this.#sealed(Vn),
-          ...(await this.#withheld(Vn)),
+          ...(await this.#withheld(Vn, jn.selector)),
           testIdAttribute: testIdAttributeName,
         },
       );
@@ -4938,7 +4940,7 @@ function createLocatorClass() {
           scoped: scope !== void 0,
           countOnly,
           sealedDocument: await this.#sealed(jn),
-          ...(await this.#withheld(jn)),
+          ...(await this.#withheld(jn, xn)),
           testIdAttribute: testIdAttributeName,
         },
         { result: Yn } = await this.#e.cdp.send(
@@ -4948,6 +4950,7 @@ function createLocatorClass() {
         const withheldOwners = (() => {
           const owners = (${FRAME_OWNERS_SOURCE})();
           const withheld = query.withheldOwners;
+          if (withheld === null) return new Set();
           if (!withheld || withheld.all || owners.length !== withheld.total) return new Set(owners.filter(${CARRIES_MARKUP_SOURCE}));
           return new Set(withheld.indices.map((index) => owners[index]).filter(Boolean));
         })();
@@ -5300,7 +5303,10 @@ function createLocatorClass() {
     // whole document as sealed, so a matcher there cannot confirm a guessed secret either.
     // #379: the frame owners withheld in this frame's document; one value feeds both the value
     // reads (attributeValue) and the CSS guard (sealedFrames).
-    async #withheld(frameId: string | null) {
+    // A selector no step of which can depend on a frame source skips the probe: null tells the page
+    // side that no owner is withheld (an absent value would fail closed and withhold every candidate).
+    async #withheld(frameId: string | null, selector: string) {
+      if (!selectorNeedsOwnerCheck(selector)) return { withheldOwners: null, sealedFrames: !1 };
       const withheldOwners = await withheldFrameOwners(this.#e.cdp, this.#e.frameManager, frameId);
       return { withheldOwners, sealedFrames: holdsWithheld(withheldOwners) };
     }
@@ -5880,7 +5886,8 @@ async function takeSnapshot(xn: CoreCdpTransport, jn: PageFrameManager, Vn: Snap
           showHidden: Vn.showHidden,
           refPrefix: Yn.get(qn) ?? ``,
         };
-        let selectorSealedFrames = ai.selector ? await holdsWithheldOwner(xn, jn, qn) : !1;
+        let selectorSealedFrames =
+          ai.selector && selectorNeedsOwnerCheck(ai.selector) ? await holdsWithheldOwner(xn, jn, qn) : !1;
         try {
           let { result: Vn } = await xn.send(
               `Runtime.callFunctionOn`,
@@ -7213,7 +7220,8 @@ function createOmOPageClass() {
           selectorGuardExpression(
             xn,
             testIdAttributeName,
-            await holdsWithheldOwner(this.cdp, this.frameManager, this.frameManager.mainFrameId),
+            selectorNeedsOwnerCheck(xn) &&
+              (await holdsWithheldOwner(this.cdp, this.frameManager, this.frameManager.mainFrameId)),
           ),
         );
         let jn = await this.evaluate((xn: string) => {
