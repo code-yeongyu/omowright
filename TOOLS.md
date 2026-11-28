@@ -417,9 +417,12 @@ the frame sealing of the text outputs), and the shadow tree of a marked host, op
 closed. The style is injected into the document, every open shadow root and every
 same-origin iframe document, because a light-DOM stylesheet reaches none of those; a page
 without a marked element is not touched. Overlapping captures share one page-wide hold,
-and the injection and removal count against the `timeout` of `page.screenshot`. Two
+and the injection and removal count against the `timeout` of `page.screenshot`. Three
 limits remain: a marker inside a cross-origin frame's own document is unreachable from
-the parent page (mark the iframe itself instead), and a page can outrank the blanking with
+the parent page (mark the iframe itself instead); a marked host styled `display: contents`
+with a closed shadow root has no box to blank and a closed root cannot be styled, so its
+shadow content shows (mark an element inside it, or a wrapper that has a box); and a page
+can outrank the blanking with
 its own `!important` inline styles on a marked element — the marker is the page's own
 declaration, so a page fighting it is out of contract. `page.pdf()` renders without
 blanking, and `page.evaluate` with your own JS reads the DOM directly and is likewise not

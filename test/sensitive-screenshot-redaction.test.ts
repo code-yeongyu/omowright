@@ -2,6 +2,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, globSync, mkdtempSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
@@ -525,22 +526,70 @@ test(
   },
 );
 
+// A frame of another origin is a separate document the parent's stylesheet cannot enter, so only
+// the marked owner's own painting can blank it.
+test("a marked cross-origin iframe blanks its content (security contract #380)", { skip }, async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end(
+      '<body style="margin:0"><div style="width:300px;height:120px;background:#ff0000;color:#0000ff;font:48px bold sans-serif">hotel india</div></body>',
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const page = await openTab();
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object", "the frame server has no port");
+    await page.evaluate(
+      `new Promise((resolve) => {
+        document.body.style.margin = "0";
+        const frame = document.createElement("iframe");
+        frame.id = "foreign-frame";
+        frame.setAttribute("data-sensitive", "");
+        frame.style.cssText = "width:300px;height:120px;display:block;border:0";
+        frame.addEventListener("load", () => resolve(1), { once: true });
+        frame.src = "http://127.0.0.1:${address.port}/";
+        document.body.append(frame);
+      })`,
+    );
+    assert.equal(
+      await page.evaluate(`document.getElementById("foreign-frame").contentDocument`),
+      null,
+      "the frame is not cross-origin to the page, so this would not test the cross-origin case",
+    );
+    const dpr = await dprOf(page);
+    const rect = await rectOf(page, `document.getElementById("foreign-frame")`);
+    const image = decodePng(await page.screenshot());
+    assertRegionBlank(image, rect, dpr, "the marked cross-origin iframe");
+  } finally {
+    await page.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("a marked shadow host blanks its shadow content (security contract #380)", { skip }, async () => {
   const page = await openTab();
   try {
     await page.evaluate(() => {
       document.body.style.margin = "0";
-      document.body.innerHTML = '<div id="host" data-sensitive></div>';
-      const host = document.getElementById("host");
-      if (!host) throw new Error("host missing");
-      const shadow = host.attachShadow({ mode: "open" });
-      shadow.innerHTML =
-        '<div style="width:300px;height:120px;background:#ff00ff;color:#000000;font:48px bold sans-serif">hotel india</div>';
+      document.body.innerHTML = '<div id="host" data-sensitive></div><div id="closed-host" data-sensitive></div>';
+      for (const [id, mode] of [
+        ["host", "open"],
+        ["closed-host", "closed"],
+      ] as const) {
+        const host = document.getElementById(id);
+        if (!host) throw new Error(`${id} missing`);
+        const shadow = host.attachShadow({ mode });
+        shadow.innerHTML =
+          '<div style="width:300px;height:120px;background:#ff00ff;color:#000000;font:48px bold sans-serif">hotel india</div>';
+      }
     });
     const dpr = await dprOf(page);
     const host = await rectOf(page, `document.getElementById("host")`);
+    const closedHost = await rectOf(page, `document.getElementById("closed-host")`);
     const image = decodePng(await page.screenshot());
-    assertRegionBlank(image, host, dpr, "the shadow content of the marked host");
+    assertRegionBlank(image, host, dpr, "the shadow content of the marked open host");
+    assertRegionBlank(image, closedHost, dpr, "the shadow content of the marked closed host");
   } finally {
     await page.close();
   }
@@ -599,16 +648,14 @@ test(
 );
 
 test(
-  "overlapping blank acquisitions with a root added between never remove early or leave a style (security contract #380)",
+  "overlapping blank holders never remove early, never release another's hold, and leave no style (security contract #380)",
   { skip },
   async () => {
     const page = await openTab();
     try {
       await setBlocks(page);
-      const inject = sensitiveBlankInjectExpression();
-      const remove = sensitiveBlankRemoveExpression();
-      assert.equal(await page.evaluate(inject), true);
-      assert.equal(await page.evaluate(inject), true);
+      assert.equal(await page.evaluate(sensitiveBlankInjectExpression("a")), true);
+      assert.equal(await page.evaluate(sensitiveBlankInjectExpression("b")), true);
       await page.evaluate(() => {
         const host = document.createElement("div");
         host.id = "late-host";
@@ -616,8 +663,12 @@ test(
         const shadow = host.attachShadow({ mode: "open" });
         shadow.innerHTML = '<div data-sensitive style="width:50px;height:50px;background:#ff0000">late</div>';
       });
-      assert.equal(await page.evaluate(inject), true);
-      assert.equal(await page.evaluate(remove), 0, "a release while other captures hold the blank removed styles");
+      assert.equal(await page.evaluate(sensitiveBlankInjectExpression("c")), true);
+      assert.equal(
+        await page.evaluate(sensitiveBlankRemoveExpression("a")),
+        0,
+        "a release while other captures hold the blank removed styles",
+      );
       assert.equal(
         await page.evaluate(
           `document.querySelector("#late-host")?.shadowRoot?.querySelector("#${BLANK_STYLE_ID}") !== null`,
@@ -625,8 +676,8 @@ test(
         true,
         "the late shadow root lost its blanking while a capture still held it",
       );
-      assert.equal(await page.evaluate(remove), 0);
-      const removed = await page.evaluate(remove);
+      assert.equal(await page.evaluate(sensitiveBlankRemoveExpression("b")), 0);
+      const removed = await page.evaluate(sensitiveBlankRemoveExpression("c"));
       assert.ok(typeof removed === "number" && removed >= 1, "the final release did not remove the injected styles");
       assert.equal(await page.evaluate(`document.querySelector("#${BLANK_STYLE_ID}")`), null);
       assert.equal(
@@ -637,6 +688,22 @@ test(
         await page.evaluate(`document.querySelector("#late-host")?.shadowRoot?.querySelector("#${BLANK_STYLE_ID}")`),
         null,
       );
+
+      // A recording holds even a page with no marker yet; a capture that found nothing to blank
+      // took no hold, so its compensating release (the one queued after a timed-out inject) must
+      // leave the recording's blanking in place.
+      await page.evaluate(() => {
+        document.body.innerHTML = "";
+      });
+      assert.equal(await page.evaluate(sensitiveBlankInjectExpression("recording", "recording")), true);
+      assert.equal(await page.evaluate(sensitiveBlankInjectExpression("capture")), false);
+      assert.equal(await page.evaluate(sensitiveBlankRemoveExpression("capture")), 0);
+      assert.notEqual(
+        await page.evaluate(`document.querySelector("#${BLANK_STYLE_ID}")`),
+        null,
+        "a capture that took no hold released the recording's blanking",
+      );
+      assert.equal(await page.evaluate(sensitiveBlankRemoveExpression("recording")), 1);
     } finally {
       await page.close();
     }
@@ -650,13 +717,20 @@ test(
     const page = await openTab();
     try {
       await setBlocks(page);
-      await page.evaluate("setTimeout(() => { const until = Date.now() + 9000; while (Date.now() < until); }, 0)");
+      await page.evaluate("setTimeout(() => { const until = Date.now() + 1500; while (Date.now() < until); }, 0)");
       const started = Date.now();
       await assert.rejects(
         page.screenshot({ timeout: 400 }),
         /page\.screenshot: browser CDP command timed out while capturing sensitive blanking/,
       );
-      assert.ok(Date.now() - started < 4000, "the blanking hang did not fail within its timeout");
+      assert.ok(Date.now() - started < 1500, "the blanking hang did not fail within its timeout");
+      // The timed-out inject still runs once the page is free; the release queued behind it on
+      // the same session runs next, so this read, queued after both, sees the page restored.
+      assert.equal(
+        await page.evaluate(`document.querySelector("#${BLANK_STYLE_ID}")`),
+        null,
+        "the late inject of a timed-out capture stayed in the page",
+      );
     } finally {
       await page.close();
     }

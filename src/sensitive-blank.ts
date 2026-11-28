@@ -10,11 +10,13 @@
 // hidden so nothing overflowing the box shows. The style is injected into the document, every
 // open shadow root and every same-origin iframe document, because a light-DOM stylesheet
 // reaches none of those; a shadow root's copy blanks content under a marked host through
-// :host(). A capture on a page without a marked element mutates nothing. Two limits are stated
+// :host(). A capture on a page without a marked element mutates nothing. Three limits are stated
 // in TOOLS.md: a marker inside a cross-origin frame's own document is unreachable from the
-// parent page (marking the iframe itself does blank it), and an author `!important` inline
-// style on a marked element outranks any stylesheet, so a page can defeat the blanking by
-// fighting its own marker. The BSK daemon capture is the one path that does not go through
+// parent page (marking the iframe itself does blank it); a marked `display: contents` host with
+// a closed shadow root generates no box for the filter to act on and its closed root cannot be
+// styled, so its shadow content paints in clear; and an author `!important` inline style on a
+// marked element outranks any stylesheet, so a page can defeat the blanking by fighting its own
+// marker. The BSK daemon capture is the one path that does not go through
 // this: its screenshot tool is a cooperation-exempt read while evaluate is a gated action
 // needing the single-use context of the latest cooperate sync, so blanking there cannot run
 // without invalidating the caller's own context (TOOLS.md carries that caveat).
@@ -47,11 +49,12 @@ const SENSITIVE_BLANK_CSS = [
   `}`,
 ].join("\n");
 
-// One reference count for the whole page, kept on the top document's style element, so
+// One holder list for the whole page, kept on the top document's style element, so
 // overlapping holders share one blanking: every acquire ensures the style in every root that
-// exists at that moment (roots appearing between captures included) and raises the count, and
-// a release removes the style from every root only when the count reaches zero.
-const SENSITIVE_BLANK_COUNT = "data-omowright-count";
+// exists at that moment (roots appearing between captures included) and adds its own token,
+// and a release drops only its own token, removing the style from every root once no holder is
+// left. A release whose acquire never took a hold (a capture that found no marker) is a no-op.
+const SENSITIVE_BLANK_HOLDERS = "data-omowright-holders";
 
 // Collects every root a light-DOM stylesheet cannot reach: the document, open shadow roots
 // and same-origin iframe documents, recursively; cross-origin frame documents are unreachable
@@ -75,14 +78,15 @@ const SENSITIVE_BLANK_ROOT_WALK = `
 
 // capture: a screenshot's hold, skipped on a page with no marked element.
 // recording: a video's hold, taken even before any marker exists, since one may appear later.
-// refresh: re-ensure the style in roots that appeared during a recording (or after it
-//   navigated) without taking another hold; the recording's own hold is restored to at least 1.
-export type SensitiveBlankMode = "capture" | "recording" | "refresh";
+//   Acquiring it again with the same token is how a recording refreshes: it re-ensures the
+//   style in roots that appeared since (or after a navigation) without taking a second hold.
+export type SensitiveBlankMode = "capture" | "recording";
 
-// Evaluates to true when the page is blanked and holds, false when a capture found nothing to
-// blank (nothing mutated), or an "error: ..." string when the page threw, so a page fault is
-// told apart from a transport failure. The count changes last, after every style is in place.
-export function sensitiveBlankInjectExpression(mode: SensitiveBlankMode = "capture"): string {
+// Evaluates to true when the page is blanked and the token holds, false when a capture found
+// nothing to blank (nothing mutated), or an "error: ..." string when the page threw, so a page
+// fault is told apart from a transport failure. The holder list changes last, after every
+// style is in place.
+export function sensitiveBlankInjectExpression(token: string, mode: SensitiveBlankMode = "capture"): string {
   return `(() => { try {${SENSITIVE_BLANK_ROOT_WALK}
   const id = ${JSON.stringify(SENSITIVE_BLANK_STYLE_ID)};
   const css = ${JSON.stringify(SENSITIVE_BLANK_CSS)};
@@ -99,21 +103,27 @@ export function sensitiveBlankInjectExpression(mode: SensitiveBlankMode = "captu
     }
     if (root === document) top = style;
   }
-  const count = Number(top.getAttribute(${JSON.stringify(SENSITIVE_BLANK_COUNT)}) || "0");
-  top.setAttribute(${JSON.stringify(SENSITIVE_BLANK_COUNT)}, String(${mode === "refresh"} ? Math.max(count, 1) : count + 1));
+  const holders = (top.getAttribute(${JSON.stringify(SENSITIVE_BLANK_HOLDERS)}) || "").split(" ").filter(Boolean);
+  if (!holders.includes(${JSON.stringify(token)})) holders.push(${JSON.stringify(token)});
+  top.setAttribute(${JSON.stringify(SENSITIVE_BLANK_HOLDERS)}, holders.join(" "));
   return true;
 } catch (error) { return "error: " + String(error && error.message || error); } })()`;
 }
 
-// Evaluates to the number of style elements removed: 0 while another holder still holds.
-export function sensitiveBlankRemoveExpression(): string {
+// Evaluates to the number of style elements removed: 0 while another holder still holds or
+// when the token never held.
+export function sensitiveBlankRemoveExpression(token: string): string {
   return `(() => {${SENSITIVE_BLANK_ROOT_WALK}
   const id = ${JSON.stringify(SENSITIVE_BLANK_STYLE_ID)};
   const top = document.querySelector("#" + id);
-  const count = Number((top && top.getAttribute(${JSON.stringify(SENSITIVE_BLANK_COUNT)})) || "0") - 1;
-  if (top && count > 0) {
-    top.setAttribute(${JSON.stringify(SENSITIVE_BLANK_COUNT)}, String(count));
-    return 0;
+  if (top) {
+    const holders = (top.getAttribute(${JSON.stringify(SENSITIVE_BLANK_HOLDERS)}) || "").split(" ").filter(Boolean);
+    if (!holders.includes(${JSON.stringify(token)})) return 0;
+    const rest = holders.filter((holder) => holder !== ${JSON.stringify(token)});
+    if (rest.length > 0) {
+      top.setAttribute(${JSON.stringify(SENSITIVE_BLANK_HOLDERS)}, rest.join(" "));
+      return 0;
+    }
   }
   let removed = 0;
   for (const root of roots) {
@@ -128,26 +138,27 @@ export function sensitiveBlankRemoveExpression(): string {
 
 export type SensitiveBlankEvaluate = (expression: string) => Promise<unknown>;
 
-async function acquireSensitiveBlanking(evaluate: SensitiveBlankEvaluate, mode: SensitiveBlankMode) {
+async function acquireSensitiveBlanking(evaluate: SensitiveBlankEvaluate, token: string, mode: SensitiveBlankMode) {
   let result: unknown;
   try {
-    result = await evaluate(sensitiveBlankInjectExpression(mode));
+    result = await evaluate(sensitiveBlankInjectExpression(token, mode));
   } catch (error) {
     // A transport failure (a timeout on a busy renderer) does not stop the injection from
     // running later; a release queued behind it on the same session undoes it in order, so a
-    // late injection never stays in the page. It is not awaited: the caller's budget is spent.
-    void evaluate(sensitiveBlankRemoveExpression()).catch(() => {});
+    // late injection never stays in the page, and one that took no hold releases nothing. It is
+    // not awaited: the caller's budget is spent.
+    void evaluate(sensitiveBlankRemoveExpression(token)).catch(() => {});
     throw error;
   }
   if (typeof result === "string") throw new Error(`sensitive blanking failed in the page: ${result}`);
   return result === true;
 }
 
-async function releaseSensitiveBlanking(evaluate: SensitiveBlankEvaluate) {
+async function releaseSensitiveBlanking(evaluate: SensitiveBlankEvaluate, token: string) {
   // A removal that fails means the page (and the style with it) is already gone, or the page is
   // busy and the queued removal still runs; this is the same dead-target cleanup readCapture
   // performs for screenshot_release.
-  await evaluate(sensitiveBlankRemoveExpression()).catch(() => {});
+  await evaluate(sensitiveBlankRemoveExpression(token)).catch(() => {});
 }
 
 // Runs capture() with every reachable data-sensitive element blanked, restoring the page
@@ -159,11 +170,12 @@ export async function withSensitiveBlanking<T>(
   evaluate: SensitiveBlankEvaluate,
   capture: () => Promise<T>,
 ): Promise<T> {
-  if (!(await acquireSensitiveBlanking(evaluate, "capture"))) return await capture();
+  const token = crypto.randomUUID();
+  if (!(await acquireSensitiveBlanking(evaluate, token, "capture"))) return await capture();
   try {
     return await capture();
   } finally {
-    await releaseSensitiveBlanking(evaluate);
+    await releaseSensitiveBlanking(evaluate, token);
   }
 }
 
@@ -190,11 +202,12 @@ const SENSITIVE_BLANK_PAINTED = `new Promise((resolve) => {
 })`;
 
 export async function holdSensitiveBlanking(evaluate: SensitiveBlankEvaluate): Promise<SensitiveBlankHold> {
-  await acquireSensitiveBlanking(evaluate, "recording");
+  const token = crypto.randomUUID();
+  await acquireSensitiveBlanking(evaluate, token, "recording");
   try {
     await evaluate(SENSITIVE_BLANK_PAINTED);
   } catch (error) {
-    await releaseSensitiveBlanking(evaluate);
+    await releaseSensitiveBlanking(evaluate, token);
     throw error;
   }
   let refreshing = false;
@@ -202,12 +215,12 @@ export async function holdSensitiveBlanking(evaluate: SensitiveBlankEvaluate): P
     refresh() {
       if (refreshing) return;
       refreshing = true;
-      void evaluate(sensitiveBlankInjectExpression("refresh"))
+      void evaluate(sensitiveBlankInjectExpression(token, "recording"))
         .catch(() => {})
         .finally(() => {
           refreshing = false;
         });
     },
-    release: async () => await releaseSensitiveBlanking(evaluate),
+    release: async () => await releaseSensitiveBlanking(evaluate, token),
   };
 }
