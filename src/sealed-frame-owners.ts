@@ -1,11 +1,11 @@
 // #379 (#392 audit): a frame's markup can come from its owner element's attribute: srcdoc, or a
-// data: or javascript: URL in <iframe src>, <frame src>, <object data> or <embed src>. An owner is
-// withheld (src, srcdoc and data read as the placeholder in serialized HTML and getAttribute, and
-// its document counts as holding sealed content for the selector guard) when its loaded frame, or
-// any frame below it, holds sealed markup. That is decided from the loaded frame tree, never by
-// reading the attribute text. A frame whose document cannot be read counts as holding it, and an
-// owner with no loaded frame is withheld when its attribute carries markup itself (srcdoc, or a
-// data: or javascript: URL), since that source cannot be checked.
+// data: or javascript: URL in <iframe src>, <frame src>, <object data> or <embed src>. Only such an
+// owner can leak frame markup through its attribute, so only such owners are candidates; an http(s)
+// source carries no markup and is never withheld. A candidate is withheld (src, srcdoc and data read
+// as the placeholder in serialized HTML, getAttribute and attribute matchers, and its document
+// counts as holding sealed content for the selector guard) when its loaded frame, or any frame
+// below it, holds sealed markup. That is decided from the loaded frame tree, never by reading the
+// attribute text. A candidate whose frame is not loaded or cannot be read is withheld too.
 
 import type { CdpDomNode } from "./cdp-protocol.ts";
 import type { SealCdp, SealableFrames } from "./sensitive-guard.ts";
@@ -16,17 +16,9 @@ export interface OwnerFrames extends SealableFrames {
 
 export const WITHHELD_OWNER_ATTRIBUTES = ["src", "srcdoc", "data"];
 
-// Whether the document holds sealed markup itself: a marker anywhere, open shadow roots and
-// <template> content included.
-const HOLDS_SEALED_MARKUP_FN = `function() {
-  const marked = (el) => { const v = el.getAttribute('data-sensitive'); return v !== null && v !== 'false'; };
-  const visit = (root) => Array.from(root.querySelectorAll('*')).some((el) =>
-    marked(el) || (!!el.shadowRoot && visit(el.shadowRoot)) || (el.tagName === 'TEMPLATE' && visit(el.content)));
-  return visit(document);
-}`;
-
-// The document's frame owners in document order, open shadow roots included. Both the probe below
-// and the page-side clone (sensitiveElementGuard) use this one traversal, so indices agree.
+// The document's frame owners in document order, open shadow roots included, and whether an
+// owner's attribute carries markup (a srcdoc, or a data: or javascript: source; the scheme is
+// read, not the markup). The probe below and every page-side consumer use these, so indices agree.
 export const FRAME_OWNERS_SOURCE = `() => {
   const owners = [];
   const visit = (root) => {
@@ -38,11 +30,33 @@ export const FRAME_OWNERS_SOURCE = `() => {
   visit(document);
   return owners;
 }`;
+export const CARRIES_MARKUP_SOURCE = `(el) => /^(IFRAME|FRAME|OBJECT|EMBED)$/.test(el.tagName) &&
+  (el.hasAttribute('srcdoc') || ['src', 'data'].some((name) => /^\\s*(data|javascript):/i.test(el.getAttribute(name) || '')))`;
 
-// index < 0 returns how many frame owners the document holds; index >= 0 returns that owner.
+// The withheld owners a page function applies: indices into FRAME_OWNERS_SOURCE's list, the list
+// length they were computed against, and all = withhold every owner. A page function whose owner
+// count differs from total withholds every owner, so a DOM change between probe and use fails closed.
+export interface WithheldOwners {
+  indices: number[];
+  total: number;
+  all: boolean;
+}
+
+// index < 0 returns { total, candidates }; index >= 0 returns that owner.
 const FRAME_OWNER_FN = `function(index) {
   const owners = (${FRAME_OWNERS_SOURCE})();
-  return index < 0 ? owners.length : (owners[index] ?? null);
+  const carries = ${CARRIES_MARKUP_SOURCE};
+  if (index >= 0) return owners[index] ?? null;
+  return { total: owners.length, candidates: owners.flatMap((el, at) => (carries(el) ? [at] : [])) };
+}`;
+
+// Whether the document holds sealed markup itself: a marker anywhere, open shadow roots and
+// <template> content included.
+const HOLDS_SEALED_MARKUP_FN = `function() {
+  const marked = (el) => { const v = el.getAttribute('data-sensitive'); return v !== null && v !== 'false'; };
+  const visit = (root) => Array.from(root.querySelectorAll('*')).some((el) =>
+    marked(el) || (!!el.shadowRoot && visit(el.shadowRoot)) || (el.tagName === 'TEMPLATE' && visit(el.content)));
+  return visit(document);
 }`;
 
 async function frameContext(frames: SealableFrames, frameId: string) {
@@ -66,16 +80,13 @@ async function holdsSealedMarkup(cdp: SealCdp, frames: SealableFrames, frameId: 
   }
 }
 
-// The frames below `frameId` whose own document, or a frame below them, holds sealed markup.
-async function contentSealedFrames(cdp: SealCdp, frames: OwnerFrames, frameId: string) {
-  const below = frames.collectDescendantFrames(frameId).slice(1);
-  const own = await Promise.all(
-    below.map(async (entry) => [entry, await holdsSealedMarkup(cdp, frames, entry.frameId)] as const),
-  );
-  const sealed = new Set(own.flatMap(([entry, holds]) => (holds ? [entry.frameId] : [])));
-  for (const { frameId: child, parentFrameId } of below.toReversed())
-    if (sealed.has(child) && parentFrameId && parentFrameId !== frameId) sealed.add(parentFrameId);
-  return sealed;
+// Whether the frame loaded for this owner node, or any frame below it, holds sealed markup; an
+// owner with no loaded frame, or a frame that cannot be read, counts as holding it.
+async function ownerFrameSealed(cdp: SealCdp, frames: OwnerFrames, node: CdpDomNode) {
+  if (node.frameId === undefined || !frames.getFrame(node.frameId)) return true;
+  const subtree = frames.collectDescendantFrames(node.frameId);
+  const holds = await Promise.all(subtree.map(({ frameId }) => holdsSealedMarkup(cdp, frames, frameId)));
+  return holds.some(Boolean);
 }
 
 function carriesMarkup(node: CdpDomNode) {
@@ -90,70 +101,79 @@ function carriesMarkup(node: CdpDomNode) {
   return false;
 }
 
-function withheld(node: CdpDomNode, frames: SealableFrames, sealed: ReadonlySet<string>) {
-  const loaded = node.frameId !== undefined && !!frames.getFrame(node.frameId);
-  return loaded ? sealed.has(node.frameId ?? "") : carriesMarkup(node);
-}
-
-/**
- * Indices, in the document-order owner traversal FRAME_OWNER_FN and the page-side
- * __omowFrameOwners share, of the frame owners in `frameId`'s document to withhold. Indices rather
- * than remote objects let the page function that applies them run in either JS world. A document
- * that cannot be listed yields `all: true`: every owner is withheld.
- */
-export async function withheldFrameOwners(cdp: SealCdp, frames: OwnerFrames, frameId: string | null | undefined) {
-  const indices: number[] = [];
+/** The frame owners in `frameId`'s document to withhold; a document that cannot be listed withholds all. */
+export async function withheldFrameOwners(
+  cdp: SealCdp,
+  frames: OwnerFrames,
+  frameId: string | null | undefined,
+): Promise<WithheldOwners> {
   const context = frameId ? await frameContext(frames, frameId) : null;
-  if (!frameId || !context) return { indices, all: true };
+  if (!context) return { indices: [], total: 0, all: true };
+  const call = (index: number, returnByValue: boolean) =>
+    cdp.send(
+      "Runtime.callFunctionOn",
+      {
+        functionDeclaration: FRAME_OWNER_FN,
+        arguments: [{ value: index }],
+        executionContextId: context.contextId,
+        returnByValue,
+      },
+      context.sessionId,
+    );
   try {
-    const call = (index: number, returnByValue: boolean) =>
-      cdp.send(
-        "Runtime.callFunctionOn",
-        {
-          functionDeclaration: FRAME_OWNER_FN,
-          arguments: [{ value: index }],
-          executionContextId: context.contextId,
-          returnByValue,
-        },
-        context.sessionId,
-      );
-    const count = (await call(-1, true)).result.value;
-    if (typeof count !== "number") return { indices, all: true };
-    if (count === 0) return { indices, all: false };
-    const sealed = await contentSealedFrames(cdp, frames, frameId);
-    for (let index = 0; index < count; index++) {
+    const listed: unknown = (await call(-1, true)).result.value;
+    const total = typeof listed === "object" && listed ? Reflect.get(listed, "total") : undefined;
+    const candidates = typeof listed === "object" && listed ? Reflect.get(listed, "candidates") : undefined;
+    if (typeof total !== "number" || !Array.isArray(candidates)) return { indices: [], total: 0, all: true };
+    const indices: number[] = [];
+    for (const index of candidates) {
+      if (typeof index !== "number") return { indices: [], total, all: true };
       const { result } = await call(index, false);
-      if (!result.objectId) continue;
+      if (!result.objectId) return { indices: [], total, all: true };
       try {
         const { node } = await cdp.send("DOM.describeNode", { objectId: result.objectId }, context.sessionId);
-        if (withheld(node, frames, sealed)) indices.push(index);
+        if (await ownerFrameSealed(cdp, frames, node)) indices.push(index);
       } finally {
         await cdp.send("Runtime.releaseObject", { objectId: result.objectId }, context.sessionId).catch(() => {});
       }
     }
-    return { indices, all: false };
+    return { indices, total, all: false };
   } catch {
-    return { indices: [], all: true };
+    return { indices: [], total: 0, all: true };
   }
 }
 
-export async function holdsWithheldOwner(cdp: SealCdp, frames: OwnerFrames, frameId: string | null | undefined) {
-  const owners = await withheldFrameOwners(cdp, frames, frameId);
+export function holdsWithheld(owners: WithheldOwners) {
   return owners.all || owners.indices.length > 0;
+}
+
+export async function holdsWithheldOwner(cdp: SealCdp, frames: OwnerFrames, frameId: string | null | undefined) {
+  return holdsWithheld(await withheldFrameOwners(cdp, frames, frameId));
 }
 
 export async function isWithheldOwner(
   cdp: SealCdp,
   frames: OwnerFrames,
-  element: { objectId: string; frameId?: string | undefined; frameSessionId?: string | undefined },
+  element: { objectId: string; frameSessionId?: string | undefined },
 ) {
   try {
     const { node } = await cdp.send("DOM.describeNode", { objectId: element.objectId }, element.frameSessionId);
-    if (!/^(IFRAME|FRAME|OBJECT|EMBED)$/.test(node.nodeName.toUpperCase())) return false;
-    if (node.frameId === undefined || !frames.getFrame(node.frameId)) return carriesMarkup(node);
-    if (await holdsSealedMarkup(cdp, frames, node.frameId)) return true;
-    return (await contentSealedFrames(cdp, frames, node.frameId)).size > 0;
+    if (!/^(IFRAME|FRAME|OBJECT|EMBED)$/.test(node.nodeName.toUpperCase()) || !carriesMarkup(node)) return false;
+    return await ownerFrameSealed(cdp, frames, node);
   } catch {
     return true;
   }
+}
+
+/**
+ * A frame or page URL with its markup payload withheld when it can carry markup (data: or
+ * javascript:). url() and frames() are synchronous, so the frame tree cannot be checked there.
+ */
+export function withheldMarkupUrl(url: string, placeholder: string) {
+  const trimmed = url.trimStart();
+  const scheme = /^(data|javascript):/i.exec(trimmed)?.[0];
+  if (!scheme) return url;
+  if (scheme.toLowerCase() === "javascript:") return `javascript:${placeholder}`;
+  const comma = trimmed.indexOf(",");
+  return `${comma < 0 ? trimmed : trimmed.slice(0, comma)},${placeholder}`;
 }

@@ -2,6 +2,7 @@ import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { buildSnapshotExpression, compactSnapshot, describeLayers } from "../src/index.ts";
 import { readProperty } from "../src/read-property.ts";
+import { sensitiveElementGuard } from "../src/sensitive-guard.ts";
 import {
   PLACEHOLDER,
   type PipePage,
@@ -340,6 +341,7 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
     });
     const templateOnly = await page.content();
     assertNoWords("template-only page.content()", templateOnly, ["quartz"]);
+    assertNoWords("template innerHTML", await page.locator("template").innerHTML(), ["quartz"]);
     assert.ok(templateOnly.includes("after"), `template-only page.content():\n${templateOnly}`);
 
     // A page whose only sealed markup sits in a srcdoc still counts as holding sealed content, and
@@ -384,6 +386,7 @@ async function setFramedPage(page: PipePage) {
       '<p>alpha bravo charlie</p><button title="zulu tip">zulu outer</button><iframe id="inner" srcdoc="<p>delta echo</p><button title=\'yankee tip\'>yankee inner</button>"></iframe>',
     );
     sealed.setAttribute("data-sensitive", "");
+    sealed.name = "vault";
     const wrapper = document.createElement("div");
     wrapper.setAttribute("data-sensitive", "");
     const wrapped = frame(
@@ -392,6 +395,7 @@ async function setFramedPage(page: PipePage) {
     );
     wrapper.append(wrapped);
     const open = frame("open", "<p>public frame text</p><button>Open action</button>");
+    open.name = "open-frame";
     const loaded = [sealed, wrapped, open].map(
       (element) => new Promise((resolve) => element.addEventListener("load", resolve, { once: true })),
     );
@@ -438,6 +442,11 @@ test(
         assert.ok(tree.includes("Open action"), `unmarked frame dropped from ${JSON.stringify(options)}:\n${tree}`);
       }
       assertSealed("diff", compactSnapshot(await page.snapshot({ diff: true })));
+      // frame.name() is the owner's name attribute; once a snapshot has proven an owner sealed, it
+      // reads the placeholder, while an unmarked frame keeps its name (#395 review).
+      const names = page.frames().map((frame) => frame.name());
+      assert.ok(!names.includes("vault") && names.includes(PLACEHOLDER), `frame names: ${JSON.stringify(names)}`);
+      assert.ok(names.includes("open-frame"), `unmarked frame lost its name: ${JSON.stringify(names)}`);
 
       // Frame prefixes follow attach order: f1 #sealed, f2 #wrapped, f3 #open, f4 #inner. A guessed
       // ref into a sealed frame is refused; the unmarked frame's ref still resolves.
@@ -540,6 +549,21 @@ test(
       assert.equal(await page.locator("#data-object").getAttribute("data"), PLACEHOLDER, "object data");
       assert.equal(await page.locator("#nested").getAttribute("srcdoc"), PLACEHOLDER, "nested srcdoc");
       assert.equal(await page.locator("#plain").getAttribute("src"), "data:text/html,<p>public data frame</p>");
+      // The attribute engine reads values through the same withholding (#395 review).
+      assert.equal(await page.locator("internal:attr=[src=/rho/]").count(), 0, "attribute engine matched a src");
+      assert.equal(await page.locator("internal:attr=[srcdoc=/chi/]").count(), 0, "attribute engine matched a srcdoc");
+      assert.equal(await page.locator("internal:attr=[src=/public/]").count(), 1, "unmarked src stopped matching");
+      // A frame URL can carry the same markup; url() is synchronous, so a data: payload is withheld.
+      assertNoWords(
+        "frame urls",
+        page.frames().map((frame) => frame.url()),
+        SOURCE_WORDS,
+      );
+      // An owner count that changed since the probe withholds every markup-carrying owner.
+      const stale = await page.evaluate(
+        `(() => { ${sensitiveElementGuard}; return __omowRedactedClone(document.body, { indices: [], total: -1, all: false }).innerHTML; })()`,
+      );
+      assertNoWords("clone with a stale owner count", stale, SOURCE_WORDS);
       for (const selector of ['iframe[src*="rho"]', 'object[data*="tau"]', 'iframe[srcdoc*="chi"]']) {
         await assert.rejects(page.locator(selector).count(), /data-sensitive/, `CSS ${selector} answered`);
         await assert.rejects(page.snapshot({ selector }), /data-sensitive/, `snapshot({ selector: ${selector} })`);
@@ -555,6 +579,7 @@ test(
         document.querySelector("main")?.append(holder);
       });
       assertNoWords("unloaded owners in page.content()", await page.content(), ["upsilon"]);
+      assertNoWords("template innerHTML", await page.locator("template").innerHTML(), ["upsilon"]);
       assert.equal(await page.locator("#bare").getAttribute("data"), PLACEHOLDER, "frameless object data");
       await page.evaluate(() => document.getElementById("bare")?.parentElement?.remove());
 
@@ -563,6 +588,45 @@ test(
         for (const id of ["data-frame", "data-object", "nested"]) document.getElementById(id)?.remove();
       });
       assert.equal(await page.locator('iframe[src*="public"]').count(), 1, "unmarked frame source refused");
+    } finally {
+      await page.close();
+    }
+  },
+);
+
+// A page's own URL and a frame whose source carries no markup (#395 review): a data: page URL
+// withholds its payload, and an http frame that cannot be read does not make the whole page count
+// as sealed, so ordinary attribute selectors keep working there.
+test(
+  "page URLs withhold data: payloads; unreadable http frames do not seal the page (security contract #379)",
+  { skip },
+  async () => {
+    const page = await openTab();
+    try {
+      await page.goto("data:text/html,<p data-sensitive>rho sigma</p>");
+      assertNoWords("page.url()", page.url(), SOURCE_WORDS);
+      await page.evaluate(async () => {
+        const frame = Object.assign(document.createElement("iframe"), { src: "http://127.0.0.1:9/" });
+        const loaded = new Promise((resolve) => frame.addEventListener("load", resolve, { once: true }));
+        document.body.innerHTML = '<input name="q">';
+        document.body.append(frame);
+        await loaded;
+      });
+      // An http source carries no markup, so its frame is never probed: the query makes no owner
+      // probe at all (counted through a pass-through spy that forwards every call unchanged).
+      const transport = page.cdp;
+      const send = transport.send.bind(transport);
+      let probes = 0;
+      transport.send = (method, ...rest) => {
+        if (method === "DOM.describeNode") probes++;
+        return send(method, ...rest);
+      };
+      try {
+        assert.equal(await page.locator('input[name="q"]').count(), 1, "an unreadable http frame sealed the page");
+      } finally {
+        transport.send = send;
+      }
+      assert.equal(probes, 0, "a frame owner without a markup source was probed");
     } finally {
       await page.close();
     }

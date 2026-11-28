@@ -31,9 +31,13 @@ import {
 } from "./sensitive-guard.ts";
 import {
   WITHHELD_OWNER_ATTRIBUTES,
+  CARRIES_MARKUP_SOURCE,
+  FRAME_OWNERS_SOURCE,
+  holdsWithheld,
   holdsWithheldOwner,
   isWithheldOwner,
   withheldFrameOwners,
+  withheldMarkupUrl,
 } from "./sealed-frame-owners.ts";
 import { snapshotResult, validateSnapshotOptions } from "./snapshot-diff.ts";
 import { subscribeConsoleEvents } from "./console-events.ts";
@@ -1026,6 +1030,8 @@ export interface FrameRecord {
   name: string;
   sessionId: string;
   isolatedContextId?: number | undefined;
+  // Set once an owner check proves the frame sealed (sensitive-guard.ts).
+  sealedOwner?: boolean | undefined;
 }
 
 /** The frame registry. Lookups also take the main frame id before any frame is known (null), which finds nothing. */
@@ -3650,7 +3656,7 @@ async function innerHTMLElement(xn: OmOPage, jn: ElementTarget) {
       if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
       return __omowNeedsRedaction(this, withheld) ? __omowRedactedClone(this, withheld).innerHTML : this.innerHTML;
     }`,
-    owners.all ? true : owners.indices,
+    owners,
   );
 }
 async function innerTextElement(xn: OmOPage, jn: ElementTarget) {
@@ -4006,11 +4012,15 @@ function createOmOFrameClass() {
     async $$eval(xn: string, jn: Parameters<Locator["evaluateAll"]>[0], Vn?: Parameters<Locator["evaluateAll"]>[1]) {
       return await this.locator(xn).evaluateAll(jn, Vn);
     }
+    // #379: a data: or javascript: URL can carry the frame's markup, and url() is synchronous, so
+    // its payload is withheld. name() is the owner's name attribute, an author-chosen identifier
+    // (documented exception); it reads the placeholder once an owner check has proven it sealed.
     url() {
-      return this.#t().url;
+      return withheldMarkupUrl(this.#t().url, SENSITIVE_PLACEHOLDER);
     }
     name() {
-      return this.#t().name;
+      let xn = this.#t();
+      return xn.sealedOwner ? SENSITIVE_PLACEHOLDER : xn.name;
     }
     parentFrame() {
       let jn = this.#t().parentFrameId;
@@ -4458,7 +4468,13 @@ function createLocatorClass() {
       return await this.#e.evaluateInFrame<number>(
         Vn,
         `function(query) {
-        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
+        const withheldOwners = (() => {
+          const owners = (${FRAME_OWNERS_SOURCE})();
+          const withheld = query.withheldOwners;
+          if (!withheld || withheld.all || owners.length !== withheld.total) return new Set(owners.filter(${CARRIES_MARKUP_SOURCE}));
+          return new Set(withheld.indices.map((index) => owners[index]).filter(Boolean));
+        })();
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute, withheldOwners);
         const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute, query.sealedFrames === true);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
@@ -4609,7 +4625,7 @@ function createLocatorClass() {
           nth: jn.nth,
           hasNth: xn,
           sealedDocument: await this.#sealed(Vn),
-          sealedFrames: await holdsWithheldOwner(this.#e.cdp, this.#e.frameManager, Vn),
+          ...(await this.#withheld(Vn)),
           testIdAttribute: testIdAttributeName,
         },
       );
@@ -4922,14 +4938,20 @@ function createLocatorClass() {
           scoped: scope !== void 0,
           countOnly,
           sealedDocument: await this.#sealed(jn),
-          sealedFrames: await holdsWithheldOwner(this.#e.cdp, this.#e.frameManager, jn),
+          ...(await this.#withheld(jn)),
           testIdAttribute: testIdAttributeName,
         },
         { result: Yn } = await this.#e.cdp.send(
           `Runtime.callFunctionOn`,
           {
             functionDeclaration: `function(query, ...scopeRoots) {
-        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
+        const withheldOwners = (() => {
+          const owners = (${FRAME_OWNERS_SOURCE})();
+          const withheld = query.withheldOwners;
+          if (!withheld || withheld.all || owners.length !== withheld.total) return new Set(owners.filter(${CARRIES_MARKUP_SOURCE}));
+          return new Set(withheld.indices.map((index) => owners[index]).filter(Boolean));
+        })();
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute, withheldOwners);
         const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute, query.sealedFrames === true);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
@@ -5276,6 +5298,12 @@ function createLocatorClass() {
     }
     // #379: text, label and role-name matching inside a frame hosted by a sealed owner reads the
     // whole document as sealed, so a matcher there cannot confirm a guessed secret either.
+    // #379: the frame owners withheld in this frame's document; one value feeds both the value
+    // reads (attributeValue) and the CSS guard (sealedFrames).
+    async #withheld(frameId: string | null) {
+      const withheldOwners = await withheldFrameOwners(this.#e.cdp, this.#e.frameManager, frameId);
+      return { withheldOwners, sealedFrames: holdsWithheld(withheldOwners) };
+    }
     async #sealed(frameId: string | null) {
       return await isInSealedFrame(this.#e.cdp, this.#e.frameManager, frameId ?? undefined);
     }
@@ -7364,8 +7392,10 @@ function createOmOPageClass() {
         this.browser.extensionBridgeRoute,
       );
     }
+    // #379: a data: or javascript: payload can carry the page's markup, so it is withheld.
     url({ truncate: xn = !1 }: { truncate?: boolean } = {}) {
-      return xn ? truncateUrlForLLM(this.#r) : this.#r;
+      let jn = withheldMarkupUrl(this.#r, SENSITIVE_PLACEHOLDER);
+      return xn ? truncateUrlForLLM(jn) : jn;
     }
     // #379: a sealed <title> (or one inside a sealed ancestor) reads as the placeholder.
     async title() {
@@ -7382,7 +7412,7 @@ function createOmOPageClass() {
       return await this.evaluate<string>(`(() => {
         ${sensitiveElementGuard}
         const root = document.documentElement;
-        const withheld = ${JSON.stringify(owners.all ? true : owners.indices)};
+        const withheld = ${JSON.stringify(owners)};
         return __omowNeedsRedaction(root, withheld) ? __omowRedactedClone(root, withheld).outerHTML : root.outerHTML;
       })()`);
     }

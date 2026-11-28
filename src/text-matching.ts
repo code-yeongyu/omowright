@@ -23,6 +23,8 @@ export function createTextMatching(
   includeHidden = false,
   sealedDocument = false,
   testIdAttribute = "data-testid",
+  // Frame owners whose markup-carrying source is withheld (sealed-frame-owners.ts).
+  withheldOwners: ReadonlySet<Element> = new Set(),
 ) {
   // Predicates live inside the factory so the serialized source stays self-contained.
   const isElement = (node: Node): node is Element => node.nodeType === 1;
@@ -103,7 +105,9 @@ export function createTextMatching(
   // test id, which stays matchable so a sealed block can still be located.
   const attributeValue = (node: Element, name: string) => {
     const value = node.getAttribute(name);
-    return value !== null && name !== testIdAttribute && sealed(node) ? SENSITIVE : value;
+    if (value === null) return null;
+    if (withheldOwners.has(node) && ["src", "srcdoc", "data"].includes(name.toLowerCase())) return SENSITIVE;
+    return name !== testIdAttribute && sealed(node) ? SENSITIVE : value;
   };
   const matchesText = (node: MatchNode, matcher: TextMatcher) => !skipped(node) && matches(sealedText(node), matcher);
   const labelledBy = (node: Element) => {

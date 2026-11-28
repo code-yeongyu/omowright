@@ -11,7 +11,7 @@
 // parent document, using only CDP methods the scoped page path already allows.
 
 import type { CdpSend } from "./cdp-protocol.ts";
-import { FRAME_OWNERS_SOURCE } from "./sealed-frame-owners.ts";
+import { CARRIES_MARKUP_SOURCE, FRAME_OWNERS_SOURCE } from "./sealed-frame-owners.ts";
 import { createSelectorGuard } from "./selector-guard.ts";
 
 export const SENSITIVE_PLACEHOLDER = `[redacted: sensitive]`;
@@ -43,22 +43,25 @@ const __omowSensitiveTextOf = (root) => {
 };
 // Serialized HTML also carries <template> content, which the element walk does not reach, and the
 // src/srcdoc/data of frame owners whose loaded frames hold sealed markup. Those owners are decided
-// from the frame tree (sealed-frame-owners.ts) and arrive as indices into __omowFrameOwners();
-// withheld === true withholds every owner.
+// from the frame tree (sealed-frame-owners.ts) and arrive as a WithheldOwners value: indices into
+// __omowFrameOwners(), the owner count they were computed against, and all. A count that no longer
+// matches (the DOM changed in between) or all withholds every owner that carries markup.
 const __omowFrameOwners = ${FRAME_OWNERS_SOURCE};
 // A frame owner inside <template> content never loads a frame, so its source cannot be checked:
-// a srcdoc, or a data: or javascript: URL, is withheld there (the scheme is read, not the markup).
-const __omowCarriesMarkup = (el) => /^(IFRAME|FRAME|OBJECT|EMBED)$/.test(el.tagName) &&
-  (el.hasAttribute('srcdoc') || ['src', 'data'].some((name) => /^\\s*(data|javascript):/i.test(el.getAttribute(name) || '')));
+// a srcdoc, or a data: or javascript: source, is withheld there.
+const __omowCarriesMarkup = ${CARRIES_MARKUP_SOURCE};
+const __omowTemplateSealed = (template) =>
+  __omowHasSensitive(template.content) ||
+  Array.from(template.content.querySelectorAll('iframe, frame, object, embed')).some(__omowCarriesMarkup);
 const __omowHasSensitive = (root) =>
   __omowSensitive(root) ||
+  (root.tagName === 'TEMPLATE' && __omowTemplateSealed(root)) ||
   Array.from(root.querySelectorAll('[data-sensitive], template')).some((el) =>
-    el.tagName === 'TEMPLATE'
-      ? __omowHasSensitive(el.content) || Array.from(el.content.querySelectorAll('iframe, frame, object, embed')).some(__omowCarriesMarkup)
-      : el.getAttribute('data-sensitive') !== 'false');
+    el.tagName === 'TEMPLATE' ? __omowTemplateSealed(el) : el.getAttribute('data-sensitive') !== 'false');
 const __omowWithheldOwners = (root, withheld) => {
   const owners = __omowFrameOwners();
-  const picked = withheld === true ? owners : (withheld || []).map((index) => owners[index]);
+  const all = !withheld || withheld.all || owners.length !== withheld.total;
+  const picked = all ? owners.filter(__omowCarriesMarkup) : withheld.indices.map((index) => owners[index]);
   return picked.filter((el) => el && (el === root || root.contains(el)));
 };
 const __omowNeedsRedaction = (root, withheld) => __omowHasSensitive(root) || __omowWithheldOwners(root, withheld).length > 0;
@@ -86,6 +89,8 @@ const __omowRedactedClone = (root, withheld) => {
       }
     }
   };
+  // A <template> root keeps its children in .content, which the walk below does not enter.
+  if (clone.tagName === 'TEMPLATE') strip(clone.content, true);
   strip(clone);
   return clone;
 };`;
@@ -115,6 +120,8 @@ interface SealableFrame {
   readonly parentFrameId: string | null;
   readonly sessionId: string;
   readonly isolatedContextId?: number | null | undefined;
+  // Set once an owner check proves the frame sealed: frame.name() then reads the placeholder.
+  sealedOwner?: boolean | undefined;
 }
 
 export interface SealableFrames {
@@ -183,6 +190,10 @@ export async function collectSealedFrames(
     const children = owned.get(parentFrameId);
     if (sealed.has(parentFrameId) || !children || children.has(frameId)) sealed.add(frameId);
   }
+  for (const frameId of sealed) {
+    const record = frames.getFrame(frameId);
+    if (record) record.sealedOwner = true;
+  }
   return sealed;
 }
 
@@ -191,7 +202,11 @@ export async function isInSealedFrame(cdp: SealCdp, frames: SealableFrames, fram
     const parent = frames.getFrame(child)?.parentFrameId;
     if (!parent) return false;
     const children = await sealedChildFrames(cdp, frames, parent);
-    if (!children || children.has(child)) return true;
+    if (!children || children.has(child)) {
+      const record = frameId ? frames.getFrame(frameId) : undefined;
+      if (record) record.sealedOwner = true;
+      return true;
+    }
     child = parent;
   }
   return false;
