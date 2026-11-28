@@ -35,12 +35,16 @@ export function lifecycleClient(
   extraArgs: string[] = [],
   logName = "signals.log",
   onClose = "ignore",
+  signal?: AbortSignal,
 ) {
   const logPath = path.join(dir, logName);
   const client = new PipeCdpClient({
     browserPath: process.execPath,
     browserArgs: [fixture, ...extraArgs],
-    spawnOptions: { env: { ...process.env, FAKE_SIGNAL_LOG: logPath, FAKE_ON_TERM: onTerm, FAKE_ON_CLOSE: onClose } },
+    spawnOptions: {
+      ...(signal === undefined ? {} : { signal, killSignal: "SIGKILL" as const }),
+      env: { ...process.env, FAKE_SIGNAL_LOG: logPath, FAKE_ON_TERM: onTerm, FAKE_ON_CLOSE: onClose },
+    },
   });
   return { client, logPath };
 }
