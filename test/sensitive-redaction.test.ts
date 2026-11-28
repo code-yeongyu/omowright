@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { globSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,116 +95,58 @@ async function setSecretPage(page: PipePage) {
   });
 }
 
-test(
-  "snapshot and locator reads redact data-sensitive page text (security contract #379)",
-  { skip: !SHELL && "no chromium binary found" },
-  async () => {
-    const ud = mkdtempSync(path.join(tmpdir(), "omowright-sensitive-"));
-    let browser: PipeBrowser | undefined;
+// One browser serves the whole file. The first test that runs starts it — the lighter BSK read
+// below runs first, so the cold chrome-headless-shell start, which alone can take most of a slow
+// runner's per-test limit, lands on the lightest body, and the locator-read contract runs against
+// the already-warm browser — and after() releases everything. Not in a before() hook: bun gives
+// hooks the test limit and ignores a hook's timeout option, and that hook timed out on a Windows
+// runner. Not while the module loads either: a run whose filter selects no test here would launch a
+// browser and leave its profile behind. Release runs newest first, the browser before its
+// user-data dir, collecting failures instead of stranding the rest.
+const skip = !SHELL && "no chromium binary found";
+type Release = () => unknown;
+const releases: Release[] = [];
+let shared: Promise<PipeBrowser> | undefined;
+
+async function start(): Promise<PipeBrowser> {
+  assert.ok(SHELL, "no chromium binary found");
+  const ud = mkdtempSync(path.join(tmpdir(), "omowright-sensitive-"));
+  releases.push(() => removeTreeSync(ud));
+  const browser = await connectPipe({
+    browserPath: SHELL,
+    browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
+    storageRoot: ud,
+  });
+  releases.push(() => browser.close());
+  return browser;
+}
+
+after(async () => {
+  await shared?.catch(() => undefined);
+  const failures: unknown[] = [];
+  for (const step of releases.toReversed()) {
     try {
-      browser = await connectPipe({
-        browserPath: SHELL,
-        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-        storageRoot: ud,
-      });
-      const page = await browser.newTab("about:blank");
-      await setSecretPage(page);
-
-      for (const options of [{}, { interactive: true }]) {
-        const read = await page.snapshot(options);
-        assertTreeRead(read);
-        const tree = compactSnapshot(read);
-        assertNoSecret(`${JSON.stringify(options)} tree`, tree);
-        assert.ok(tree.includes(PLACEHOLDER), `no placeholder in ${JSON.stringify(options)} tree:\n${tree}`);
-        assert.ok(
-          tree.includes("Copy phrase"),
-          `outside button dropped from ${JSON.stringify(options)} tree:\n${tree}`,
-        );
-        assertNoSecret(`${JSON.stringify(options)} refs`, read.refs);
-        const redactedEntries = Object.entries(read.refs).filter(([, meta]) => meta.name === PLACEHOLDER);
-        assert.ok(redactedEntries.length >= 1, `no redacted ref entry in ${JSON.stringify(options)} refs`);
-      }
-      // Interactive mode drops free-standing prose by design, so the inert-value control runs
-      // on a full read: data-sensitive="false" stays visible and unredacted.
-      const full = await page.snapshot();
-      assertTreeRead(full);
-      const fullTree = compactSnapshot(full);
-      assert.ok(
-        fullTree.includes("public notes stay visible"),
-        `data-sensitive="false" must stay visible:\n${fullTree}`,
-      );
-
-      // find: the match set of the redacted tree cannot contain the secret.
-      const found = await page.snapshot({ find: "alpha" });
-      assertTreeRead(found);
-      assertNoSecret("find tree", found.tree);
-
-      // A read scoped to the marked element itself is redacted too, with the placeholder.
-      const scoped = await page.snapshot({ selector: "#phrase" });
-      assertTreeRead(scoped);
-      assertNoSecret("scoped tree", scoped.tree);
-      assert.ok(scoped.tree.includes(PLACEHOLDER), `scoped read has no placeholder:\n${scoped.tree}`);
-
-      // diff: a change inside the marked subtree plus one outside must not leak the secret.
-      await page.evaluate(() => {
-        const span = document.querySelector("#phrase span");
-        if (span) span.textContent = `${span.textContent ?? ""} foxtrot golf`;
-        const later = document.createElement("button");
-        later.textContent = "Later";
-        document.body.append(later);
-      });
-      const delta = compactSnapshot(await page.snapshot({ diff: true }));
-      assertNoSecret("diff", delta);
-      assert.ok(delta.includes("Later"), `diff lost the outside change:\n${delta}`);
-
-      // Locator reads: the marked element and its descendants return the placeholder; an
-      // ancestor read substitutes the placeholder for the marked subtree; unmarked reads are
-      // untouched.
-      assert.equal(await page.locator("#phrase").textContent(), PLACEHOLDER);
-      assert.equal(await page.locator("#phrase span").textContent(), PLACEHOLDER);
-      assert.equal(await page.locator("#phrase span").innerText(), PLACEHOLDER);
-      assert.equal(await page.locator("#seed").inputValue(), PLACEHOLDER);
-      assert.equal(await page.locator("#seed").getAttribute("value"), PLACEHOLDER);
-      assert.equal(await page.locator("#copy").getAttribute("id"), "copy");
-
-      const mainText = await page.locator("main").textContent();
-      assertNoSecret("main textContent", mainText);
-      assert.ok(
-        mainText?.includes("Copy phrase") && mainText.includes("public notes stay visible"),
-        `ancestor read lost unmarked text:\n${mainText}`,
-      );
-      assert.ok(mainText?.includes(PLACEHOLDER), `ancestor read has no placeholder:\n${mainText}`);
-
-      const mainHtml = await page.locator("main").innerHTML();
-      assertNoSecret("main innerHTML", mainHtml);
-      assert.ok(mainHtml.includes(PLACEHOLDER), `ancestor innerHTML has no placeholder:\n${mainHtml}`);
-
-      const texts = await page.locator("main span, main p").allTextContents();
-      assertNoSecret("allTextContents", texts);
-      assert.ok(
-        texts.includes("public notes stay visible") && texts.includes(PLACEHOLDER),
-        `allTextContents lost unmarked text or placeholder: ${JSON.stringify(texts)}`,
-      );
-    } finally {
-      await browser?.close();
-      removeTreeSync(ud);
+      await step();
+    } catch (error) {
+      failures.push(error);
     }
-  },
-);
+  }
+  if (failures.length > 0)
+    throw new AggregateError(failures, "the sensitive-redaction fixture did not release cleanly");
+});
+
+async function openTab(): Promise<PipePage> {
+  shared ??= start();
+  const browser = await shared;
+  return await browser.newTab("about:blank");
+}
 
 test(
   "bsk snapshot redacts data-sensitive text and emits no css path for marked refs (security contract #379)",
-  { skip: !SHELL && "no chromium binary found" },
+  { skip },
   async () => {
-    const ud = mkdtempSync(path.join(tmpdir(), "omowright-bsk-sensitive-"));
-    let browser: PipeBrowser | undefined;
+    const page = await openTab();
     try {
-      browser = await connectPipe({
-        browserPath: SHELL,
-        browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-        storageRoot: ud,
-      });
-      const page = await browser.newTab("about:blank");
       await setSecretPage(page);
       const sessionId = await page.resolveSessionId();
       const reply = await page.cdp.send(
@@ -231,8 +173,86 @@ test(
         `outside button lost its css path: ${String(copyPath)}`,
       );
     } finally {
-      await browser?.close();
-      removeTreeSync(ud);
+      await page.close();
     }
   },
 );
+
+test("snapshot and locator reads redact data-sensitive page text (security contract #379)", { skip }, async () => {
+  const page = await openTab();
+  try {
+    await setSecretPage(page);
+
+    for (const options of [{}, { interactive: true }]) {
+      const read = await page.snapshot(options);
+      assertTreeRead(read);
+      const tree = compactSnapshot(read);
+      assertNoSecret(`${JSON.stringify(options)} tree`, tree);
+      assert.ok(tree.includes(PLACEHOLDER), `no placeholder in ${JSON.stringify(options)} tree:\n${tree}`);
+      assert.ok(tree.includes("Copy phrase"), `outside button dropped from ${JSON.stringify(options)} tree:\n${tree}`);
+      assertNoSecret(`${JSON.stringify(options)} refs`, read.refs);
+      const redactedEntries = Object.entries(read.refs).filter(([, meta]) => meta.name === PLACEHOLDER);
+      assert.ok(redactedEntries.length >= 1, `no redacted ref entry in ${JSON.stringify(options)} refs`);
+    }
+    // Interactive mode drops free-standing prose by design, so the inert-value control runs
+    // on a full read: data-sensitive="false" stays visible and unredacted.
+    const full = await page.snapshot();
+    assertTreeRead(full);
+    const fullTree = compactSnapshot(full);
+    assert.ok(fullTree.includes("public notes stay visible"), `data-sensitive="false" must stay visible:\n${fullTree}`);
+
+    // find: the match set of the redacted tree cannot contain the secret.
+    const found = await page.snapshot({ find: "alpha" });
+    assertTreeRead(found);
+    assertNoSecret("find tree", found.tree);
+
+    // A read scoped to the marked element itself is redacted too, with the placeholder.
+    const scoped = await page.snapshot({ selector: "#phrase" });
+    assertTreeRead(scoped);
+    assertNoSecret("scoped tree", scoped.tree);
+    assert.ok(scoped.tree.includes(PLACEHOLDER), `scoped read has no placeholder:\n${scoped.tree}`);
+
+    // diff: a change inside the marked subtree plus one outside must not leak the secret.
+    await page.evaluate(() => {
+      const span = document.querySelector("#phrase span");
+      if (span) span.textContent = `${span.textContent ?? ""} foxtrot golf`;
+      const later = document.createElement("button");
+      later.textContent = "Later";
+      document.body.append(later);
+    });
+    const delta = compactSnapshot(await page.snapshot({ diff: true }));
+    assertNoSecret("diff", delta);
+    assert.ok(delta.includes("Later"), `diff lost the outside change:\n${delta}`);
+
+    // Locator reads: the marked element and its descendants return the placeholder; an
+    // ancestor read substitutes the placeholder for the marked subtree; unmarked reads are
+    // untouched.
+    assert.equal(await page.locator("#phrase").textContent(), PLACEHOLDER);
+    assert.equal(await page.locator("#phrase span").textContent(), PLACEHOLDER);
+    assert.equal(await page.locator("#phrase span").innerText(), PLACEHOLDER);
+    assert.equal(await page.locator("#seed").inputValue(), PLACEHOLDER);
+    assert.equal(await page.locator("#seed").getAttribute("value"), PLACEHOLDER);
+    assert.equal(await page.locator("#copy").getAttribute("id"), "copy");
+
+    const mainText = await page.locator("main").textContent();
+    assertNoSecret("main textContent", mainText);
+    assert.ok(
+      mainText?.includes("Copy phrase") && mainText.includes("public notes stay visible"),
+      `ancestor read lost unmarked text:\n${mainText}`,
+    );
+    assert.ok(mainText?.includes(PLACEHOLDER), `ancestor read has no placeholder:\n${mainText}`);
+
+    const mainHtml = await page.locator("main").innerHTML();
+    assertNoSecret("main innerHTML", mainHtml);
+    assert.ok(mainHtml.includes(PLACEHOLDER), `ancestor innerHTML has no placeholder:\n${mainHtml}`);
+
+    const texts = await page.locator("main span, main p").allTextContents();
+    assertNoSecret("allTextContents", texts);
+    assert.ok(
+      texts.includes("public notes stay visible") && texts.includes(PLACEHOLDER),
+      `allTextContents lost unmarked text or placeholder: ${JSON.stringify(texts)}`,
+    );
+  } finally {
+    await page.close();
+  }
+});
