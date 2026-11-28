@@ -106,8 +106,8 @@ string `"false"`): snapshots, locator reads and BSK output replace it with a
 `[redacted: sensitive]` placeholder that keeps the element's role and ref, while
 everything outside the subtree stays fully visible and clickable. Password input
 values were already redacted; the marker extends that to page text the page
-declares secret (#379). Screenshots still capture rendered pixels — see
-TOOLS.md for the full contract.
+declares secret (#379). Screenshots blank the marked boxes before capture (the BSK
+daemon path excepted) — see TOOLS.md for the full contract.
 
 ## Scrolling is a first-class problem
 

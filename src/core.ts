@@ -47,6 +47,7 @@ import {
 } from "./page-setup.ts";
 import { readProperty } from "./read-property.ts";
 import { redactValue } from "./redact-value.ts";
+import { holdSensitiveBlanking, type SensitiveBlankHold, withSensitiveBlanking } from "./sensitive-blank.ts";
 import type { DialogOpeningParams, DialogPolicy } from "./dialog-policy.ts";
 import type { ConsoleApiCalledEvent } from "./console-events.ts";
 import type { ExceptionThrownEvent } from "./page-events.ts";
@@ -5997,6 +5998,7 @@ export interface ActiveRecording {
   rejectCompletion: (error: unknown) => void;
   resolveCompletion: (value: VideoCompletion) => void;
   sessionId: string;
+  sensitiveBlank: SensitiveBlankHold;
   unsubscribe: () => void;
 }
 interface CapturedFrame {
@@ -6194,9 +6196,16 @@ function createOmOVideoClass() {
         await ensureDirForFile(Yn);
         let ei = new FfmpegVideoRecorder(Yn, Jn, Qn, qn);
         await ei.ready();
+        let si: SensitiveBlankHold;
+        try {
+          si = await holdSensitiveBlanking((expression) => this.#e.evaluate(expression));
+        } catch (xn) {
+          throw (await ei.dispose(), xn);
+        }
         let { promise: ti, resolve: ni } = Promise.withResolvers<VideoCompletion>(),
           ii = this.#e.cdp.on(`Page.screencastFrame`, (xn, Vn) => {
             if (Vn.sessionId !== jn) return;
+            si.refresh();
             let qn = Buffer.from(xn.data, `base64`),
               Jn = xn.metadata?.timestamp ?? Date.now() / 1e3;
             (ei.writeFrame(qn, Jn),
@@ -6211,6 +6220,7 @@ function createOmOVideoClass() {
           rejectCompletion: (error) => ni({ error }),
           resolveCompletion: ni,
           sessionId: jn,
+          sensitiveBlank: si,
           unsubscribe: ii,
         }),
           (this.#n = Yn));
@@ -6221,7 +6231,9 @@ function createOmOVideoClass() {
             jn,
           );
         } catch (xn) {
-          throw (ii(), (this.#t = null), (this.#n = null), await ei.dispose(), ni({ error: xn }), xn);
+          throw (
+            ii(), (this.#t = null), (this.#n = null), await si.release(), await ei.dispose(), ni({ error: xn }), xn
+          );
         }
       });
     }
@@ -6233,7 +6245,10 @@ function createOmOVideoClass() {
           jn.unsubscribe(),
           await this.#e.cdp.send(`Page.stopScreencast`, void 0, jn.sessionId).catch(() => {}));
         try {
-          let Vn = await this.#e.screenshot({ type: `jpeg` }).catch(() => void 0),
+          let Vn = await this.#e
+              .screenshot({ type: `jpeg` })
+              .catch(() => void 0)
+              .finally(() => jn.sensitiveBlank.release()),
             qn = xn.path ? await this.#e.browser.ensurePath(xn.path, `write`, `page.video.stop`) : jn.outputPath;
           (await jn.recorder.stop(Vn),
             qn !== jn.outputPath && (await ensureDirForFile(qn), await fs$16.copyFile(jn.outputPath, qn)),
@@ -6354,9 +6369,14 @@ function screenshotCaptureLabel(xn: ScreenshotOptions) {
 function formatScreenshotError(xn: unknown) {
   return xn instanceof Error ? xn.message : String(xn);
 }
-function rewriteCaptureScreenshotError(xn: unknown, jn: number | undefined, Vn: string) {
+function rewriteCaptureScreenshotError(
+  xn: unknown,
+  jn: number | undefined,
+  Vn: string,
+  method = `Page.captureScreenshot`,
+) {
   let qn = formatScreenshotError(xn);
-  if (qn !== `CDP command timeout: Page.captureScreenshot`) return xn instanceof Error ? xn : Error(qn);
+  if (!isCdpCommandTimeout(qn, method)) return xn instanceof Error ? xn : Error(qn);
   let Jn =
     jn === void 0
       ? `the default screenshot timeout`
@@ -6365,10 +6385,15 @@ function rewriteCaptureScreenshotError(xn: unknown, jn: number | undefined, Vn: 
         : `the requested ${jn}ms page.screenshot timeout`;
   return Error(`page.screenshot: browser CDP command timed out while capturing ${Vn} before ${Jn} completed`);
 }
+// The pipe transport appends its launch details in parentheses after the method name.
+function isCdpCommandTimeout(message: string, method: string) {
+  let prefix = `CDP command timeout: ${method}`;
+  return message === prefix || message.startsWith(`${prefix} (`);
+}
 function isCaptureScreenshotTimeout(xn: unknown) {
   let jn = formatScreenshotError(xn);
   return (
-    jn === `CDP command timeout: Page.captureScreenshot` ||
+    isCdpCommandTimeout(jn, `Page.captureScreenshot`) ||
     jn.startsWith(`page.screenshot: browser CDP command timed out while capturing `)
   );
 }
@@ -7364,11 +7389,30 @@ function createOmOPageClass() {
       return await this.evaluate<number>(`window.devicePixelRatio`).catch(() => 1);
     }
     async #b(xn: object, jn: number | undefined, Vn: string) {
-      try {
-        return await this._sendToTarget(`Page.captureScreenshot`, xn, { timeoutMs: jn });
-      } catch (xn) {
-        throw rewriteCaptureScreenshotError(xn, jn, Vn);
-      }
+      let qn = jn && jn > 0 ? Date.now() + jn : void 0,
+        Jn = () => (qn === void 0 ? jn : Math.max(1, qn - Date.now()));
+      return await withSensitiveBlanking(
+        async (expression) => {
+          try {
+            let { result: xn, exceptionDetails: Vn } = await this._sendToTarget(
+              `Runtime.evaluate`,
+              { expression, returnByValue: !0 },
+              { timeoutMs: Jn() },
+            );
+            if (Vn) throw Error(formatRuntimeException(Vn, `Evaluation failed`));
+            return xn.value;
+          } catch (xn) {
+            throw rewriteCaptureScreenshotError(xn, jn, `sensitive blanking`, `Runtime.evaluate`);
+          }
+        },
+        async () => {
+          try {
+            return await this._sendToTarget(`Page.captureScreenshot`, xn, { timeoutMs: Jn() });
+          } catch (xn) {
+            throw rewriteCaptureScreenshotError(xn, jn, Vn);
+          }
+        },
+      );
     }
     async snapshot(xn: SnapshotOptions = {}) {
       return await takeSnapshot(this.cdp, this.frameManager, xn);

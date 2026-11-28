@@ -424,10 +424,42 @@ and structural pseudo-classes (`:nth-child()`, `:first-of-type`, `:enabled`, ...
 still run. `requestHuman`'s `until.selector`, like its predicate, runs page
 JS directly and is not covered.
 
-Screenshots, `readText` OCR and anything pixel-based still capture what the page
-renders: avoid them (or mask via the page's own CSS) while a marked secret is
-visible. `page.evaluate` with your own JS reads the DOM directly and is likewise
-not redacted.
+Screenshots blank the pixels too. Every screenshot omowright controls — viewport, clipped,
+element and full-page `page.screenshot`, locator screenshots, the captcha `readText`
+helper, CUA and trace step shots — flows through one choke point that first injects a
+temporary style rendering each marked element as an opaque black block of its own box,
+captures, then removes the style, so the page is exactly restored even when the capture
+fails. Everything a marked element paints turns black: its text, input values, children,
+pseudo-element content, the content of a marked `<img>`, `<canvas>` or `<video>`, the
+shadow tree of a marked host (open or closed), and the frames it hosts. Every frame the
+text outputs seal stays blank in pixels too: a marked `<iframe>`, `<frame>`, `<object>` or
+`<embed>` of any origin, a frame inside a marked element, and every frame below either.
+The style is injected into the document, every open shadow root and every same-origin
+frame document, because a light-DOM stylesheet reaches none of those; a page without a
+marked element is not touched. Overlapping captures share one page-wide hold, and the
+injection and removal count against the `timeout` of `page.screenshot`. Three limits
+remain: a marker inside a cross-origin frame's own document is unreachable from the
+parent page (mark the iframe itself instead); a marked host styled `display: contents`
+with a closed shadow root has no box to blank and a closed root cannot be styled, so its
+shadow content shows (mark an element inside it, or a wrapper that has a box); and a page
+can outrank the blanking with its own `!important` inline styles on a marked element —
+the marker is the page's own declaration, so a page fighting it is out of contract.
+`page.pdf()` renders without blanking, and `page.evaluate` with your own JS reads the DOM
+directly and is likewise not redacted.
+
+`page.video()` recordings hold the blanking for the whole recording, in place and painted
+before the first frame is streamed, and markers added to the page while it records are
+blanked at once. One window remains: a shadow root or same-origin frame created during the
+recording, or the new document after a navigation, is blanked only from the frame after it
+first appears, so that one frame can show it. Stop the recording before navigating to or
+rendering such a secret.
+
+The BSK daemon path (`session.screenshot()`) is the one capture omowright does not
+control: the daemon's `screenshot` tool is a cooperation-exempt read, while `evaluate` —
+the only way to inject the blanking style into the remote page — is a gated action that
+needs the single-use context of the latest `cooperate` sync, which a screenshot cannot
+obtain without invalidating the caller's own context. Avoid BSK screenshots while a
+marked secret is visible, or mask it via the page's own CSS.
 
 ## Rules
 
