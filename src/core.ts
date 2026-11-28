@@ -29,6 +29,18 @@ import {
   selectorGuardExpression,
   sensitiveElementGuard,
 } from "./sensitive-guard.ts";
+import {
+  WITHHELD_OWNER_ATTRIBUTES,
+  CARRIES_MARKUP_SOURCE,
+  FRAME_OWNERS_SOURCE,
+  holdsWithheld,
+  holdsWithheldOwner,
+  isWithheldOwner,
+  withheldFrameOwners,
+  withheldMarkupUrl,
+  cssNeedsOwnerCheck,
+  selectorNeedsOwnerCheck,
+} from "./sealed-frame-owners.ts";
 import { snapshotResult, validateSnapshotOptions } from "./snapshot-diff.ts";
 import { subscribeConsoleEvents } from "./console-events.ts";
 import { assertPageEvent, RUNTIME_PAGE_EVENTS, subscribePageErrors } from "./page-events.ts";
@@ -1020,6 +1032,8 @@ export interface FrameRecord {
   name: string;
   sessionId: string;
   isolatedContextId?: number | undefined;
+  // Set once an owner check proves the frame sealed (sensitive-guard.ts).
+  sealedOwner?: boolean | undefined;
 }
 
 /** The frame registry. Lookups also take the main frame id before any frame is known (null), which finds nothing. */
@@ -3635,14 +3649,16 @@ async function inputValueElement(xn: OmOPage, jn: ElementTarget) {
 }
 async function innerHTMLElement(xn: OmOPage, jn: ElementTarget) {
   if (await inSealedFrame(xn, jn)) return SENSITIVE_PLACEHOLDER;
+  const owners = await withheldFrameOwners(xn.cdp, xn.frameManager, jn.frameId ?? xn.frameManager.mainFrameId);
   return await evaluateOnElement<string>(
     xn,
     jn,
-    `function() {
+    `function(_, withheld) {
       ${sensitiveElementGuard}
       if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
-      return __omowHasSensitive(this) ? __omowRedactedClone(this).innerHTML : this.innerHTML;
+      return __omowNeedsRedaction(this, withheld) ? __omowRedactedClone(this, withheld).innerHTML : this.innerHTML;
     }`,
+    owners,
   );
 }
 async function innerTextElement(xn: OmOPage, jn: ElementTarget) {
@@ -3671,13 +3687,20 @@ async function textContentElement(xn: OmOPage, jn: ElementTarget) {
 }
 async function getAttributeElement(xn: OmOPage, jn: ElementTarget, Vn: string) {
   if (await inSealedFrame(xn, jn)) return SENSITIVE_PLACEHOLDER;
+  if (
+    WITHHELD_OWNER_ATTRIBUTES.includes(Vn.toLowerCase()) &&
+    (await isWithheldOwner(xn.cdp, xn.frameManager, {
+      objectId: jn.objectId,
+      frameSessionId: await resolveActionSessionId(xn, jn),
+    }))
+  )
+    return SENSITIVE_PLACEHOLDER;
   return await evaluateOnElement<string | null>(
     xn,
     jn,
     `function(_, attributeName) {
       ${sensitiveElementGuard}
       if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
-      if (String(attributeName).toLowerCase() === 'srcdoc' && __omowSrcdocSealed(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
       return this.getAttribute(attributeName);
     }`,
     Vn,
@@ -3991,11 +4014,15 @@ function createOmOFrameClass() {
     async $$eval(xn: string, jn: Parameters<Locator["evaluateAll"]>[0], Vn?: Parameters<Locator["evaluateAll"]>[1]) {
       return await this.locator(xn).evaluateAll(jn, Vn);
     }
+    // #379: a data: or javascript: URL can carry the frame's markup, and url() is synchronous, so
+    // its payload is withheld. name() is the owner's name attribute, an author-chosen identifier
+    // (documented exception); it reads the placeholder once an owner check has proven it sealed.
     url() {
-      return this.#t().url;
+      return withheldMarkupUrl(this.#t().url, SENSITIVE_PLACEHOLDER);
     }
     name() {
-      return this.#t().name;
+      let xn = this.#t();
+      return xn.sealedOwner ? SENSITIVE_PLACEHOLDER : xn.name;
     }
     parentFrame() {
       let jn = this.#t().parentFrameId;
@@ -4443,8 +4470,15 @@ function createLocatorClass() {
       return await this.#e.evaluateInFrame<number>(
         Vn,
         `function(query) {
-        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
-        const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute);
+        const withheldOwners = (() => {
+          const owners = (${FRAME_OWNERS_SOURCE})();
+          const withheld = query.withheldOwners;
+          if (withheld === null) return new Set();
+          if (!withheld || withheld.all || owners.length !== withheld.total) return new Set(owners.filter(${CARRIES_MARKUP_SOURCE}));
+          return new Set(withheld.indices.map((index) => owners[index]).filter(Boolean));
+        })();
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute, withheldOwners);
+        const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute, query.sealedFrames === true);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -4594,6 +4628,7 @@ function createLocatorClass() {
           nth: jn.nth,
           hasNth: xn,
           sealedDocument: await this.#sealed(Vn),
+          ...(await this.#withheld(Vn, jn.selector)),
           testIdAttribute: testIdAttributeName,
         },
       );
@@ -4906,14 +4941,22 @@ function createLocatorClass() {
           scoped: scope !== void 0,
           countOnly,
           sealedDocument: await this.#sealed(jn),
+          ...(await this.#withheld(jn, xn)),
           testIdAttribute: testIdAttributeName,
         },
         { result: Yn } = await this.#e.cdp.send(
           `Runtime.callFunctionOn`,
           {
             functionDeclaration: `function(query, ...scopeRoots) {
-        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute);
-        const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute);
+        const withheldOwners = (() => {
+          const owners = (${FRAME_OWNERS_SOURCE})();
+          const withheld = query.withheldOwners;
+          if (withheld === null) return new Set();
+          if (!withheld || withheld.all || owners.length !== withheld.total) return new Set(owners.filter(${CARRIES_MARKUP_SOURCE}));
+          return new Set(withheld.indices.map((index) => owners[index]).filter(Boolean));
+        })();
+        const textMatching = (${createTextMatching.toString()})(undefined, undefined, false, query.sealedDocument === true, query.testIdAttribute, withheldOwners);
+        const selectorGuard = (${createSelectorGuard.toString()})(query.sealedDocument === true, query.testIdAttribute, query.sealedFrames === true);
         const parseTextMatcher = (raw) => {
           if (!raw) return null;
           if (raw.startsWith('/') && raw.lastIndexOf('/') > 0) {
@@ -5259,6 +5302,15 @@ function createLocatorClass() {
     }
     // #379: text, label and role-name matching inside a frame hosted by a sealed owner reads the
     // whole document as sealed, so a matcher there cannot confirm a guessed secret either.
+    // #379: the frame owners withheld in this frame's document; one value feeds both the value
+    // reads (attributeValue) and the CSS guard (sealedFrames).
+    // A selector no step of which can depend on a frame source skips the probe: null tells the page
+    // side that no owner is withheld (an absent value would fail closed and withhold every candidate).
+    async #withheld(frameId: string | null, selector: string) {
+      if (!selectorNeedsOwnerCheck(selector)) return { withheldOwners: null, sealedFrames: !1 };
+      const withheldOwners = await withheldFrameOwners(this.#e.cdp, this.#e.frameManager, frameId);
+      return { withheldOwners, sealedFrames: holdsWithheld(withheldOwners) };
+    }
     async #sealed(frameId: string | null) {
       return await isInSealedFrame(this.#e.cdp, this.#e.frameManager, frameId ?? undefined);
     }
@@ -5835,6 +5887,8 @@ async function takeSnapshot(xn: CoreCdpTransport, jn: PageFrameManager, Vn: Snap
           showHidden: Vn.showHidden,
           refPrefix: Yn.get(qn) ?? ``,
         };
+        let selectorSealedFrames =
+          ai.selector && cssNeedsOwnerCheck(ai.selector) ? await holdsWithheldOwner(xn, jn, qn) : !1;
         try {
           let { result: Vn } = await xn.send(
               `Runtime.callFunctionOn`,
@@ -5842,7 +5896,7 @@ async function takeSnapshot(xn: CoreCdpTransport, jn: PageFrameManager, Vn: Snap
                 // #379: a scoped read runs the caller's selector, so it passes the same attribute
                 // comparison check as locators, in the frame it is queried in.
                 functionDeclaration: `function(opts) {
-              ${ai.selector ? `try { ${selectorGuardExpression(ai.selector, testIdAttributeName)}; } catch (error) { return { error: String((error && error.message) || error) }; }` : ``}
+              ${ai.selector ? `try { ${selectorGuardExpression(ai.selector, testIdAttributeName, selectorSealedFrames)}; } catch (error) { return { error: String((error && error.message) || error) }; }` : ``}
               return globalThis.__omowright.takeSnapshot(opts);
             }`,
                 arguments: [{ value: ai }],
@@ -7163,7 +7217,14 @@ function createOmOPageClass() {
       for (;;) {
         if (Date.now() - Yn >= qn)
           throw Error(`waitForSelector: timed out after ${qn}ms waiting for "${xn}" to be ${Vn}`);
-        await this.evaluate(selectorGuardExpression(xn, testIdAttributeName));
+        await this.evaluate(
+          selectorGuardExpression(
+            xn,
+            testIdAttributeName,
+            cssNeedsOwnerCheck(xn) &&
+              (await holdsWithheldOwner(this.cdp, this.frameManager, this.frameManager.mainFrameId)),
+          ),
+        );
         let jn = await this.evaluate((xn: string) => {
           let jn = document.querySelector(xn);
           if (!jn) return { attached: !1, visible: !1 };
@@ -7340,8 +7401,10 @@ function createOmOPageClass() {
         this.browser.extensionBridgeRoute,
       );
     }
+    // #379: a data: or javascript: payload can carry the page's markup, so it is withheld.
     url({ truncate: xn = !1 }: { truncate?: boolean } = {}) {
-      return xn ? truncateUrlForLLM(this.#r) : this.#r;
+      let jn = withheldMarkupUrl(this.#r, SENSITIVE_PLACEHOLDER);
+      return xn ? truncateUrlForLLM(jn) : jn;
     }
     // #379: a sealed <title> (or one inside a sealed ancestor) reads as the placeholder.
     async title() {
@@ -7351,12 +7414,15 @@ function createOmOPageClass() {
         return title && __omowSensitive(title) ? ${JSON.stringify(SENSITIVE_PLACEHOLDER)} : document.title;
       })()`).catch(() => ``);
     }
-    // #379: the document's HTML with every sealed subtree replaced by the placeholder, like innerHTML.
+    // #379: the document's HTML with every sealed subtree replaced by the placeholder, like innerHTML,
+    // and the src/srcdoc/data of frame owners whose loaded frames hold sealed markup withheld.
     async content() {
+      const owners = await withheldFrameOwners(this.cdp, this.frameManager, this.frameManager.mainFrameId);
       return await this.evaluate<string>(`(() => {
         ${sensitiveElementGuard}
         const root = document.documentElement;
-        return __omowHasSensitive(root) ? __omowRedactedClone(root).outerHTML : root.outerHTML;
+        const withheld = ${JSON.stringify(owners)};
+        return __omowNeedsRedaction(root, withheld) ? __omowRedactedClone(root, withheld).outerHTML : root.outerHTML;
       })()`);
     }
     async screenshot(xn: ScreenshotOptions = {}) {

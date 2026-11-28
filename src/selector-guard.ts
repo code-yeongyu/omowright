@@ -14,7 +14,9 @@
 // `[name op "value"]`. A selector the engine rejects as a style rule is judged on its raw text: an
 // attribute selector or a pseudo-class cannot exist without a literal `[` or `:`.
 
-export function createSelectorGuard(sealedDocument = false, testIdAttribute = "data-testid") {
+// sealedFrames: the document holds a frame owner whose loaded frame holds sealed markup, decided
+// from the frame tree by sealed-frame-owners.ts (a frame's source can carry its markup).
+export function createSelectorGuard(sealedDocument = false, testIdAttribute = "data-testid", sealedFrames = false) {
   const structural = new Set([
     "is",
     "where",
@@ -53,18 +55,12 @@ export function createSelectorGuard(sealedDocument = false, testIdAttribute = "d
     "modal",
     "open",
   ]);
-  const holdsSealed = (root: Document | ShadowRoot): boolean =>
+  const holdsMarker = (root: Document | ShadowRoot): boolean =>
     Array.from(root.querySelectorAll("*")).some((element) => {
       const marker = element.getAttribute("data-sensitive");
-      // An iframe srcdoc that carries the marker is sealed markup too (#390).
-      const srcdoc = element.tagName === "IFRAME" ? element.getAttribute("srcdoc") : null;
-      return (
-        sealedDocument ||
-        (marker !== null && marker !== "false") ||
-        (srcdoc !== null && /data-sensitive/i.test(srcdoc)) ||
-        (!!element.shadowRoot && holdsSealed(element.shadowRoot))
-      );
+      return (marker !== null && marker !== "false") || (!!element.shadowRoot && holdsMarker(element.shadowRoot));
     });
+  const holdsSealed = (root: Document) => sealedDocument || sealedFrames || holdsMarker(root);
   // The part of the selector that can depend on sealed content, or null. The canonical text is
   // scanned outside strings: inside a bracket, the text before the first `=` is the serialized name
   // plus operator, and only the exact serialized marker or test id name is exempt (a raw role
