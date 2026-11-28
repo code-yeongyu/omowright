@@ -102,6 +102,20 @@ test("fresh navigation keeps the OOPIF child stitched and clickable", live, asyn
     const scoped = await snapshotWithFrames(framesPage, { ref: "f1e1" });
     assert.ok(scoped.tree.includes(`button "Inside" [ref=f1e1]`), scoped.tree);
     assert.ok(!scoped.tree.includes("Outside"), scoped.tree);
+
+    // #379/#384: data-sensitive on the cross-site owner seals the out-of-process child. Its owner
+    // lives in the parent process, so this is the case where DOM.describeNode must map the owner
+    // to the child frame id across processes; the child attached late, through Target.attachedToTarget.
+    await page.evaluate(() => document.getElementById("child")?.setAttribute("data-sensitive", ""));
+    const sealed = await snapshotWithFrames(framesPage);
+    assert.ok(!/Inside|child doc/.test(sealed.tree), sealed.tree);
+    assert.ok(sealed.tree.includes(`button "Outside"`), sealed.tree);
+    assert.equal(sealed.refs?.["f1e1"], undefined);
+    assert.equal(field(sealed, "missingFrames"), undefined);
+    const sealedChild = page.frameLocator("#child");
+    assert.equal(await sealedChild.locator("#inside").textContent(), "[redacted: sensitive]");
+    assert.equal(await sealedChild.getByText("Inside").count(), 0);
+    assert.equal(await sealedChild.locator("button").filter({ hasText: "Inside" }).count(), 0);
   } finally {
     await launched?.cleanup();
     await fixtures.close();

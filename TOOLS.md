@@ -405,28 +405,42 @@ findable and clickable. Accessible names never source from a sealed subtree: an
 input values were already redacted; the marker extends that to page text the
 page itself declares secret.
 
+A sealed `<iframe>` (or one inside a sealed element) seals the document it hosts
+and every frame below it: snapshots show only the iframe's placeholder line, refs
+into those frames resolve as stale, and `frameLocator(...)` reads return the
+placeholder. Text, label and role-name matchers (`getByText`, `getByLabel`,
+`getByRole({ name })`, `:has-text`, `filter({ hasText, hasNotText })`) and the
+attribute matchers `getByTitle`, `getByPlaceholder` and `getByAltText` read a sealed
+subtree as the placeholder, so a match count cannot confirm a guessed secret.
+`getByTestId` still matches a sealed element, so a sealed block can be located by
+its test id. In a document with sealed content, a CSS selector that compares an
+attribute value (`[value^="k"]`, also inside `:has()`/`:not()`) is refused by
+locators and `waitForSelector`; presence selectors (`[data-sensitive]`), ids and
+classes still run. `requestHuman`'s `until.selector`, like its predicate, runs page
+JS directly and is not covered.
+
 Screenshots blank the pixels too. Every screenshot omowright controls — viewport, clipped,
 element and full-page `page.screenshot`, locator screenshots, the captcha `readText`
 helper, CUA and trace step shots — flows through one choke point that first injects a
 temporary style rendering each marked element as an opaque black block of its own box,
 captures, then removes the style, so the page is exactly restored even when the capture
-fails. Everything the marked element paints turns black: its text, input values,
-children, pseudo-element content, the content of a marked `<img>`, `<canvas>`, `<video>`
-or `<iframe>` (an iframe of any origin, and any iframe inside a marked element, matching
-the frame sealing of the text outputs), and the shadow tree of a marked host, open or
-closed. The style is injected into the document, every open shadow root and every
-same-origin iframe document, because a light-DOM stylesheet reaches none of those; a page
-without a marked element is not touched. Overlapping captures share one page-wide hold,
-and the injection and removal count against the `timeout` of `page.screenshot`. Three
-limits remain: a marker inside a cross-origin frame's own document is unreachable from
-the parent page (mark the iframe itself instead); a marked host styled `display: contents`
+fails. Everything a marked element paints turns black: its text, input values, children,
+pseudo-element content, the content of a marked `<img>`, `<canvas>` or `<video>`, the
+shadow tree of a marked host (open or closed), and the frames it hosts. Every frame the
+text outputs seal stays blank in pixels too: a marked `<iframe>`, `<frame>`, `<object>` or
+`<embed>` of any origin, a frame inside a marked element, and every frame below either.
+The style is injected into the document, every open shadow root and every same-origin
+frame document, because a light-DOM stylesheet reaches none of those; a page without a
+marked element is not touched. Overlapping captures share one page-wide hold, and the
+injection and removal count against the `timeout` of `page.screenshot`. Three limits
+remain: a marker inside a cross-origin frame's own document is unreachable from the
+parent page (mark the iframe itself instead); a marked host styled `display: contents`
 with a closed shadow root has no box to blank and a closed root cannot be styled, so its
 shadow content shows (mark an element inside it, or a wrapper that has a box); and a page
-can outrank the blanking with
-its own `!important` inline styles on a marked element — the marker is the page's own
-declaration, so a page fighting it is out of contract. `page.pdf()` renders without
-blanking, and `page.evaluate` with your own JS reads the DOM directly and is likewise not
-redacted.
+can outrank the blanking with its own `!important` inline styles on a marked element —
+the marker is the page's own declaration, so a page fighting it is out of contract.
+`page.pdf()` renders without blanking, and `page.evaluate` with your own JS reads the DOM
+directly and is likewise not redacted.
 
 `page.video()` recordings hold the blanking for the whole recording, in place and painted
 before the first frame is streamed, and markers added to the page while it records are

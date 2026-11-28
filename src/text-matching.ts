@@ -21,6 +21,8 @@ export function createTextMatching(
   isHidden: (element: Element) => boolean = () => false,
   getRole: (element: Element) => string = () => "",
   includeHidden = false,
+  sealedDocument = false,
+  testIdAttribute = "data-testid",
 ) {
   // Predicates live inside the factory so the serialized source stays self-contained.
   const isElement = (node: Node): node is Element => node.nodeType === 1;
@@ -57,6 +59,24 @@ export function createTextMatching(
       ? text === normalize(matcher.exact)
       : text.toLowerCase().includes(normalize(matcher.contains).toLowerCase());
   };
+  // #379: data-sensitive (any value except "false") seals a subtree. Text, label and role-name
+  // matching read a sealed subtree as the placeholder, so a matcher cannot confirm a guessed secret.
+  // sealedDocument: the whole document is hosted by a sealed frame owner.
+  const SENSITIVE = "[redacted: sensitive]";
+  const marked = (node: Node) => {
+    if (!isElement(node)) return false;
+    const value = node.getAttribute("data-sensitive");
+    return value !== null && value !== "false";
+  };
+  const sealed = (node: Node) => {
+    if (sealedDocument) return true;
+    for (let current: Node | null = node; current;) {
+      if (marked(current)) return true;
+      const root: Node | null = current.parentNode;
+      current = root && root.nodeType === 11 && "host" in root && root.host instanceof Node ? root.host : root;
+    }
+    return false;
+  };
   const skipped = (node: Node) =>
     ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.nodeName) || !!node.ownerDocument?.head?.contains(node);
   const textCache = new Map<Node, string>();
@@ -64,7 +84,8 @@ export function createTextMatching(
     const cached = textCache.get(node);
     if (cached !== undefined) return cached;
     let value = "";
-    if (!skipped(node)) {
+    if (marked(node)) value = SENSITIVE;
+    else if (!skipped(node)) {
       if (isInput(node) && ["submit", "button", "reset"].includes(node.type)) value = node.value;
       else {
         for (const child of node.childNodes) {
@@ -77,7 +98,74 @@ export function createTextMatching(
     textCache.set(node, value);
     return value;
   };
-  const matchesText = (node: MatchNode, matcher: TextMatcher) => !skipped(node) && matches(text(node), matcher);
+  const sealedText = (node: MatchNode) => (sealed(node) ? SENSITIVE : text(node));
+  // Attribute matchers read a sealed element's attribute values as the placeholder, except the
+  // test id, which stays matchable so a sealed block can still be located.
+  const attributeValue = (node: Element, name: string) => {
+    const value = node.getAttribute(name);
+    return value !== null && name !== testIdAttribute && sealed(node) ? SENSITIVE : value;
+  };
+  // A CSS selector that compares an attribute value (`[value^="k"]`, also inside :has/:not or
+  // across combinators) could confirm a sealed value through its match count, so it is refused in
+  // a document holding sealed content. Presence-only selectors, ids and classes still run. The
+  // refusal depends only on whether sealed content exists, which the snapshot already shows.
+  // The engine parses the selector: a constructable sheet (never adopted, so the page is untouched)
+  // serializes it canonically, with comments dropped, escapes decoded and every comparison written
+  // `[name op "value"]`. A selector the engine rejects as a style rule is judged on its raw text:
+  // an attribute selector cannot exist without a literal `[`.
+  const canonicalSelector = (selector: string) => {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.insertRule(`${selector}{}`);
+      const rule = sheet.cssRules[0];
+      return rule instanceof CSSStyleRule ? rule.selectorText : null;
+    } catch {
+      return null;
+    }
+  };
+  // Scans the canonical brackets outside strings. The text before the first `=` in a bracket is the
+  // serialized name plus operator; only the exact serialized marker or test id name is exempt, so a
+  // namespace prefix or any other spelling counts as a comparison.
+  const comparesAttributeValue = (selector: string) => {
+    const canonical = canonicalSelector(selector);
+    if (canonical === null) return selector.includes("[");
+    const exempt = new Set(["data-sensitive", testIdAttribute].map((name) => CSS.escape(name)));
+    let quote = "";
+    let escaped = false;
+    let body: string | null = null;
+    for (const char of canonical) {
+      if (body !== null) body += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (quote) quote = char === quote ? "" : quote;
+      else if (char === '"' || char === "'") quote = char;
+      else if (char === "[" && body === null) body = "";
+      else if (char === "]" && body !== null) {
+        const operator = body.indexOf("=");
+        const name =
+          operator < 0
+            ? ""
+            : body
+                .slice(0, operator)
+                .replace(/[~|^$*]$/, "")
+                .trim();
+        if (operator >= 0 && !exempt.has(name)) return true;
+        body = null;
+      }
+    }
+    return false;
+  };
+  const holdsSealed = (root: Document | ShadowRoot): boolean =>
+    Array.from(root.querySelectorAll("*")).some(
+      (element) => sealedDocument || marked(element) || (!!element.shadowRoot && holdsSealed(element.shadowRoot)),
+    );
+  const assertSelectorAllowed = (selector: string, document: Document) => {
+    if (comparesAttributeValue(selector) && holdsSealed(document))
+      throw new Error(
+        `Selector "${selector}" compares attribute values in a document with data-sensitive content; use a ref, role, test id, id or class instead`,
+      );
+  };
+  const matchesText = (node: MatchNode, matcher: TextMatcher) => !skipped(node) && matches(sealedText(node), matcher);
   const labelledBy = (node: Element) => {
     const refs =
       node.ariaLabelledByElements ??
@@ -91,10 +179,10 @@ export function createTextMatching(
   };
   const labels = (node: MatchElement) => {
     const refs = labelledBy(node);
-    if (refs) return refs.map(text);
+    if (refs) return refs.map(sealedText);
     const ariaLabel = node.getAttribute("aria-label");
-    if (ariaLabel?.trim()) return [ariaLabel];
-    return Array.from(node.labels ?? [], text);
+    if (ariaLabel?.trim()) return [sealed(node) ? SENSITIVE : ariaLabel];
+    return Array.from(node.labels ?? [], sealedText);
   };
   const contentRoles = new Set([
     "button",
@@ -143,7 +231,7 @@ export function createTextMatching(
       descendant = false,
       inLabelledBy = false,
     ): string => {
-      if (visited.has(element) || skipped(element)) return "";
+      if (visited.has(element) || skipped(element) || sealed(element)) return "";
       if (!includeHidden && !hiddenReference && isHidden(element)) return "";
       visited.add(element);
       const refs = labelledBy(element);
@@ -189,7 +277,18 @@ export function createTextMatching(
       }
       return element.getAttribute("title") || "";
     };
-    return prohibitedRoles.has(getRole(node)) ? "" : normalize(alternative(node));
+    if (prohibitedRoles.has(getRole(node))) return "";
+    return sealed(node) ? SENSITIVE : normalize(alternative(node));
   };
-  return { normalize, matches, skipped, text, matchesText, labels, accessibleName };
+  return {
+    normalize,
+    matches,
+    skipped,
+    text,
+    matchesText,
+    labels,
+    accessibleName,
+    attributeValue,
+    assertSelectorAllowed,
+  };
 }
