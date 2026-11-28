@@ -1,14 +1,17 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, globSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
-import { connectPipe } from "../src/index.ts";
 import { sensitiveBlankInjectExpression, sensitiveBlankRemoveExpression } from "../src/sensitive-blank.ts";
-import { removeTreeSync } from "./fixtures/remove-tree.ts";
+import {
+  openSensitiveTab,
+  type PipePage,
+  releaseSensitiveBrowser,
+  skipWithoutShell,
+} from "./fixtures/sensitive-browser.ts";
 
 // Test authoring gate: (1) contract — security (#380): the pixels of an element the page seals
 // with data-sensitive (any value except the exact string "false", the marker #379 introduced)
@@ -195,72 +198,13 @@ function assertRegionUnchanged(
   assert.ok(textPixels >= 1, `${what} lost its text: no pixel differs from background or blank`);
 }
 
-function findHeadlessShell() {
-  const home = process.env["HOME"] ?? "";
-  const candidates = [
-    ...globSync(
-      path.join(
-        home,
-        "Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell",
-      ),
-    ),
-    ...globSync(
-      path.join(
-        home,
-        ".cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell",
-      ),
-    ),
-  ];
-  return candidates.toSorted().at(-1);
-}
-
-const SHELL = process.env["SHELL_BIN"] ?? findHeadlessShell();
-
-type PipeBrowser = Awaited<ReturnType<typeof connectPipe>>;
-type PipePage = Awaited<ReturnType<PipeBrowser["newTab"]>>;
-
-// One browser serves the whole file, started lazily by the first test that runs and released
-// in after(), newest first (the browser before its user-data dir), the same lifecycle
-// sensitive-redaction.test.ts uses. The first test pays the cold chrome-headless-shell start,
-// which alone takes the whole default per-test limit on windows-latest, so it carries the one
-// explicit 30 s allowance; the rest run against the warm browser.
-const skip = !SHELL && "no chromium binary found";
-type Release = () => unknown;
-const releases: Release[] = [];
-let shared: Promise<PipeBrowser> | undefined;
-
-async function start(): Promise<PipeBrowser> {
-  assert.ok(SHELL, "no chromium binary found");
-  const ud = mkdtempSync(path.join(tmpdir(), "omowright-sensitive-shot-"));
-  releases.push(() => removeTreeSync(ud));
-  const browser = await connectPipe({
-    browserPath: SHELL,
-    browserArgs: ["--headless", "--no-first-run", `--user-data-dir=${ud}`],
-    storageRoot: ud,
-  });
-  releases.push(() => browser.close());
-  return browser;
-}
-
-after(async () => {
-  await shared?.catch(() => undefined);
-  const failures: unknown[] = [];
-  for (const step of releases.toReversed()) {
-    try {
-      await step();
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length > 0)
-    throw new AggregateError(failures, "the sensitive-screenshot fixture did not release cleanly");
-});
-
-async function openTab(): Promise<PipePage> {
-  shared ??= start();
-  const browser = await shared;
-  return await browser.newTab("about:blank");
-}
+// One browser serves the whole file: the shared data-sensitive fixture (sensitive-browser.ts)
+// starts it lazily from the first test that runs and releases it in after(). That first test
+// pays the cold chrome-headless-shell start, which alone takes the whole default per-test limit
+// on windows-latest, so it carries the one explicit 30 s allowance; the rest run warm.
+const skip = skipWithoutShell;
+const openTab = openSensitiveTab;
+after(releaseSensitiveBrowser);
 
 async function rectOf(page: PipePage, expression: string): Promise<Rect> {
   const serialized = await page.evaluate(
@@ -465,9 +409,7 @@ function assertRegionNearBlank(image: DecodedPng, rect: Rect, what: string) {
   }
 }
 
-const skipVideo = !SHELL
-  ? "no chromium binary found"
-  : !FFMPEG && "no ffmpeg on PATH with the libvpx encoder and null muxer";
+const skipVideo = skip || (!FFMPEG && "no ffmpeg on PATH with the libvpx encoder and null muxer");
 
 // A replaced element carrying the marker paints its own content above the black background and
 // has no element children for the visibility rule to hide (H1).
@@ -567,6 +509,67 @@ test("a marked cross-origin iframe blanks its content (security contract #380)",
   }
 });
 
+// #385 seals the frame a sealed owner hosts (<iframe>, <frame>, <object>, <embed>; marked, or
+// inside a marked element) and every frame below it; each of those shapes must stay blank in
+// pixels too, here with cross-origin content the parent's stylesheet cannot enter.
+test(
+  "every frame the text outputs seal (#385) stays blank in screenshots (security contract #380)",
+  { skip },
+  async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(
+        '<body style="margin:0"><div style="width:300px;height:120px;background:#ff0000;color:#0000ff;font:48px bold sans-serif">hotel india</div></body>',
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const page = await openTab();
+    try {
+      const address = server.address();
+      assert.ok(address && typeof address === "object", "the frame server has no port");
+      const url = `http://127.0.0.1:${address.port}/`;
+      const box = "width:300px;height:120px;display:block;border:0";
+      const owners: ReadonlyArray<readonly [string, string]> = [
+        [
+          "in-wrapper",
+          `<div data-sensitive id="in-wrapper" style="width:300px;height:120px"><iframe src="${url}" style="${box}"></iframe></div>`,
+        ],
+        [
+          "nested",
+          `<iframe data-sensitive id="nested" style="${box}" srcdoc="<body style='margin:0'><iframe src='${url}' style='${box}'></iframe></body>"></iframe>`,
+        ],
+        ["object", `<object data-sensitive id="object" type="text/html" data="${url}" style="${box}"></object>`],
+        ["embed", `<embed data-sensitive id="embed" type="text/html" src="${url}" style="${box}">`],
+        [
+          "frameset",
+          `<iframe id="frameset" style="${box}" srcdoc="<frameset rows='*'><frame data-sensitive src='${url}'></frameset>"></iframe>`,
+        ],
+      ];
+      await page.evaluate(
+        `new Promise((resolve) => {
+        document.body.style.margin = "0";
+        document.body.innerHTML = ${JSON.stringify(owners.map(([, html]) => html).join(""))};
+        const loading = ${JSON.stringify(owners.map(([id]) => id))}.map((id) => {
+          const owner = document.getElementById(id);
+          const element = owner.tagName === "DIV" ? owner.firstElementChild : owner;
+          return new Promise((done) => element.addEventListener("load", done, { once: true }));
+        });
+        Promise.all(loading).then(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve(1))));
+      })`,
+      );
+      const dpr = await dprOf(page);
+      const image = decodePng(await page.screenshot());
+      for (const [id] of owners) {
+        const rect = await rectOf(page, `document.getElementById("${id}")`);
+        assertRegionBlank(image, rect, dpr, `the sealed frame shape "${id}"`);
+      }
+    } finally {
+      await page.close();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  },
+);
+
 test("a marked shadow host blanks its shadow content (security contract #380)", { skip }, async () => {
   const page = await openTab();
   try {
@@ -599,7 +602,6 @@ test(
   "video recording frames blank a marked page mid-recording (security contract #380)",
   { skip: skipVideo },
   async () => {
-    assert.ok(SHELL, "no chromium binary found");
     assert.ok(FFMPEG, "no ffmpeg on PATH with the libvpx encoder and null muxer");
     const page = await openTab();
     const originalPath = process.env["PATH"];
