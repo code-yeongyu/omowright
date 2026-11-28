@@ -220,11 +220,22 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
     assert.equal(await page.getByTestId("hint-box").count(), 1, "a sealed block lost its test id");
     // A CSS selector comparing attribute values is refused in a document with sealed content,
     // whatever its match would be; presence, id and class selectors still run.
-    for (const selector of ['input[data-sensitive][value^="k"]', 'main:has(input[value^="k"])', '[title*="z"]']) {
+    // The comment, escape and namespace spellings are valid CSS for the same comparison.
+    const comparing = [
+      'input[data-sensitive][value^="k"]',
+      'main:has(input[value^="k"])',
+      '[title*="z"]',
+      'input[value/**/^="k"]',
+      'input[\\76 alue^="k"]',
+      'input[*|value^="k"]',
+      'input[value/*]*/^="k"]',
+    ];
+    for (const selector of comparing) {
       await assert.rejects(page.locator(selector).count(), /data-sensitive/, `CSS ${selector} answered`);
       await assert.rejects(page.waitForSelector(selector, { timeout: 200 }), /data-sensitive/, `wait ${selector}`);
     }
     assert.equal(await page.locator("#seed[data-sensitive]").count(), 1, "presence selector refused");
+    assert.equal(await page.locator('[data-testid="hint-box"]').count(), 1, "test id comparison refused");
     assert.equal(await page.getByText("oscar").count(), 0, "getByText confirmed a sealed option");
     assert.equal(await page.getByLabel("bravo").count(), 0, "getByLabel confirmed a sealed label");
     assert.equal(await page.getByRole("button", { name: "bravo" }).count(), 0, "role name confirmed a secret");

@@ -109,16 +109,58 @@ export function createTextMatching(
   // across combinators) could confirm a sealed value through its match count, so it is refused in
   // a document holding sealed content. Presence-only selectors, ids and classes still run. The
   // refusal depends only on whether sealed content exists, which the snapshot already shows.
-  const comparedAttributes = (selector: string) =>
-    Array.from(selector.matchAll(/\[\s*(?:[\w*-]*\|)?([^\s~|^$*=\]]+)\s*[~|^$*]?=/g), (match) =>
-      String(match[1]).toLowerCase(),
-    ).filter((name) => name !== "data-sensitive" && name !== testIdAttribute.toLowerCase());
+  // The engine parses the selector: a constructable sheet (never adopted, so the page is untouched)
+  // serializes it canonically, with comments dropped, escapes decoded and every comparison written
+  // `[name op "value"]`. A selector the engine rejects as a style rule is judged on its raw text:
+  // an attribute selector cannot exist without a literal `[`.
+  const canonicalSelector = (selector: string) => {
+    try {
+      const sheet = new CSSStyleSheet();
+      sheet.insertRule(`${selector}{}`);
+      const rule = sheet.cssRules[0];
+      return rule instanceof CSSStyleRule ? rule.selectorText : null;
+    } catch {
+      return null;
+    }
+  };
+  // Scans the canonical brackets outside strings. The text before the first `=` in a bracket is the
+  // serialized name plus operator; only the exact serialized marker or test id name is exempt, so a
+  // namespace prefix or any other spelling counts as a comparison.
+  const comparesAttributeValue = (selector: string) => {
+    const canonical = canonicalSelector(selector);
+    if (canonical === null) return selector.includes("[");
+    const exempt = new Set(["data-sensitive", testIdAttribute].map((name) => CSS.escape(name)));
+    let quote = "";
+    let escaped = false;
+    let body: string | null = null;
+    for (const char of canonical) {
+      if (body !== null) body += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (quote) quote = char === quote ? "" : quote;
+      else if (char === '"' || char === "'") quote = char;
+      else if (char === "[" && body === null) body = "";
+      else if (char === "]" && body !== null) {
+        const operator = body.indexOf("=");
+        const name =
+          operator < 0
+            ? ""
+            : body
+                .slice(0, operator)
+                .replace(/[~|^$*]$/, "")
+                .trim();
+        if (operator >= 0 && !exempt.has(name)) return true;
+        body = null;
+      }
+    }
+    return false;
+  };
   const holdsSealed = (root: Document | ShadowRoot): boolean =>
     Array.from(root.querySelectorAll("*")).some(
       (element) => sealedDocument || marked(element) || (!!element.shadowRoot && holdsSealed(element.shadowRoot)),
     );
   const assertSelectorAllowed = (selector: string, document: Document) => {
-    if (comparedAttributes(selector).length > 0 && holdsSealed(document))
+    if (comparesAttributeValue(selector) && holdsSealed(document))
       throw new Error(
         `Selector "${selector}" compares attribute values in a document with data-sensitive content; use a ref, role, test id, id or class instead`,
       );
