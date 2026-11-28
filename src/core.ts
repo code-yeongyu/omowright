@@ -2632,10 +2632,6 @@ export interface LocatorScreenshotOptions {
   timeout?: number;
   type?: ScreenshotOptions["type"];
 }
-interface TextFilterValue {
-  source: string;
-  flags: string;
-}
 export interface MouseButtonOptions {
   button?: string;
   clickCount?: number;
@@ -4707,27 +4703,17 @@ function createLocatorClass() {
         const options = definedOrThrow(plan.filters);
         const filtered: ElementTarget[] = [];
         for (const node of nodes) {
-          const textOptions: { hasText?: string | TextFilterValue; hasNotText?: string | TextFilterValue } = {};
-          for (const key of ["hasText", "hasNotText"] as const)
-            if (options[key] !== undefined) {
-              const value = options[key];
-              textOptions[key] = isRegExpValue(value) ? { source: value.source, flags: value.flags } : String(value);
-            }
-          const matches = await evaluateOnElement<boolean>(
-            this.#e,
-            node,
-            `function(_, options){
-        const text=this.textContent||'';
-        const matchesText=(matcher)=>typeof matcher==='string'
-          ?text.replace(/\\s+/g,' ').trim().toLowerCase().includes(matcher.toLowerCase())
-          :new RegExp(matcher.source,matcher.flags).test(text);
-        if(options.hasText!==undefined&&!matchesText(options.hasText))return false;
-        if(options.hasNotText!==undefined&&matchesText(options.hasNotText))return false;
-        return true;
-      }`,
-            textOptions,
-          );
-          if (!matches) continue;
+          if (options.hasText !== undefined || options.hasNotText !== undefined) {
+            // #379: the sealed text form (placeholder for a sealed subtree or a sealed frame), so a
+            // filter cannot confirm a guessed secret.
+            const text = (await textContentElement(this.#e, node)) ?? ``;
+            const matchesText = (matcher: string | RegExp) =>
+              isRegExpValue(matcher)
+                ? new RegExp(matcher.source, matcher.flags).test(text)
+                : text.replace(/\s+/g, ` `).trim().toLowerCase().includes(matcher.toLowerCase());
+            if (options.hasText !== undefined && !matchesText(options.hasText)) continue;
+            if (options.hasNotText !== undefined && matchesText(options.hasNotText)) continue;
+          }
           if (options.visible !== undefined && (await isVisibleElement(this.#e, node)) !== options.visible) continue;
           if (options.has && (await options.has.#collect([node])).length === 0) continue;
           if (options.hasNot && (await options.hasNot.#collect([node])).length !== 0) continue;

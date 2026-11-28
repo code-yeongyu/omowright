@@ -202,6 +202,10 @@ test("snapshot and locator reads redact data-sensitive page text (security contr
     // Matchers (#382): a guessed sealed string matches nothing, by text, label or role name,
     // while unmarked text still matches.
     assert.equal(await page.getByText("bravo").count(), 0, "getByText confirmed a sealed string");
+    const sealedSpans = page.locator("#phrase span");
+    assert.equal(await sealedSpans.filter({ hasText: "bravo" }).count(), 0, "filter hasText confirmed a secret");
+    assert.equal(await sealedSpans.filter({ hasText: /^alpha/ }).count(), 0, "filter hasText RegExp confirmed");
+    assert.equal(await sealedSpans.filter({ hasNotText: "bravo" }).count(), 1, "filter hasNotText confirmed");
     assert.equal(await page.getByText("oscar").count(), 0, "getByText confirmed a sealed option");
     assert.equal(await page.getByLabel("bravo").count(), 0, "getByLabel confirmed a sealed label");
     assert.equal(await page.getByRole("button", { name: "bravo" }).count(), 0, "role name confirmed a secret");
@@ -305,6 +309,7 @@ test(
         assertSealed(`${what} allTextContents`, await frame.locator("p").allTextContents());
         // Guesses the placeholder cannot match: "o" is in every sealed frame's text, not in it.
         assert.equal(await frame.getByText("o").count(), 0, `${what} getByText matched sealed text`);
+        assert.equal(await frame.locator("p").filter({ hasText: "o" }).count(), 0, `${what} filter matched`);
         const roleGuess = frame.getByRole("button", { name: /zulu|yankee/ });
         assert.equal(await roleGuess.count(), 0, `${what} role name matched`);
       }
