@@ -4,6 +4,7 @@ import type { DevicePreset } from "./emulate.ts";
 import type { ViewportSize } from "./viewport.ts";
 import { targetCreationCapability } from "./internal-capability.ts";
 import type { BrowserConnection } from "./connection.ts";
+import { underlyingConnection } from "./shared-connections.ts";
 import type { CdpUnsubscribe } from "./cdp-protocol.ts";
 import type { OmOPage } from "./core.ts";
 
@@ -299,10 +300,13 @@ export class AgentTabManager {
 }
 
 export function getAgentTabs(connection: BrowserConnection) {
-  return managers.get(connection);
+  return managers.get(underlyingConnection(connection));
 }
 
-export function createAgentTabs(connection: BrowserConnection, options: AgentTabManagerOptions = {}) {
+// Every lease of a shared connection gets the connection's one manager: popup
+// adoption and close() look it up under the connection itself.
+export function createAgentTabs(handle: BrowserConnection, options: AgentTabManagerOptions = {}) {
+  const connection = underlyingConnection(handle);
   const current = managers.get(connection);
   if (current) {
     if (current._optionsKey !== optionsKey(options)) throw new TypeError("Conflicting AgentTabManager options");
