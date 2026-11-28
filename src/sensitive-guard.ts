@@ -40,16 +40,24 @@ const __omowSensitiveTextOf = (root) => {
   visit(root);
   return parts.join('');
 };
+// Serialized HTML also carries <template> content and iframe srcdoc markup, which the element
+// walk does not reach: a srcdoc that mentions the marker is withheld whole (fail closed).
+const __omowSrcdocSealed = (el) => el.tagName === 'IFRAME' && /data-sensitive/i.test(el.getAttribute('srcdoc') || '');
 const __omowHasSensitive = (root) =>
   __omowSensitive(root) ||
-  Array.from(root.querySelectorAll('[data-sensitive]')).some((el) => el.getAttribute('data-sensitive') !== 'false');
+  Array.from(root.querySelectorAll('[data-sensitive], template, iframe[srcdoc]')).some((el) =>
+    el.tagName === 'TEMPLATE' ? __omowHasSensitive(el.content) : el.tagName === 'IFRAME' ? __omowSrcdocSealed(el) : el.getAttribute('data-sensitive') !== 'false');
 const __omowRedactedClone = (root) => {
   const clone = root.cloneNode(true);
   const strip = (node) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType !== 1) continue;
       if (__omowSensitive(child)) node.replaceChild(document.createTextNode(${JSON.stringify(SENSITIVE_PLACEHOLDER)}), child);
-      else strip(child);
+      else {
+        if (__omowSrcdocSealed(child)) child.setAttribute('srcdoc', ${JSON.stringify(SENSITIVE_PLACEHOLDER)});
+        if (child.tagName === 'TEMPLATE') strip(child.content);
+        strip(child);
+      }
     }
   };
   strip(clone);

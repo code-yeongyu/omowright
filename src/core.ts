@@ -3343,13 +3343,17 @@ async function fillElement(xn: OmOPage, jn: ElementTarget, Vn: string) {
 }
 export type SelectOptionValue = string | { value?: string; label?: string; index?: number };
 async function selectOptionElement(xn: OmOPage, jn: ElementTarget, Vn: SelectOptionValue | SelectOptionValue[]) {
-  return await performActionAndWait(
+  // #379: the selected values are output too; a sealed option, or any option in a sealed frame,
+  // comes back as the placeholder.
+  const sealedFrame = await inSealedFrame(xn, jn);
+  const selected = await performActionAndWait(
     xn,
     async () =>
       await callOnElementSync<string[]>(
         xn,
         jn,
         `function(requested) {
+          ${sensitiveElementGuard}
           const target = globalThis.__omowright?.retarget(this, 'follow-label') || this;
           if (!target || !target.tagName || target.tagName.toUpperCase() !== 'SELECT') {
             throw new Error('Element is not a <select>');
@@ -3386,12 +3390,15 @@ async function selectOptionElement(xn: OmOPage, jn: ElementTarget, Vn: SelectOpt
 
           select.dispatchEvent(new Event('input', { bubbles: true }));
           select.dispatchEvent(new Event('change', { bubbles: true }));
-          return Array.from(select.selectedOptions).map((option) => option.value);
+          return Array.from(select.selectedOptions).map((option) =>
+            __omowSensitive(option) ? ${JSON.stringify(SENSITIVE_PLACEHOLDER)} : option.value,
+          );
         }`,
         Vn,
       ),
     { frameSessionId: jn.frameSessionId },
   );
+  return sealedFrame ? selected.map(() => SENSITIVE_PLACEHOLDER) : selected;
 }
 async function checkElement(xn: OmOPage, jn: ElementTarget, Vn = !0) {
   let qn = await callOnElementSync<CheckState>(

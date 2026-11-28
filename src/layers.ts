@@ -105,7 +105,8 @@ export async function describeLayers(page: LayersPage, { grid = 5 }: { grid?: nu
         .map((id) => {
           const target = document.getElementById(id);
           if (!target || isSensitive(target)) return "";
-          return target.textContent?.trim() ?? "";
+          // A sealed descendant of the label reads as the placeholder (#389 audit).
+          return sealedSubtreeText(target).trim();
         })
         .filter(Boolean)
         .join(" ");
@@ -118,7 +119,7 @@ export async function describeLayers(page: LayersPage, { grid = 5 }: { grid?: nu
       if (labelled) return labelled;
       const heading = el.querySelector("h1,h2,h3,h4,h5,h6");
       if (heading && !isSensitive(heading)) {
-        const text = heading.textContent?.trim();
+        const text = sealedSubtreeText(heading).trim();
         if (text) return text;
       }
       const raw = el.querySelector("[data-sensitive]:not([data-sensitive='false'])")

@@ -5,7 +5,7 @@
 // depend on a sealed element's attribute values (#386), language or form state (#387) is refused,
 // so a match count or a found/not-found answer cannot confirm a guessed secret. The refusal depends
 // only on whether sealed content exists, which every snapshot already shows. Presence selectors,
-// ids, classes, the marker, role and the test id still run, as do the structural and interaction
+// ids, classes, the marker and the test id still run, as do the structural and interaction
 // pseudo-classes below; anything else (:lang, :placeholder-shown, :invalid, :empty, :checked, and
 // any pseudo-class added later) is refused.
 //
@@ -64,8 +64,8 @@ export function createSelectorGuard(sealedDocument = false, testIdAttribute = "d
     });
   // The part of the selector that can depend on sealed content, or null. The canonical text is
   // scanned outside strings: inside a bracket, the text before the first `=` is the serialized name
-  // plus operator, and only the exact serialized marker, role or test id name is exempt (role is
-  // already in every snapshot); outside brackets, every single-colon pseudo-class name is checked
+  // plus operator, and only the exact serialized marker or test id name is exempt (a raw role
+  // attribute is not in the redacted snapshot, #390); outside brackets, every single-colon pseudo-class name is checked
   // against the allowlist, including those nested in :is(), :has() or ::slotted().
   const revealingPart = (selector: string): string | null => {
     let canonical: string | null = null;
@@ -78,7 +78,7 @@ export function createSelectorGuard(sealedDocument = false, testIdAttribute = "d
       canonical = null;
     }
     if (canonical === null) return /[[:]/.test(selector) ? selector : null;
-    const exempt = new Set(["data-sensitive", "role", testIdAttribute].map((name) => CSS.escape(name)));
+    const exempt = new Set(["data-sensitive", testIdAttribute].map((name) => CSS.escape(name)));
     let quote = "";
     let escaped = false;
     let body: string | null = null;
@@ -114,7 +114,7 @@ export function createSelectorGuard(sealedDocument = false, testIdAttribute = "d
     const part = revealingPart(selector);
     if (part !== null && holdsSealed(document))
       throw new Error(
-        `Selector "${selector}" can depend on sealed content (${part}) in a document with data-sensitive content; use a ref, role, test id, id, class or structural selector instead`,
+        `Selector "${selector}" can depend on sealed content (${part}) in a document with data-sensitive content; use a ref, getByRole, test id, id, class or structural selector instead`,
       );
   };
   return { assertSelectorAllowed };
