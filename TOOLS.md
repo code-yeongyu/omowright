@@ -398,8 +398,9 @@ Mark an element `data-sensitive` (any value except the exact string `"false"` �
 `"false"` is inert and does not unseal a marked ancestor). Every omowright output —
 snapshot trees, refs maps, diff/find/scoped reads, locator `textContent`/
 `innerText`/`inputValue`/`getAttribute`/`innerHTML`, `page.content()` (including
-`<template>` content and an iframe `srcdoc` that carries the marker), the values
-`selectOption` returns, BSK snapshots (tree, refs, css paths) and layer headers — replaces that subtree with a `[redacted: sensitive]`
+`<template>` content and an iframe `srcdoc` that carries the marker, which
+`getAttribute('srcdoc')` withholds too), `page.title()`, the values `selectOption`
+returns, BSK snapshots (tree, refs, css paths) and layer headers — replaces that subtree with a `[redacted: sensitive]`
 placeholder that keeps the element's role and ref, so buttons outside it stay
 findable and clickable. Accessible names never source from a sealed subtree: an
 `aria-labelledby` target or `<label>` inside it contributes nothing. Password
@@ -414,7 +415,9 @@ placeholder. Text, label and role-name matchers (`getByText`, `getByLabel`,
 attribute matchers `getByTitle`, `getByPlaceholder` and `getByAltText` read a sealed
 subtree as the placeholder, so a match count cannot confirm a guessed secret.
 `getByTestId` still matches a sealed element, so a sealed block can be located by
-its test id. In a document with sealed content, a CSS selector that could depend on
+its test id. On a `<select>` that is sealed, holds a sealed option, or sits in a
+sealed frame, `selectOption` accepts only `{ index }`: a value or label would
+confirm a guess through what ends up selected. In a document with sealed content, a CSS selector that could depend on
 a sealed element's attribute values, language or form state is refused by
 locators, `waitForSelector` and scoped snapshots (`snapshot({ selector })`): an
 attribute comparison (`[value^="k"]`, in any spelling, also inside

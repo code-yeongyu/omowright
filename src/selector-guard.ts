@@ -56,9 +56,12 @@ export function createSelectorGuard(sealedDocument = false, testIdAttribute = "d
   const holdsSealed = (root: Document | ShadowRoot): boolean =>
     Array.from(root.querySelectorAll("*")).some((element) => {
       const marker = element.getAttribute("data-sensitive");
+      // An iframe srcdoc that carries the marker is sealed markup too (#390).
+      const srcdoc = element.tagName === "IFRAME" ? element.getAttribute("srcdoc") : null;
       return (
         sealedDocument ||
         (marker !== null && marker !== "false") ||
+        (srcdoc !== null && /data-sensitive/i.test(srcdoc)) ||
         (!!element.shadowRoot && holdsSealed(element.shadowRoot))
       );
     });

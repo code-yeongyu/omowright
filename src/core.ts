@@ -3344,7 +3344,8 @@ async function fillElement(xn: OmOPage, jn: ElementTarget, Vn: string) {
 export type SelectOptionValue = string | { value?: string; label?: string; index?: number };
 async function selectOptionElement(xn: OmOPage, jn: ElementTarget, Vn: SelectOptionValue | SelectOptionValue[]) {
   // #379: the selected values are output too; a sealed option, or any option in a sealed frame,
-  // comes back as the placeholder.
+  // comes back as the placeholder. A value or label request on a select that is or holds sealed
+  // content would confirm a guess through what ends up selected, so only { index } is accepted there.
   const sealedFrame = await inSealedFrame(xn, jn);
   const selected = await performActionAndWait(
     xn,
@@ -3352,7 +3353,7 @@ async function selectOptionElement(xn: OmOPage, jn: ElementTarget, Vn: SelectOpt
       await callOnElementSync<string[]>(
         xn,
         jn,
-        `function(requested) {
+        `function(requested, sealedFrame) {
           ${sensitiveElementGuard}
           const target = globalThis.__omowright?.retarget(this, 'follow-label') || this;
           if (!target || !target.tagName || target.tagName.toUpperCase() !== 'SELECT') {
@@ -3361,6 +3362,11 @@ async function selectOptionElement(xn: OmOPage, jn: ElementTarget, Vn: SelectOpt
 
           const select = target;
           const wanted = Array.isArray(requested) ? requested : [requested];
+          const sealedSelect = sealedFrame || __omowSensitive(select) || Array.from(select.options).some((option) => __omowSensitive(option));
+          const byIndexOnly = (token) => !!token && typeof token === 'object' && typeof token.index === 'number' && token.value === undefined && token.label === undefined;
+          if (sealedSelect && !wanted.every(byIndexOnly)) {
+            throw new Error('selectOption by value or label is refused on a select with data-sensitive options; select by { index } instead');
+          }
           const matched = new Set();
 
           for (let index = 0; index < select.options.length; index += 1) {
@@ -3395,6 +3401,7 @@ async function selectOptionElement(xn: OmOPage, jn: ElementTarget, Vn: SelectOpt
           );
         }`,
         Vn,
+        sealedFrame,
       ),
     { frameSessionId: jn.frameSessionId },
   );
@@ -3620,6 +3627,8 @@ async function inputValueElement(xn: OmOPage, jn: ElementTarget) {
     `function() {
       ${sensitiveElementGuard}
       if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
+      // A select's value is its selected option's value: a sealed selected option reads as the placeholder.
+      if (this.tagName === 'SELECT' && this.selectedOptions?.[0] && __omowSensitive(this.selectedOptions[0])) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
       return this.value || '';
     }`,
   );
@@ -3668,6 +3677,7 @@ async function getAttributeElement(xn: OmOPage, jn: ElementTarget, Vn: string) {
     `function(_, attributeName) {
       ${sensitiveElementGuard}
       if (__omowSensitive(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
+      if (String(attributeName).toLowerCase() === 'srcdoc' && __omowSrcdocSealed(this)) return ${JSON.stringify(SENSITIVE_PLACEHOLDER)};
       return this.getAttribute(attributeName);
     }`,
     Vn,
@@ -7333,8 +7343,13 @@ function createOmOPageClass() {
     url({ truncate: xn = !1 }: { truncate?: boolean } = {}) {
       return xn ? truncateUrlForLLM(this.#r) : this.#r;
     }
+    // #379: a sealed <title> (or one inside a sealed ancestor) reads as the placeholder.
     async title() {
-      return await this.evaluate<string>(`document.title`).catch(() => ``);
+      return await this.evaluate<string>(`(() => {
+        ${sensitiveElementGuard}
+        const title = document.getElementsByTagNameNS('http://www.w3.org/1999/xhtml', 'title')[0];
+        return title && __omowSensitive(title) ? ${JSON.stringify(SENSITIVE_PLACEHOLDER)} : document.title;
+      })()`).catch(() => ``);
     }
     // #379: the document's HTML with every sealed subtree replaced by the placeholder, like innerHTML.
     async content() {
